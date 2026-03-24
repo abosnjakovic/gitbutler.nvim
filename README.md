@@ -4,6 +4,9 @@ A neovim interface for [Git Butler](https://gitbutler.com) virtual branches. Man
 
 Zero dependencies. Requires neovim 0.10+ and the [`but` CLI](https://docs.gitbutler.com/cli-overview).
 
+<img width="2066" height="1202" alt="image" src="https://github.com/user-attachments/assets/a32f66e2-eb5b-49ac-a7e4-eeb9d823731f" />
+
+
 ## Installation
 
 Install the `but` CLI first:
