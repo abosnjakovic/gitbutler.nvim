@@ -37,10 +37,40 @@ local function extract_branch_names(data)
   return names
 end
 
----Open the file under cursor.
+---Open the file under cursor, or show commit details for recent commits.
 function M.open_file(buf)
   local line = buf:get_cursor_line()
-  if not line or not line.data or not line.data.path then return end
+  if not line or not line.data then return end
+
+  -- Recent commit: show full commit details + diff in a split
+  if line.type == 'recent_commit' then
+    local sha = line.data.sha
+    if not sha then return end
+
+    local result = vim.system(
+      { 'git', 'show', '--patch', '--stat', '--format=%H%n%an <%ae>%n%aD%n%n%B', sha },
+      { text = true }
+    ):wait()
+
+    if result.code ~= 0 or not result.stdout then
+      vim.notify('gitbutler: failed to show commit', vim.log.levels.ERROR)
+      return
+    end
+
+    local show_lines = vim.split(result.stdout, '\n')
+    vim.cmd('belowright split')
+    local diff_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_win_set_buf(0, diff_buf)
+    vim.api.nvim_buf_set_lines(diff_buf, 0, -1, false, show_lines)
+    vim.bo[diff_buf].buftype = 'nofile'
+    vim.bo[diff_buf].bufhidden = 'wipe'
+    vim.bo[diff_buf].filetype = 'diff'
+    vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = diff_buf })
+    return
+  end
+
+  -- File: open in editor
+  if not line.data.path then return end
   local path = line.data.path
 
   buf:close()

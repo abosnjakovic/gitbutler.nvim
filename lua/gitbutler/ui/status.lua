@@ -164,6 +164,35 @@ local function build_lines(buf, data)
     add('', nil, 'blank', nil)
   end
 
+  -- Recent commits (from git log, always shown for context)
+  local recent = data._recent_commits or {}
+  if #recent > 0 then
+    local fold_id = 'recent'
+    local is_folded = buf:is_folded(fold_id)
+
+    add('Recent commits (' .. #recent .. ')', 'GitButlerSection', 'section_header', {
+      fold_id = fold_id,
+    }, { foldable = true, folded = is_folded })
+
+    if not is_folded then
+      for _, entry in ipairs(recent) do
+        add(entry.sha .. ' ' .. entry.message, 'GitButlerCommitHash', 'recent_commit', {
+          sha = entry.full_sha,
+          message = entry.message,
+        }, { indent = 1 })
+      end
+    end
+
+    add('', nil, 'blank', nil)
+  end
+
+  -- Merge base info
+  local mb = data.mergeBase
+  if mb and mb.commitId then
+    local msg = (mb.message or ''):match('^([^\n]*)') or ''
+    add('Base: ' .. (mb.commitId or ''):sub(1, 7) .. ' ' .. msg, 'GitButlerHelp', 'info', nil)
+  end
+
   add('Press ? for help', 'GitButlerHelp', 'help', nil)
 
   return lines
@@ -205,6 +234,24 @@ function M.open()
   M.refresh()
 end
 
+---Fetch recent commits via git log (sync, fast).
+local function get_recent_commits(count)
+  local result = vim.system(
+    { 'git', 'log', '--oneline', '--no-decorate', '-n', tostring(count or 10) },
+    { text = true }
+  ):wait()
+  if result.code ~= 0 or not result.stdout then return {} end
+
+  local commits = {}
+  for line in result.stdout:gmatch('[^\n]+') do
+    local sha, msg = line:match('^(%S+)%s+(.*)')
+    if sha then
+      table.insert(commits, { sha = sha, full_sha = sha, message = msg })
+    end
+  end
+  return commits
+end
+
 ---Refresh the status buffer with fresh data from `but status`.
 function M.refresh()
   if not M.instance then return end
@@ -220,6 +267,9 @@ function M.refresh()
       vim.notify('gitbutler: unexpected status output', vim.log.levels.WARN)
       return
     end
+
+    -- Augment with recent commits from git log
+    data._recent_commits = get_recent_commits(10)
 
     local lines = build_lines(buf, data)
     buf:render(lines)
