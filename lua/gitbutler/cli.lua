@@ -136,11 +136,15 @@ function M.reword(target, message, callback)
   M.run({ 'reword', target, '-m', message, '--json' }, callback)
 end
 
----Convenience: but squash
-function M.squash(commit, callback)
+---Convenience: but squash (accepts single commit string or list of commit strings)
+function M.squash(commits, callback)
   local args = { 'squash', '--json' }
-  if commit then
-    table.insert(args, commit)
+  if type(commits) == 'table' then
+    for _, c in ipairs(commits) do
+      table.insert(args, c)
+    end
+  elseif commits then
+    table.insert(args, commits)
   end
   M.run(args, callback)
 end
@@ -172,6 +176,11 @@ function M.uncommit(commit, callback)
     table.insert(args, commit)
   end
   M.run(args, callback)
+end
+
+---Convenience: but discard
+function M.discard(id, callback)
+  M.run({ 'discard', id, '--json' }, callback)
 end
 
 ---Convenience: but apply

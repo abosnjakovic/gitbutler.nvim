@@ -5,7 +5,7 @@ local M = {}
 ---@class GitButlerLine
 ---@field text string Display text for the line
 ---@field hl? string Highlight group name
----@field type string Line type: 'branch', 'commit', 'file', 'section_header', 'blank', 'help'
+---@field type string Line type: 'branch', 'commit', 'file', 'committed_file', 'section_header', 'blank', 'help', 'info', 'recent_commit'
 ---@field data? table Arbitrary data associated with the line (branch info, commit sha, file path, etc.)
 ---@field foldable? boolean Whether this line is a fold header
 ---@field folded? boolean Current fold state
@@ -18,6 +18,7 @@ local M = {}
 ---@field ns number Namespace for extmarks
 ---@field keymaps table<string, fun()> Action keymaps
 ---@field fold_state table<string, boolean> Persisted fold states keyed by section id
+---@field selected table<string, boolean> Selected items keyed by stable identifier
 
 local Buffer = {}
 Buffer.__index = Buffer
@@ -30,6 +31,7 @@ function Buffer.new()
   self.ns = vim.api.nvim_create_namespace('gitbutler')
   self.keymaps = {}
   self.fold_state = {}
+  self.selected = {}
   return self
 end
 
@@ -101,14 +103,20 @@ function Buffer:render(lines)
     if line.foldable then
       prefix = line.folded and '▸ ' or '▾ '
     end
-    table.insert(text_lines, indent .. prefix .. line.text)
+    local select_marker = ''
+    if self:is_selected(line) then
+      select_marker = '● '
+    end
+    table.insert(text_lines, indent .. select_marker .. prefix .. line.text)
   end
 
   vim.api.nvim_buf_set_lines(self.buf, 0, -1, false, text_lines)
 
   -- Apply highlights
   for i, line in ipairs(lines) do
-    if line.hl then
+    if self:is_selected(line) then
+      vim.api.nvim_buf_add_highlight(self.buf, self.ns, 'GitButlerSelected', i - 1, 0, -1)
+    elseif line.hl then
       vim.api.nvim_buf_add_highlight(self.buf, self.ns, line.hl, i - 1, 0, -1)
     end
   end
@@ -166,6 +174,71 @@ function Buffer:is_folded(fold_id)
     return self.fold_state[fold_id]
   end
   return false
+end
+
+---Extract a stable selection key from a line, or nil if not selectable.
+---@param line GitButlerLine
+---@return string?
+function Buffer:select_key(line)
+  if not line or not line.data then return nil end
+  if line.type == 'file' or line.type == 'committed_file' then
+    return line.data.cli_id
+  elseif line.type == 'commit' then
+    return line.data.sha
+  end
+  return nil
+end
+
+---Toggle selection for the line under cursor.
+function Buffer:toggle_select()
+  local row = self._cursor_row
+  if not row then
+    if not self.win or not vim.api.nvim_win_is_valid(self.win) then return end
+    row = vim.api.nvim_win_get_cursor(self.win)[1]
+  end
+  local line = self.lines[row]
+  local key = self:select_key(line)
+  if not key then return end
+  if self.selected[key] then
+    self.selected[key] = nil
+  else
+    self.selected[key] = true
+  end
+end
+
+---Check if a line is currently selected.
+---@param line GitButlerLine
+---@return boolean
+function Buffer:is_selected(line)
+  local key = self:select_key(line)
+  return key ~= nil and self.selected[key] == true
+end
+
+---Return all selected lines from self.lines, in display order.
+---@param types? string[] Optional filter: only return lines of these types
+---@return GitButlerLine[]
+function Buffer:get_selected_lines(types)
+  local result = {}
+  for _, line in ipairs(self.lines) do
+    if self:is_selected(line) then
+      if not types then
+        table.insert(result, line)
+      else
+        for _, t in ipairs(types) do
+          if line.type == t then
+            table.insert(result, line)
+            break
+          end
+        end
+      end
+    end
+  end
+  return result
+end
+
+---Clear all selections.
+function Buffer:clear_selection()
+  self.selected = {}
 end
 
 ---Register an action handler.

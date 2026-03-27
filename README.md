@@ -1,6 +1,6 @@
 # gitbutler.nvim
 
-A neovim interface for [Git Butler](https://gitbutler.com) virtual branches. Manage parallel branches, assign files, commit, absorb, squash, reword, and push — all from a buffer-based UI without leaving your editor.
+A neovim interface for [Git Butler](https://gitbutler.com) virtual branches. Manage parallel branches, select and assign files, commit, absorb, squash, reword, and push — all from a buffer-based UI without leaving your editor.
 
 Zero dependencies. Requires neovim 0.10+ and the [`but` CLI](https://docs.gitbutler.com/cli-overview).
 
@@ -59,10 +59,17 @@ vim.keymap.set('n', '<leader>bb', ':Butler<CR>', { desc = 'gitbutler' })
 
 `:Butler` toggles the status view. `:ButlerBranches` opens the branch management popup. `:ButlerLog [branch]` shows the commit log for a branch (defaults to the first applied branch). `:ButlerOplog` opens the operations history. `:ButlerAbsorb`, `:ButlerPush`, `:ButlerPull`, and `:ButlerUndo` run the corresponding operations directly.
 
+### Multi-select
+
+Press `<Space>` on any file or commit line to toggle its selection. Selected items are highlighted and marked with `●`. Once you have a selection, the next action you trigger applies to all selected items rather than just the cursor line. Selection clears automatically after an action completes but persists across refreshes.
+
+Actions that support multi-select: assign (`s`), discard (`x`), squash (`S`), move (`m`), and open file (`<CR>`). For squash, all selected commits are passed in a single CLI call. For the others, operations run sequentially. Selecting items across different branches is allowed — the CLI determines validity per item.
+
 ### Status buffer keybindings
 
 ```
 <CR>     Open file under cursor
+<Space>  Select / deselect (multi-select)
 s        Assign file to a branch (inline picker)
 c        Commit to the branch under cursor
 a        Absorb uncommitted changes into logical commits
@@ -73,6 +80,7 @@ d        Describe/reword a commit or rename a branch
 u        Undo last operation
 p        Push the branch under cursor
 P        Push all branches
+F        Pull / sync from upstream
 b        Create a new branch
 B        Branch management popup
 l        Commit log for the branch under cursor

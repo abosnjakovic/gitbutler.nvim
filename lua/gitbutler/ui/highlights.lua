@@ -15,6 +15,7 @@ function M.setup()
     GitButlerUnassigned = { link = 'WarningMsg' },
     GitButlerHelp = { link = 'Comment' },
     GitButlerHelpKey = { link = 'Special' },
+    GitButlerSelected = { link = 'Visual' },
     GitButlerPickerSelected = { link = 'CursorLine' },
     GitButlerPickerBranch = { link = 'String' },
   }

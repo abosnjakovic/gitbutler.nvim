@@ -37,12 +37,24 @@ local function extract_branch_names(data)
   return names
 end
 
----Open the file under cursor, or show commit details for recent commits.
+---Open the file(s) under cursor or selected, or show commit details for recent commits.
 function M.open_file(buf)
+  -- Multi-select: open each selected file without closing status buffer
+  local selected = buf:get_selected_lines({ 'file', 'committed_file' })
+  if #selected > 0 then
+    buf:clear_selection()
+    for _, line in ipairs(selected) do
+      if line.data and line.data.path then
+        vim.cmd('edit ' .. vim.fn.fnameescape(line.data.path))
+      end
+    end
+    return
+  end
+
+  -- Single file / recent commit: existing behaviour
   local line = buf:get_cursor_line()
   if not line or not line.data then return end
 
-  -- Recent commit: show full commit details + diff in a split
   if line.type == 'recent_commit' then
     local sha = line.data.sha
     if not sha then return end
@@ -69,7 +81,6 @@ function M.open_file(buf)
     return
   end
 
-  -- File: open in editor
   if not line.data.path then return end
   local path = line.data.path
 
@@ -79,13 +90,17 @@ function M.open_file(buf)
   vim.cmd('edit ' .. vim.fn.fnameescape(path))
 end
 
----Assign a file to a branch via inline picker.
+---Assign file(s) to a branch via inline picker.
 function M.assign_to_branch(buf)
-  local line = buf:get_cursor_line()
-  if not line or (line.type ~= 'file' and line.type ~= 'committed_file') or not line.data then return end
-
-  local file_path = line.data.path
-  if not file_path then return end
+  local selected = buf:get_selected_lines({ 'file', 'committed_file' })
+  local targets
+  if #selected > 0 then
+    targets = selected
+  else
+    local line = buf:get_cursor_line()
+    if not line or (line.type ~= 'file' and line.type ~= 'committed_file') or not line.data then return end
+    targets = { line }
+  end
 
   cli.branch_list(function(err, data)
     if err then
@@ -103,9 +118,27 @@ function M.assign_to_branch(buf)
       title = 'Assign to branch',
       items = names,
       on_select = function(branch_name)
-        cli.stage(file_path, branch_name, function(stage_err, _)
-          notify_result('stage ' .. file_path .. ' → ' .. branch_name, stage_err, nil)
-        end)
+        local i = 0
+        local function stage_next()
+          i = i + 1
+          if i > #targets then
+            buf:clear_selection()
+            vim.notify('gitbutler: staged ' .. #targets .. ' file(s) → ' .. branch_name, vim.log.levels.INFO)
+            refresh()
+            return
+          end
+          local id = targets[i].data.cli_id or targets[i].data.path
+          cli.stage(id, branch_name, function(stage_err, _)
+            if stage_err then
+              buf:clear_selection()
+              vim.notify('gitbutler stage: ' .. stage_err, vim.log.levels.ERROR)
+              refresh()
+              return
+            end
+            stage_next()
+          end)
+        end
+        stage_next()
       end,
     })
   end)
@@ -147,26 +180,42 @@ function M.amend(buf)
   end)
 end
 
----Squash: combine commit under cursor into its parent.
+---Squash: combine selected commits or commit under cursor into parent.
 function M.squash(buf)
+  local selected = buf:get_selected_lines({ 'commit' })
+  if #selected > 0 then
+    local shas = {}
+    for _, line in ipairs(selected) do
+      table.insert(shas, line.data.sha)
+    end
+    cli.squash(shas, function(err, result)
+      buf:clear_selection()
+      notify_result('squash ' .. #shas .. ' commits', err, result)
+    end)
+    return
+  end
+
+  -- Single commit fallback
   local line = buf:get_cursor_line()
   if not line or line.type ~= 'commit' or not line.data then return end
-
   local sha = line.data.sha
   if not sha then return end
-
   cli.squash(sha, function(err, result)
     notify_result('squash', err, result)
   end)
 end
 
----Move a commit to a different branch.
+---Move commit(s) to a different branch.
 function M.move(buf)
-  local line = buf:get_cursor_line()
-  if not line or line.type ~= 'commit' or not line.data then return end
-
-  local sha = line.data.sha
-  if not sha then return end
+  local selected = buf:get_selected_lines({ 'commit' })
+  local targets
+  if #selected > 0 then
+    targets = selected
+  else
+    local line = buf:get_cursor_line()
+    if not line or line.type ~= 'commit' or not line.data then return end
+    targets = { line }
+  end
 
   cli.branch_list(function(err, data)
     if err then
@@ -177,12 +226,30 @@ function M.move(buf)
     local names = extract_branch_names(data)
 
     float.picker({
-      title = 'Move commit to',
+      title = 'Move commit(s) to',
       items = names,
       on_select = function(target_branch)
-        cli.move(sha, target_branch, function(move_err, result)
-          notify_result('move → ' .. target_branch, move_err, result)
-        end)
+        local i = 0
+        local function move_next()
+          i = i + 1
+          if i > #targets then
+            buf:clear_selection()
+            vim.notify('gitbutler: moved ' .. #targets .. ' commit(s) → ' .. target_branch, vim.log.levels.INFO)
+            refresh()
+            return
+          end
+          local sha = targets[i].data.sha
+          cli.move(sha, target_branch, function(move_err, _)
+            if move_err then
+              buf:clear_selection()
+              vim.notify('gitbutler move: ' .. move_err, vim.log.levels.ERROR)
+              refresh()
+              return
+            end
+            move_next()
+          end)
+        end
+        move_next()
       end,
     })
   end)
@@ -246,6 +313,13 @@ function M.push_all(_buf)
   end)
 end
 
+---Pull (sync) from upstream.
+function M.pull(_buf)
+  cli.pull(function(err, result)
+    notify_result('pull', err, result)
+  end)
+end
+
 ---Close the status buffer.
 function M.close(_buf)
   local status = require('gitbutler.ui.status')
@@ -265,26 +339,46 @@ function M.branch_new(_buf)
   })
 end
 
----Discard changes for file under cursor.
+---Discard changes for file(s) under cursor or selected.
 function M.discard(buf)
-  local line = buf:get_cursor_line()
-  if not line or line.type ~= 'file' or not line.data then return end
+  local selected = buf:get_selected_lines({ 'file' })
+  local targets
+  if #selected > 0 then
+    targets = selected
+  else
+    local line = buf:get_cursor_line()
+    if not line or line.type ~= 'file' or not line.data then return end
+    targets = { line }
+  end
 
-  local path = line.data.path
-  if not path then return end
+  local paths = {}
+  for _, t in ipairs(targets) do
+    table.insert(paths, t.data.path or t.data.cli_id)
+  end
+  local prompt = 'Discard changes to ' .. table.concat(paths, ', ') .. '?'
 
-  vim.ui.select({ 'Yes', 'No' }, { prompt = 'Discard changes to ' .. path .. '?' }, function(choice)
+  vim.ui.select({ 'Yes', 'No' }, { prompt = prompt }, function(choice)
     if choice ~= 'Yes' then return end
-    vim.system({ 'git', 'checkout', '--', path }, { text = true }, function(result)
-      vim.schedule(function()
-        if result.code ~= 0 then
-          vim.notify('gitbutler discard: ' .. (result.stderr or 'failed'), vim.log.levels.ERROR)
-        else
-          vim.notify('gitbutler: discarded ' .. path, vim.log.levels.INFO)
+    local i = 0
+    local function discard_next()
+      i = i + 1
+      if i > #targets then
+        buf:clear_selection()
+        vim.notify('gitbutler: discarded ' .. #targets .. ' file(s)', vim.log.levels.INFO)
+        refresh()
+        return
+      end
+      cli.discard(targets[i].data.cli_id, function(err, _)
+        if err then
+          buf:clear_selection()
+          vim.notify('gitbutler discard: ' .. err, vim.log.levels.ERROR)
           refresh()
+          return
         end
+        discard_next()
       end)
-    end)
+    end
+    discard_next()
   end)
 end
 
@@ -335,6 +429,15 @@ function M.toggle_fold(buf)
   end
 end
 
+---Toggle selection on the line under cursor.
+function M.toggle_select(buf)
+  buf:toggle_select()
+  -- Re-render to show updated markers without a full refresh (preserves selection)
+  if buf.lines and #buf.lines > 0 then
+    buf:render(buf.lines)
+  end
+end
+
 ---Show help popup.
 function M.help(_buf)
   local help_lines = {
@@ -351,6 +454,7 @@ function M.help(_buf)
     'u        Undo last operation',
     'p        Push branch',
     'P        Push all branches',
+    'F        Pull / sync from upstream',
     'B        Branch management',
     'b        New branch',
     'l        Commit log for branch',
@@ -359,6 +463,7 @@ function M.help(_buf)
     '<Tab>    Diff / toggle fold',
     'r        Refresh',
     'q        Close',
+    '<Space>  Select / deselect',
     '?        This help',
   }
 
