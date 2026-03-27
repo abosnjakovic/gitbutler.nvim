@@ -280,6 +280,7 @@ function M.describe(buf)
 
     float.input({
       title = 'Rename branch',
+      single_line = true,
       content = { name },
       on_submit = function(new_name)
         cli.run({ 'reword', name, '-m', new_name, '--json' }, function(err, result)
@@ -330,7 +331,7 @@ end
 function M.branch_new(_buf)
   float.input({
     title = 'New branch name',
-    height = 1,
+    single_line = true,
     on_submit = function(name)
       cli.branch_new(name, function(err, result)
         notify_result('branch new ' .. name, err, result)

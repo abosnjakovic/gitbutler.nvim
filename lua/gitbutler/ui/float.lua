@@ -12,9 +12,9 @@ function M.open(opts)
   local width = opts.width or config.values.float.width
   local height = opts.height or config.values.float.height
 
-  -- Resolve fractional dimensions
-  if width <= 1 then width = math.floor(ui.width * width) end
-  if height <= 1 then height = math.floor(ui.height * height) end
+  -- Resolve fractional dimensions (values < 1 are treated as fractions of screen size)
+  if width < 1 then width = math.floor(ui.width * width) end
+  if height < 1 then height = math.floor(ui.height * height) end
 
   local row = opts.row or math.floor((ui.height - height) / 2)
   local col = opts.col or math.floor((ui.width - width) / 2)
@@ -38,13 +38,16 @@ function M.open(opts)
 end
 
 ---Open a small input float near the cursor for text entry (commit message, branch name, etc).
----@param opts {title: string, on_submit: fun(text: string), on_abort?: fun(), height?: number, width?: number, content?: string[]}
+---When single_line is true, Enter submits and height defaults to 1.
+---Otherwise, Ctrl-C Ctrl-C submits (for multi-line input like commit messages).
+---@param opts {title: string, on_submit: fun(text: string), on_abort?: fun(), height?: number, width?: number, content?: string[], single_line?: boolean}
 ---@return number buf, number win
 function M.input(opts)
+  local is_single = opts.single_line == true
   local buf, win = M.open({
     title = opts.title,
     width = opts.width or config.values.input_float.width,
-    height = opts.height or config.values.input_float.height,
+    height = is_single and 1 or (opts.height or config.values.input_float.height),
     relative = 'editor',
     border = config.values.input_float.border,
     style = config.values.input_float.style,
@@ -59,8 +62,7 @@ function M.input(opts)
 
   vim.cmd('startinsert')
 
-  -- Submit: ctrl-c ctrl-c
-  vim.keymap.set({ 'n', 'i' }, '<C-c><C-c>', function()
+  local function submit()
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     local text = vim.trim(table.concat(lines, '\n'))
     vim.api.nvim_win_close(win, true)
@@ -68,17 +70,25 @@ function M.input(opts)
     if text ~= '' then
       opts.on_submit(text)
     end
-  end, { buffer = buf })
+  end
 
-  -- Abort: ctrl-c ctrl-k or q in normal mode
   local function abort()
     vim.api.nvim_win_close(win, true)
     vim.api.nvim_buf_delete(buf, { force = true })
     if opts.on_abort then opts.on_abort() end
   end
 
+  if is_single then
+    -- Single-line: Enter submits, Esc aborts
+    vim.keymap.set('i', '<CR>', submit, { buffer = buf })
+    vim.keymap.set('n', '<CR>', submit, { buffer = buf })
+  end
+
+  -- Ctrl-C Ctrl-C always works as submit (multi-line and single-line)
+  vim.keymap.set({ 'n', 'i' }, '<C-c><C-c>', submit, { buffer = buf })
   vim.keymap.set({ 'n', 'i' }, '<C-c><C-k>', abort, { buffer = buf })
   vim.keymap.set('n', 'q', abort, { buffer = buf })
+  vim.keymap.set('n', '<Esc>', abort, { buffer = buf })
 
   return buf, win
 end
