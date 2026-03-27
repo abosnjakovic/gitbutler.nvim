@@ -8,6 +8,10 @@ local function refresh()
   status.refresh()
 end
 
+local function notify_start(action)
+  vim.notify('gitbutler: ' .. action .. '...', vim.log.levels.INFO)
+end
+
 local function notify_result(action, err, _result)
   if err then
     vim.notify('gitbutler ' .. action .. ': ' .. err, vim.log.levels.ERROR)
@@ -118,6 +122,7 @@ function M.assign_to_branch(buf)
       title = 'Assign to branch',
       items = names,
       on_select = function(branch_name)
+        notify_start('staging')
         local i = 0
         local function stage_next()
           i = i + 1
@@ -146,6 +151,7 @@ end
 
 ---Absorb all uncommitted changes into logical commits.
 function M.absorb(_buf)
+  notify_start('absorb')
   cli.absorb(function(err, result)
     notify_result('absorb', err, result)
   end)
@@ -159,6 +165,7 @@ function M.commit(buf)
   float.input({
     title = 'Commit' .. (branch_name and (' to ' .. branch_name) or ''),
     on_submit = function(message)
+      notify_start('commit')
       cli.commit(branch_name, message, function(err, result)
         notify_result('commit', err, result)
       end)
@@ -175,6 +182,7 @@ function M.amend(buf)
     table.insert(args, 2, branch_name)
   end
 
+  notify_start('amend')
   cli.run(args, function(err, result)
     notify_result('amend', err, result)
   end)
@@ -188,6 +196,7 @@ function M.squash(buf)
     for _, line in ipairs(selected) do
       table.insert(shas, line.data.sha)
     end
+    notify_start('squash')
     cli.squash(shas, function(err, result)
       buf:clear_selection()
       notify_result('squash ' .. #shas .. ' commits', err, result)
@@ -200,6 +209,7 @@ function M.squash(buf)
   if not line or line.type ~= 'commit' or not line.data then return end
   local sha = line.data.sha
   if not sha then return end
+  notify_start('squash')
   cli.squash(sha, function(err, result)
     notify_result('squash', err, result)
   end)
@@ -229,6 +239,7 @@ function M.move(buf)
       title = 'Move commit(s) to',
       items = names,
       on_select = function(target_branch)
+        notify_start('move')
         local i = 0
         local function move_next()
           i = i + 1
@@ -269,6 +280,7 @@ function M.describe(buf)
       title = 'Reword commit',
       content = current_msg ~= '' and vim.split(current_msg, '\n') or nil,
       on_submit = function(message)
+        notify_start('reword')
         cli.reword(sha, message, function(err, result)
           notify_result('reword', err, result)
         end)
@@ -283,6 +295,7 @@ function M.describe(buf)
       single_line = true,
       content = { name },
       on_submit = function(new_name)
+        notify_start('rename')
         cli.run({ 'reword', name, '-m', new_name, '--json' }, function(err, result)
           notify_result('rename → ' .. new_name, err, result)
         end)
@@ -293,6 +306,7 @@ end
 
 ---Undo last operation.
 function M.undo(_buf)
+  notify_start('undo')
   cli.undo(function(err, result)
     notify_result('undo', err, result)
   end)
@@ -302,6 +316,7 @@ end
 function M.push(buf)
   local branch = buf:get_cursor_branch()
   local name = branch and branch.name or nil
+  notify_start('push')
   cli.push(name, function(err, result)
     notify_result('push', err, result)
   end)
@@ -309,6 +324,7 @@ end
 
 ---Push all branches.
 function M.push_all(_buf)
+  notify_start('push all')
   cli.push(nil, function(err, result)
     notify_result('push all', err, result)
   end)
@@ -316,6 +332,7 @@ end
 
 ---Pull (sync) from upstream.
 function M.pull(_buf)
+  notify_start('pull')
   cli.pull(function(err, result)
     notify_result('pull', err, result)
   end)
@@ -333,6 +350,7 @@ function M.branch_new(_buf)
     title = 'New branch name',
     single_line = true,
     on_submit = function(name)
+      notify_start('branch new')
       cli.branch_new(name, function(err, result)
         notify_result('branch new ' .. name, err, result)
       end)
@@ -360,6 +378,7 @@ function M.discard(buf)
 
   vim.ui.select({ 'Yes', 'No' }, { prompt = prompt }, function(choice)
     if choice ~= 'Yes' then return end
+    notify_start('discard')
     local i = 0
     local function discard_next()
       i = i + 1
