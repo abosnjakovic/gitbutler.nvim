@@ -451,10 +451,17 @@ end
 
 ---Toggle selection on the line under cursor.
 function M.toggle_select(buf)
-  buf:toggle_select()
+  local toggled = buf:toggle_select()
   -- Re-render to show updated markers without a full refresh (preserves selection)
   if buf.lines and #buf.lines > 0 then
     buf:render(buf.lines)
+  end
+  if toggled and buf.win and vim.api.nvim_win_is_valid(buf.win) then
+    local cursor = vim.api.nvim_win_get_cursor(buf.win)
+    local max_row = vim.api.nvim_buf_line_count(buf.buf)
+    if cursor[1] < max_row then
+      vim.api.nvim_win_set_cursor(buf.win, { cursor[1] + 1, cursor[2] })
+    end
   end
 end
 
