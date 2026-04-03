@@ -312,21 +312,33 @@ function M.undo(_buf)
   end)
 end
 
----Push the branch under cursor.
+---Push the branch under cursor (syncs with upstream first).
 function M.push(buf)
   local branch = buf:get_cursor_branch()
   local name = branch and branch.name or nil
-  notify_start('push')
-  cli.push(name, function(err, result)
-    notify_result('push', err, result)
+  notify_start('sync (pull + push)')
+  cli.pull(function(err, result)
+    if err then
+      notify_result('pull', err, result)
+      return
+    end
+    cli.push(name, function(err2, result2)
+      notify_result('push', err2, result2)
+    end)
   end)
 end
 
----Push all branches.
+---Push all branches (syncs with upstream first).
 function M.push_all(_buf)
-  notify_start('push all')
-  cli.push(nil, function(err, result)
-    notify_result('push all', err, result)
+  notify_start('sync all (pull + push)')
+  cli.pull(function(err, result)
+    if err then
+      notify_result('pull', err, result)
+      return
+    end
+    cli.push(nil, function(err2, result2)
+      notify_result('push all', err2, result2)
+    end)
   end)
 end
 
