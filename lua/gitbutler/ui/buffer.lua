@@ -198,12 +198,13 @@ function Buffer:toggle_select()
   end
   local line = self.lines[row]
   local key = self:select_key(line)
-  if not key then return end
+  if not key then return false end
   if self.selected[key] then
     self.selected[key] = nil
   else
     self.selected[key] = true
   end
+  return true
 end
 
 ---Check if a line is currently selected.
