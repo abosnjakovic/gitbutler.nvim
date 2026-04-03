@@ -495,6 +495,104 @@ test('selection survives re-render', function()
   vim.api.nvim_buf_delete(buf.buf, { force = true })
 end)
 
+print('\n=== Action tests ===')
+
+local actions = require('gitbutler.actions')
+
+test('actions.toggle_select moves cursor down if successful', function()
+  local buf = mock_buffer()
+  buf.buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf.buf, 0, -1, false, { "line 1", "line 2", "line 3" })
+  
+  buf.win = vim.api.nvim_open_win(buf.buf, true, {
+    relative = 'editor', width = 10, height = 10, row = 0, col = 0
+  })
+  
+  vim.api.nvim_win_set_cursor(buf.win, { 1, 0 })
+  
+  buf.toggle_select = function() return true end
+  buf.render = function() end
+  buf.lines = { "dummy" }
+  
+  actions.toggle_select(buf)
+  
+  local cursor = vim.api.nvim_win_get_cursor(buf.win)
+  assert_eq(2, cursor[1], 'cursor should move to line 2')
+  
+  vim.api.nvim_win_close(buf.win, true)
+  vim.api.nvim_buf_delete(buf.buf, { force = true })
+end)
+
+test('actions.push does a pull first', function()
+  local pull_called = false
+  local push_called = false
+  
+  local original_pull = cli.pull
+  local original_push = cli.push
+  
+  cli.pull = function(cb)
+    pull_called = true
+    cb(nil, "pulled")
+  end
+  
+  cli.push = function(branch_name, cb)
+    assert_truthy(pull_called, 'pull must be called before push')
+    push_called = true
+    assert_eq("test-branch", branch_name)
+    cb(nil, "pushed")
+  end
+  
+  local buf = mock_buffer()
+  buf.get_cursor_branch = function() return { name = "test-branch" } end
+  
+  local notify_called = false
+  local original_notify = vim.notify
+  vim.notify = function() notify_called = true end
+  
+  actions.push(buf)
+  
+  assert_truthy(pull_called)
+  assert_truthy(push_called)
+  
+  cli.pull = original_pull
+  cli.push = original_push
+  vim.notify = original_notify
+end)
+
+test('actions.push_all does a pull first', function()
+  local pull_called = false
+  local push_called = false
+  
+  local original_pull = cli.pull
+  local original_push = cli.push
+  
+  cli.pull = function(cb)
+    pull_called = true
+    cb(nil, "pulled")
+  end
+  
+  cli.push = function(branch_name, cb)
+    assert_truthy(pull_called, 'pull must be called before push_all')
+    push_called = true
+    assert_eq(nil, branch_name)
+    cb(nil, "pushed")
+  end
+  
+  local buf = mock_buffer()
+  
+  local original_notify = vim.notify
+  vim.notify = function() end
+  
+  actions.push_all(buf)
+  
+  assert_truthy(pull_called)
+  assert_truthy(push_called)
+  
+  cli.pull = original_pull
+  cli.push = original_push
+  vim.notify = original_notify
+end)
+
 -- ── Summary ───────────────────────────────────────────────
 
 print(string.format('\n%d passed, %d failed\n', pass, fail))
