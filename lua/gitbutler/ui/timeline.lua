@@ -296,6 +296,14 @@ function M.refresh()
   local days = cfg.days or 7
 
   M.fetch_commits(function(commits)
+    -- Re-fetch files for any commits that were previously expanded
+    for _, commit in ipairs(commits) do
+      local fold_id = 'timeline:' .. commit.sha
+      if buf.fold_state[fold_id] == false then
+        commit._files = M.fetch_files(commit.sha)
+      end
+    end
+
     local lines = M.build_lines(buf, commits, days)
     buf:render(lines)
     apply_field_highlights(buf, lines)
