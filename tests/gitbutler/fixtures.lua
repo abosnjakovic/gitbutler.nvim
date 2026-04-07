@@ -231,4 +231,40 @@ M.oplog = {
 -- empty oplog
 M.oplog_empty = {}
 
+-- Simulated parsed output from git log --all for timeline view
+M.timeline_commits = {
+  {
+    sha = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2',
+    short_sha = 'a1b2c3d',
+    author = 'adam',
+    date = '2026-04-08',
+    refs = 'origin/main, main',
+    message = 'Fix auth bug',
+  },
+  {
+    sha = 'f4e5d6c7a8b9f4e5d6c7a8b9f4e5d6c7a8b9f4e5',
+    short_sha = 'f4e5d6c',
+    author = 'sarah',
+    date = '2026-04-08',
+    refs = 'feat/ui',
+    message = 'Update sidebar layout',
+  },
+  {
+    sha = '8c9d0e1f2a3b8c9d0e1f2a3b8c9d0e1f2a3b8c9d',
+    short_sha = '8c9d0e1',
+    author = 'adam',
+    date = '2026-04-07',
+    refs = '',
+    message = 'Add API endpoint',
+  },
+}
+
+M.timeline_commits_empty = {}
+
+-- Simulated parsed output from git diff-tree --stat
+M.timeline_diff_tree = {
+  { path = 'src/auth.lua', status = 'M' },
+  { path = 'src/token.lua', status = 'A' },
+}
+
 return M

@@ -18,6 +18,9 @@ function M.setup()
     GitButlerSelected = { link = 'Visual' },
     GitButlerPickerSelected = { link = 'CursorLine' },
     GitButlerPickerBranch = { link = 'String' },
+    GitButlerTimelineDate = { link = 'Title' },
+    GitButlerTimelineAuthor = { link = 'Special' },
+    GitButlerTimelineRef = { link = 'Comment' },
   }
 
   for name, def in pairs(groups) do
