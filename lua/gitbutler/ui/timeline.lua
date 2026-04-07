@@ -35,21 +35,17 @@ function M.parse_git_log(raw)
   return commits
 end
 
----Parse the output of git diff-tree --stat.
----Each file line looks like: " src/auth.lua | 15 +++---"
----The summary line ("N files changed, ...") is skipped.
----@param raw string Raw diff-tree --stat output
----@return table[] files Array of {path}
+---Parse the output of git diff-tree --name-status.
+---Each line looks like: "M\tsrc/auth.lua"
+---@param raw string Raw diff-tree --name-status output
+---@return table[] files Array of {path, status}
 function M.parse_diff_tree(raw)
   local files = {}
   for line in raw:gmatch('[^\n]+') do
-    -- Skip summary line
-    if line:find('files? changed') then goto continue end
-    local path = line:match('^%s*(.-)%s*|')
-    if path then
-      table.insert(files, { path = path })
+    local status, path = line:match('^(%a)%s+(.+)')
+    if status and path then
+      table.insert(files, { path = path, status = status })
     end
-    ::continue::
   end
   return files
 end
@@ -112,7 +108,11 @@ function M.build_lines(buf, commits, days)
     -- Expanded file list (when unfolded)
     if not is_folded and commit._files then
       for _, file in ipairs(commit._files) do
-        add(file.path, 'GitButlerFileMod', 'timeline_file', {
+        local hl = 'GitButlerFileMod'
+        if file.status == 'A' then hl = 'GitButlerFileAdd'
+        elseif file.status == 'D' then hl = 'GitButlerFileDel'
+        end
+        add(file.status .. '  ' .. file.path, hl, 'timeline_file', {
           path = file.path,
           sha = commit.sha,
         }, { indent = 1 })
@@ -156,11 +156,45 @@ end
 ---@return table[] files Array of {path}
 function M.fetch_files(sha)
   local result = vim.system(
-    { 'git', 'diff-tree', '--no-commit-id', '-r', '--stat', sha },
+    { 'git', 'diff-tree', '--no-commit-id', '-r', '--name-status', sha },
     { text = true }
   ):wait()
   if result.code ~= 0 or not result.stdout then return {} end
   return M.parse_diff_tree(result.stdout)
+end
+
+---Apply per-field highlights to timeline commit lines after render.
+---@param buf table GitButlerBuffer instance
+---@param lines GitButlerLine[] The rendered lines
+local function apply_field_highlights(buf, lines)
+  if not buf.buf or not vim.api.nvim_buf_is_valid(buf.buf) then return end
+  local ns = vim.api.nvim_create_namespace('gitbutler-timeline-fields')
+  vim.api.nvim_buf_clear_namespace(buf.buf, ns, 0, -1)
+
+  for i, line in ipairs(lines) do
+    if line.type ~= 'timeline_commit' or not line.data then goto continue end
+
+    local rendered = vim.api.nvim_buf_get_lines(buf.buf, i - 1, i, false)[1] or ''
+    local short_sha = line.data.short_sha or ''
+    local author = line.data.author or ''
+    local refs = line.data.refs or ''
+
+    -- Find author position (after "▸ short_sha  ")
+    local author_start = rendered:find(author, #short_sha + 1, true)
+    if author_start then
+      vim.api.nvim_buf_add_highlight(buf.buf, ns, 'GitButlerTimelineAuthor', i - 1, author_start - 1, author_start - 1 + #author)
+    end
+
+    -- Find refs position (after author)
+    if refs ~= '' then
+      local refs_start = rendered:find(refs, (author_start or 0) + #author, true)
+      if refs_start then
+        vim.api.nvim_buf_add_highlight(buf.buf, ns, 'GitButlerTimelineRef', i - 1, refs_start - 1, refs_start - 1 + #refs)
+      end
+    end
+
+    ::continue::
+  end
 end
 
 ---Open the timeline view.
@@ -206,6 +240,7 @@ function M.open()
       b.fold_state[id] = not currently_folded
       local lines = M.build_lines(b, commits, days)
       b:render(lines)
+      apply_field_highlights(b, lines)
     end)
 
     buf:on('yank_sha', function(b)
@@ -249,6 +284,7 @@ function M.open()
 
     local lines = M.build_lines(buf, commits, days)
     buf:render(lines)
+    apply_field_highlights(buf, lines)
   end)
 end
 
@@ -262,6 +298,7 @@ function M.refresh()
   M.fetch_commits(function(commits)
     local lines = M.build_lines(buf, commits, days)
     buf:render(lines)
+    apply_field_highlights(buf, lines)
   end)
 end
 

@@ -263,8 +263,8 @@ M.timeline_commits_empty = {}
 
 -- Simulated parsed output from git diff-tree --stat
 M.timeline_diff_tree = {
-  { path = 'src/auth.lua', status = 'M', insertions = 12, deletions = 3 },
-  { path = 'src/token.lua', status = 'A', insertions = 45, deletions = 0 },
+  { path = 'src/auth.lua', status = 'M' },
+  { path = 'src/token.lua', status = 'A' },
 }
 
 return M
