@@ -54,4 +54,76 @@ function M.parse_diff_tree(raw)
   return files
 end
 
+---Build structured lines from parsed commit data.
+---@param buf table GitButlerBuffer instance (for fold state)
+---@param commits table[] Parsed commits from parse_git_log
+---@param days number Number of days shown (for header)
+---@return GitButlerLine[]
+function M.build_lines(buf, commits, days)
+  local lines = {}
+
+  local function add(text, hl, line_type, data_tbl, opts)
+    opts = opts or {}
+    table.insert(lines, {
+      text = text,
+      hl = hl,
+      type = line_type,
+      data = data_tbl,
+      foldable = opts.foldable,
+      folded = opts.folded,
+      indent = opts.indent or 0,
+    })
+  end
+
+  add('Timeline (last ' .. days .. ' days)', 'GitButlerSection', 'section_header', nil)
+  add('', nil, 'blank', nil)
+
+  -- Group commits by date
+  local current_date = nil
+  for _, commit in ipairs(commits) do
+    if commit.date ~= current_date then
+      current_date = commit.date
+      add('── ' .. current_date .. ' ' .. string.rep('─', 30), 'GitButlerTimelineDate', 'date_header', nil)
+    end
+
+    local ref_part = ''
+    if commit.refs ~= '' then
+      ref_part = '  ' .. commit.refs
+    end
+
+    local display = commit.short_sha .. '  ' .. commit.author .. ref_part .. '  ' .. commit.message
+
+    local fold_id = 'timeline:' .. commit.sha
+    local is_folded = buf:is_folded(fold_id)
+    -- Default to folded (collapsed)
+    if buf.fold_state[fold_id] == nil then
+      is_folded = true
+    end
+
+    add(display, 'GitButlerCommitHash', 'timeline_commit', {
+      sha = commit.sha,
+      short_sha = commit.short_sha,
+      author = commit.author,
+      refs = commit.refs,
+      message = commit.message,
+      fold_id = fold_id,
+    }, { foldable = true, folded = is_folded })
+
+    -- Expanded file list (when unfolded)
+    if not is_folded and commit._files then
+      for _, file in ipairs(commit._files) do
+        add(file.path, 'GitButlerFileMod', 'timeline_file', {
+          path = file.path,
+          sha = commit.sha,
+        }, { indent = 1 })
+      end
+    end
+  end
+
+  add('', nil, 'blank', nil)
+  add('y=yank sha  l=log  r=refresh  q=close  <Tab>=toggle', 'GitButlerHelp', 'help', nil)
+
+  return lines
+end
+
 return M
