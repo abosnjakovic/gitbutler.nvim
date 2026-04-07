@@ -89,6 +89,10 @@ function M.setup(opts)
   vim.api.nvim_create_user_command('ButlerOplog', function()
     require('gitbutler.ui.oplog').open()
   end, { desc = 'GitButler operations log' })
+
+  vim.api.nvim_create_user_command('ButlerTimeline', function()
+    require('gitbutler.ui.timeline').open()
+  end, { desc = 'GitButler commit timeline' })
 end
 
 return M
