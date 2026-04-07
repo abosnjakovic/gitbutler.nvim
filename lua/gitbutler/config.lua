@@ -44,6 +44,12 @@ M.defaults = {
     unassigned = { folded = false, hidden = false },
   },
 
+  -- Timeline view settings
+  timeline = {
+    days = 7,
+    limit = 200,
+  },
+
   -- Keymaps for status buffer (set to false to disable)
   keymaps = {
     status = {
