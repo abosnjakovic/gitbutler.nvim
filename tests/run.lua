@@ -593,6 +593,41 @@ test('actions.push_all does a pull first', function()
   vim.notify = original_notify
 end)
 
+-- ── Timeline view tests ─────────────────────────────────
+
+print('\n=== Timeline view tests ===')
+
+local timeline = require('gitbutler.ui.timeline')
+
+test('parse_git_log parses structured git log output', function()
+  local raw = table.concat({
+    'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2|a1b2c3d|adam|2026-04-08|origin/main, main|Fix auth bug',
+    'f4e5d6c7a8b9f4e5d6c7a8b9f4e5d6c7a8b9f4e5|f4e5d6c|sarah|2026-04-08|feat/ui|Update sidebar',
+    '8c9d0e1f2a3b8c9d0e1f2a3b8c9d0e1f2a3b8c9d|8c9d0e1|adam|2026-04-07||Add endpoint',
+  }, '\n')
+
+  local commits = timeline.parse_git_log(raw)
+  assert_eq(3, #commits)
+  assert_eq('a1b2c3d', commits[1].short_sha)
+  assert_eq('adam', commits[1].author)
+  assert_eq('2026-04-08', commits[1].date)
+  assert_eq('origin/main, main', commits[1].refs)
+  assert_eq('Fix auth bug', commits[1].message)
+  assert_eq('', commits[3].refs)
+end)
+
+test('parse_git_log handles empty input', function()
+  local commits = timeline.parse_git_log('')
+  assert_eq(0, #commits)
+end)
+
+test('parse_git_log handles message with pipe characters', function()
+  local raw = 'abc123abc123abc123abc123abc123abc123abc12345|abc1234|adam|2026-04-08|main|Fix foo|bar baz'
+  local commits = timeline.parse_git_log(raw)
+  assert_eq(1, #commits)
+  assert_eq('Fix foo|bar baz', commits[1].message)
+end)
+
 -- ── Summary ───────────────────────────────────────────────
 
 print(string.format('\n%d passed, %d failed\n', pass, fail))
