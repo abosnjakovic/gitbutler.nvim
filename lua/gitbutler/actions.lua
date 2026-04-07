@@ -573,4 +573,9 @@ function M.oplog(_buf)
   require('gitbutler.ui.oplog').open()
 end
 
+---Open commit timeline.
+function M.timeline(_buf)
+  require('gitbutler.ui.timeline').open()
+end
+
 return M

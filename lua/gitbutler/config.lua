@@ -74,6 +74,7 @@ M.defaults = {
       ['<Space>'] = 'toggle_select',
       ['l'] = 'log',
       ['O'] = 'oplog',
+      ['t'] = 'timeline',
       ['?'] = 'help',
     },
   },

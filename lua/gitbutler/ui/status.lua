@@ -231,6 +231,7 @@ function M.open()
   buf:on('branches', actions.branches)
   buf:on('log', actions.log)
   buf:on('oplog', actions.oplog)
+  buf:on('timeline', actions.timeline)
 
   buf:open()
   M.refresh()
