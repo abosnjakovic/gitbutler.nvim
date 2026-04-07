@@ -573,6 +573,40 @@ function M.oplog(_buf)
   require('gitbutler.ui.oplog').open()
 end
 
+---Uncommit file(s) from a commit back to unstaged.
+function M.uncommit(buf)
+  local selected = buf:get_selected_lines({ 'committed_file' })
+  local targets
+  if #selected > 0 then
+    targets = selected
+  else
+    local line = buf:get_cursor_line()
+    if not line or line.type ~= 'committed_file' or not line.data then return end
+    targets = { line }
+  end
+
+  local i = 0
+  local function uncommit_next()
+    i = i + 1
+    if i > #targets then
+      buf:clear_selection()
+      vim.notify('gitbutler: uncommitted ' .. #targets .. ' file(s)', vim.log.levels.INFO)
+      refresh()
+      return
+    end
+    cli.uncommit(targets[i].data.cli_id, function(err, _)
+      if err then
+        buf:clear_selection()
+        vim.notify('gitbutler uncommit: ' .. err, vim.log.levels.ERROR)
+        refresh()
+        return
+      end
+      uncommit_next()
+    end)
+  end
+  uncommit_next()
+end
+
 ---Open commit timeline.
 function M.timeline(_buf)
   require('gitbutler.ui.timeline').open()

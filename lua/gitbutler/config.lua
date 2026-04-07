@@ -75,6 +75,7 @@ M.defaults = {
       ['l'] = 'log',
       ['O'] = 'oplog',
       ['t'] = 'timeline',
+      ['U'] = 'uncommit',
       ['?'] = 'help',
     },
   },
