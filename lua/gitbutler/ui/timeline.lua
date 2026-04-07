@@ -35,4 +35,23 @@ function M.parse_git_log(raw)
   return commits
 end
 
+---Parse the output of git diff-tree --stat.
+---Each file line looks like: " src/auth.lua | 15 +++---"
+---The summary line ("N files changed, ...") is skipped.
+---@param raw string Raw diff-tree --stat output
+---@return table[] files Array of {path}
+function M.parse_diff_tree(raw)
+  local files = {}
+  for line in raw:gmatch('[^\n]+') do
+    -- Skip summary line
+    if line:find('files? changed') then goto continue end
+    local path = line:match('^%s*(.-)%s*|')
+    if path then
+      table.insert(files, { path = path })
+    end
+    ::continue::
+  end
+  return files
+end
+
 return M

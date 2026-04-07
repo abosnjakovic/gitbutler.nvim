@@ -628,6 +628,24 @@ test('parse_git_log handles message with pipe characters', function()
   assert_eq('Fix foo|bar baz', commits[1].message)
 end)
 
+test('parse_diff_tree parses stat output', function()
+  local raw = table.concat({
+    ' src/auth.lua | 15 ++++++++++++---',
+    ' src/token.lua | 45 +++++++++++++++++++++++++++++++++++++++++++++',
+    ' 2 files changed, 57 insertions(+), 3 deletions(-)',
+  }, '\n')
+
+  local files = timeline.parse_diff_tree(raw)
+  assert_eq(2, #files)
+  assert_eq('src/auth.lua', files[1].path)
+  assert_eq('src/token.lua', files[2].path)
+end)
+
+test('parse_diff_tree handles empty output', function()
+  local files = timeline.parse_diff_tree('')
+  assert_eq(0, #files)
+end)
+
 -- ── Summary ───────────────────────────────────────────────
 
 print(string.format('\n%d passed, %d failed\n', pass, fail))
