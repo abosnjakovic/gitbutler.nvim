@@ -57,13 +57,13 @@ vim.keymap.set('n', '<leader>bb', ':Butler<CR>', { desc = 'gitbutler' })
 
 ### Commands
 
-`:Butler` toggles the status view. `:ButlerBranches` opens the branch management popup. `:ButlerLog [branch]` shows the commit log for a branch (defaults to the first applied branch). `:ButlerOplog` opens the operations history. `:ButlerAbsorb`, `:ButlerPush`, `:ButlerPull`, and `:ButlerUndo` run the corresponding operations directly.
+`:Butler` toggles the status view. `:ButlerBranches` opens the branch management popup. `:ButlerLog [branch]` shows the commit log for a branch (defaults to the first applied branch). `:ButlerTimeline` shows a chronological view of recent commits across all branches and contributors. `:ButlerOplog` opens the operations history. `:ButlerAbsorb`, `:ButlerPush`, `:ButlerPull`, and `:ButlerUndo` run the corresponding operations directly.
 
 ### Multi-select
 
 Press `<Space>` on any file or commit line to toggle its selection. Selected items are highlighted and marked with `●`. Once you have a selection, the next action you trigger applies to all selected items rather than just the cursor line. Selection clears automatically after an action completes but persists across refreshes.
 
-Actions that support multi-select: assign (`s`), discard (`x`), squash (`S`), move (`m`), and open file (`<CR>`). For squash, all selected commits are passed in a single CLI call. For the others, operations run sequentially. Selecting items across different branches is allowed — the CLI determines validity per item.
+Actions that support multi-select: assign (`s`), discard (`x`), uncommit (`U`), squash (`S`), move (`m`), and open file (`<CR>`). For squash, all selected commits are passed in a single CLI call. For the others, operations run sequentially. Selecting items across different branches is allowed — the CLI determines validity per item.
 
 ### Status buffer keybindings
 
@@ -84,7 +84,9 @@ F        Pull / sync from upstream
 b        Create a new branch
 B        Branch management popup
 l        Commit log for the branch under cursor
+t        Commit timeline (all branches)
 O        Operations log
+U        Uncommit file from commit back to unstaged
 x        Discard file changes (with confirmation)
 <Tab>    Inline diff on files, fold toggle on branch headers
 r        Refresh
@@ -116,6 +118,20 @@ S        Squash commit into parent
 <CR>     Open file
 q        Close
 ```
+
+### Timeline (t)
+
+Shows a chronological view of recent commits across all branches and contributors, grouped by date. Useful as a quick pulse check on repo activity. Data comes from `git log --all`, so it sees every ref regardless of GitButler's virtual branch state.
+
+```
+<Tab>    Toggle file list for a commit
+y        Yank full SHA to clipboard
+l        Jump to commit log for that branch
+r        Refresh
+q        Close
+```
+
+The time window defaults to 7 days and can be configured via `timeline = { days = 14 }` in your setup.
 
 ### Operations log (O)
 
@@ -162,7 +178,7 @@ The plugin talks to the `but` CLI exclusively through `but <command> --json`, wh
 
 `cli.lua` wraps every `but` subcommand with `vim.system()` for async execution and `vim.json.decode()` for parsing. All other modules go through this layer.
 
-`ui/` modules handle rendering. `buffer.lua` is the managed scratch buffer with collapsible sections. `float.lua` provides floating windows for input and pickers. `status.lua`, `log.lua`, `branch.lua`, and `oplog.lua` build the specific views.
+`ui/` modules handle rendering. `buffer.lua` is the managed scratch buffer with collapsible sections. `float.lua` provides floating windows for input and pickers. `status.lua`, `log.lua`, `timeline.lua`, `branch.lua`, and `oplog.lua` build the specific views.
 
 `actions.lua` connects keybindings to CLI operations and manages the interaction flow (inline pickers, input floats, confirmations, refresh cycles).
 
