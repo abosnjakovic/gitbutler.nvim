@@ -1,0 +1,69 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read current version
+        id: current
+        run: echo "version=$(cat version.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Bump patch version
+        id: bump
+        run: |
+          IFS='.' read -r major minor patch <<< "${{ steps.current.outputs.version }}"
+          new_version="${major}.${minor}.$((patch + 1))"
+          echo "version=${new_version}" >> "$GITHUB_OUTPUT"
+          echo "${new_version}" > version.txt
+
+      - name: Generate changelog entry
+        id: changelog
+        run: |
+          new_version="${{ steps.bump.outputs.version }}"
+          date=$(date +%Y-%m-%d)
+          prev_tag=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+
+          {
+            echo "entry<<CHANGELOG_EOF"
+            echo "## ${new_version} — ${date}"
+            echo ""
+            git log "${prev_tag}..HEAD" --pretty=format:"- %s" --no-merges
+            echo ""
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Update CHANGELOG.md
+        run: |
+          tmp=$(mktemp)
+          head -1 CHANGELOG.md > "$tmp"
+          echo "" >> "$tmp"
+          echo '${{ steps.changelog.outputs.entry }}' >> "$tmp"
+          tail -n +2 CHANGELOG.md >> "$tmp"
+          mv "$tmp" CHANGELOG.md
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add version.txt CHANGELOG.md
+          git commit -m "release v${{ steps.bump.outputs.version }}"
+          git tag "v${{ steps.bump.outputs.version }}"
+          git push origin main --tags
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.bump.outputs.version }}" \
+            --title "v${{ steps.bump.outputs.version }}" \
+            --notes '${{ steps.changelog.outputs.entry }}'
