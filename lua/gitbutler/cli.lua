@@ -90,13 +90,22 @@ function M.status(callback)
 end
 
 ---Convenience: but commit
-function M.commit(branch, message, callback)
+---@param branch? string Branch name or CLI ID
+---@param message? string Commit message
+---@param callback fun(err?: string, result?: any)
+---@param file_ids? string[] Uncommitted file CLI IDs to include (omit for all)
+function M.commit(branch, message, callback, file_ids)
   local args = { 'commit' }
   if branch then
     table.insert(args, branch)
   end
   if message then
     vim.list_extend(args, { '-m', message })
+  end
+  if file_ids then
+    for _, id in ipairs(file_ids) do
+      vim.list_extend(args, { '-p', id })
+    end
   end
   table.insert(args, '--json')
   M.run(args, callback)

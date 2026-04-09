@@ -158,17 +158,33 @@ function M.absorb(_buf)
 end
 
 ---Commit changes to the branch under cursor.
+---When files are selected, only those files are committed. Otherwise all changes.
 function M.commit(buf)
   local branch = buf:get_cursor_branch()
   local branch_name = branch and branch.name or nil
 
+  local selected = buf:get_selected_lines({ 'file' })
+  local file_ids
+  if #selected > 0 then
+    file_ids = {}
+    for _, line in ipairs(selected) do
+      table.insert(file_ids, line.data.cli_id)
+    end
+  end
+
+  local title = 'Commit' .. (branch_name and (' to ' .. branch_name) or '')
+  if file_ids then
+    title = title .. ' (' .. #file_ids .. ' file' .. (#file_ids > 1 and 's' or '') .. ')'
+  end
+
   float.input({
-    title = 'Commit' .. (branch_name and (' to ' .. branch_name) or ''),
+    title = title,
     on_submit = function(message)
       notify_start('commit')
       cli.commit(branch_name, message, function(err, result)
+        buf:clear_selection()
         notify_result('commit', err, result)
-      end)
+      end, file_ids)
     end,
   })
 end
