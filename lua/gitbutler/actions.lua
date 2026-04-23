@@ -82,6 +82,7 @@ function M.open_file(buf)
     vim.bo[diff_buf].bufhidden = 'wipe'
     vim.bo[diff_buf].filetype = 'diff'
     vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = diff_buf })
+    vim.keymap.set('n', '<Tab>', '<cmd>close<CR>', { buffer = diff_buf })
     return
   end
 
@@ -467,6 +468,7 @@ function M.toggle_fold(buf)
     end
 
     vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = diff_buf })
+    vim.keymap.set('n', '<Tab>', '<cmd>close<CR>', { buffer = diff_buf })
     return
   end
 
