@@ -65,6 +65,7 @@ function M.input(opts)
   local function submit()
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     local text = vim.trim(table.concat(lines, '\n'))
+    vim.cmd('stopinsert')
     vim.api.nvim_win_close(win, true)
     vim.api.nvim_buf_delete(buf, { force = true })
     if text ~= '' then
@@ -73,6 +74,7 @@ function M.input(opts)
   end
 
   local function abort()
+    vim.cmd('stopinsert')
     vim.api.nvim_win_close(win, true)
     vim.api.nvim_buf_delete(buf, { force = true })
     if opts.on_abort then opts.on_abort() end
