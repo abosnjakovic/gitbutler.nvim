@@ -1,7 +1,6 @@
 local cli = require('gitbutler.cli')
 local float = require('gitbutler.ui.float')
 local buffer_mod = require('gitbutler.ui.buffer')
-local hints = require('gitbutler.ui.hints')
 
 local M = {}
 
@@ -92,8 +91,6 @@ local function build_lines(buf, data)
   end
 
   add('', nil, 'blank', nil)
-  add(hints.for_context('log', nil), 'GitButlerHelp', 'help', nil)
-
   return lines
 end
 

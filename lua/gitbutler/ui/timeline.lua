@@ -1,6 +1,5 @@
 local config = require('gitbutler.config')
 local buffer_mod = require('gitbutler.ui.buffer')
-local hints = require('gitbutler.ui.hints')
 
 local M = {}
 
@@ -122,8 +121,6 @@ function M.build_lines(buf, commits, days)
   end
 
   add('', nil, 'blank', nil)
-  add(hints.for_context('timeline', nil), 'GitButlerHelp', 'help', nil)
-
   return lines
 end
 

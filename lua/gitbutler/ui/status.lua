@@ -1,6 +1,5 @@
 local cli = require('gitbutler.cli')
 local buffer_mod = require('gitbutler.ui.buffer')
-local hints = require('gitbutler.ui.hints')
 
 local M = {}
 
@@ -193,8 +192,6 @@ local function build_lines(buf, data)
     local msg = (mb.message or ''):match('^([^\n]*)') or ''
     add('Base: ' .. (mb.commitId or ''):sub(1, 7) .. ' ' .. msg, 'GitButlerHelp', 'info', nil)
   end
-
-  add(hints.for_context('status', nil), 'GitButlerHelp', 'help', nil)
 
   return lines
 end

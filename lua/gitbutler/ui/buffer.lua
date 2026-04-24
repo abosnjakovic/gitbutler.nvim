@@ -33,8 +33,88 @@ function Buffer.new()
   self.fold_state = {}
   self.selected = {}
   self.view = nil
-  self.hint_line_idx = nil
+  self.hint_buf = nil
+  self.hint_win = nil
+  self.hint_augroup = nil
   return self
+end
+
+---Compute geometry for the hint floating window.
+---@return number width, number row
+function Buffer:_hint_geometry()
+  local width = vim.api.nvim_win_get_width(self.win)
+  local height = vim.api.nvim_win_get_height(self.win)
+  return width, math.max(0, height - 2)
+end
+
+---Create the floating hint window pinned to the bottom of self.win, if absent.
+function Buffer:_ensure_hint_window()
+  if not self.win or not vim.api.nvim_win_is_valid(self.win) then return end
+
+  if self.hint_win and vim.api.nvim_win_is_valid(self.hint_win)
+     and self.hint_buf and vim.api.nvim_buf_is_valid(self.hint_buf) then
+    self:_position_hint_window()
+    return
+  end
+
+  self.hint_buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[self.hint_buf].buftype = 'nofile'
+  vim.bo[self.hint_buf].bufhidden = 'wipe'
+  vim.bo[self.hint_buf].swapfile = false
+  vim.bo[self.hint_buf].filetype = 'gitbutler-hint'
+
+  local width, row = self:_hint_geometry()
+  self.hint_win = vim.api.nvim_open_win(self.hint_buf, false, {
+    relative = 'win',
+    win = self.win,
+    anchor = 'NW',
+    row = row,
+    col = 0,
+    width = width,
+    height = 1,
+    style = 'minimal',
+    border = { '', '─', '', '', '', '', '', '' },
+    focusable = false,
+    noautocmd = true,
+    zindex = 50,
+  })
+  vim.wo[self.hint_win].winhighlight = 'NormalFloat:Normal,FloatBorder:GitButlerHelp'
+  vim.wo[self.hint_win].cursorline = false
+  vim.wo[self.hint_win].number = false
+  vim.wo[self.hint_win].relativenumber = false
+  vim.wo[self.hint_win].signcolumn = 'no'
+end
+
+---Reposition the hint window after window resize.
+function Buffer:_position_hint_window()
+  if not self.hint_win or not vim.api.nvim_win_is_valid(self.hint_win) then return end
+  if not self.win or not vim.api.nvim_win_is_valid(self.win) then return end
+  local width, row = self:_hint_geometry()
+  vim.api.nvim_win_set_config(self.hint_win, {
+    relative = 'win',
+    win = self.win,
+    anchor = 'NW',
+    row = row,
+    col = 0,
+    width = width,
+    height = 1,
+  })
+end
+
+---Tear down the hint window.
+function Buffer:_close_hint_window()
+  if self.hint_augroup then
+    pcall(vim.api.nvim_del_augroup_by_id, self.hint_augroup)
+    self.hint_augroup = nil
+  end
+  if self.hint_win and vim.api.nvim_win_is_valid(self.hint_win) then
+    pcall(vim.api.nvim_win_close, self.hint_win, true)
+  end
+  if self.hint_buf and vim.api.nvim_buf_is_valid(self.hint_buf) then
+    pcall(vim.api.nvim_buf_delete, self.hint_buf, { force = true })
+  end
+  self.hint_win = nil
+  self.hint_buf = nil
 end
 
 ---Get or create the buffer, then open it in a window.
@@ -76,14 +156,37 @@ function Buffer:open()
   vim.wo[self.win].wrap = false
   vim.wo[self.win].cursorline = true
 
+  self:_ensure_hint_window()
+
+  self.hint_augroup = vim.api.nvim_create_augroup('GitButlerHint' .. self.buf, { clear = true })
   vim.api.nvim_create_autocmd('CursorMoved', {
+    group = self.hint_augroup,
     buffer = self.buf,
     callback = function() self:update_hint() end,
+  })
+  vim.api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
+    group = self.hint_augroup,
+    callback = function() self:_position_hint_window() end,
+  })
+  vim.api.nvim_create_autocmd('BufWinEnter', {
+    group = self.hint_augroup,
+    buffer = self.buf,
+    callback = function()
+      self.win = vim.api.nvim_get_current_win()
+      self:_ensure_hint_window()
+      self:update_hint()
+    end,
+  })
+  vim.api.nvim_create_autocmd('BufWinLeave', {
+    group = self.hint_augroup,
+    buffer = self.buf,
+    callback = function() self:_close_hint_window() end,
   })
 end
 
 ---Close the buffer and window.
 function Buffer:close()
+  self:_close_hint_window()
   if self.win and vim.api.nvim_win_is_valid(self.win) then
     vim.api.nvim_win_close(self.win, true)
   end
@@ -98,15 +201,13 @@ end
 ---@param lines GitButlerLine[]
 function Buffer:render(lines)
   self.lines = lines
-  self.hint_line_idx = nil
   if not self.buf or not vim.api.nvim_buf_is_valid(self.buf) then return end
 
   vim.bo[self.buf].modifiable = true
   vim.api.nvim_buf_clear_namespace(self.buf, self.ns, 0, -1)
 
   local text_lines = {}
-  for i, line in ipairs(lines) do
-    if line.type == 'help' then self.hint_line_idx = i end
+  for _, line in ipairs(lines) do
     local indent = string.rep('  ', line.indent or 0)
     local prefix = ''
     if line.foldable then
@@ -132,14 +233,13 @@ function Buffer:render(lines)
 
   vim.bo[self.buf].modifiable = false
 
-  if self.hint_line_idx then self:update_hint() end
+  self:update_hint()
 end
 
----Update the hint line in place to reflect the current cursor context.
+---Refresh the pinned hint window contents based on current cursor context.
 function Buffer:update_hint()
-  if not self.view or not self.hint_line_idx then return end
-  if not self.buf or not vim.api.nvim_buf_is_valid(self.buf) then return end
-  if not self.win or not vim.api.nvim_win_is_valid(self.win) then return end
+  if not self.view then return end
+  if not self.hint_buf or not vim.api.nvim_buf_is_valid(self.hint_buf) then return end
 
   local line = self:get_cursor_line()
   local line_type = line and line.type or nil
@@ -147,20 +247,15 @@ function Buffer:update_hint()
   local hints = require('gitbutler.ui.hints')
   local text, key_ranges = hints.for_context(self.view, line_type, selectable)
 
-  local idx = self.hint_line_idx
-  local text_changed = not (self.lines[idx] and self.lines[idx].text == text)
-
-  vim.bo[self.buf].modifiable = true
-  vim.api.nvim_buf_clear_namespace(self.buf, self.ns, idx - 1, idx)
-  if text_changed then
-    vim.api.nvim_buf_set_lines(self.buf, idx - 1, idx, false, { text })
-    if self.lines[idx] then self.lines[idx].text = text end
-  end
-  vim.api.nvim_buf_add_highlight(self.buf, self.ns, 'GitButlerHelp', idx - 1, 0, -1)
+  vim.bo[self.hint_buf].modifiable = true
+  vim.api.nvim_buf_clear_namespace(self.hint_buf, self.ns, 0, -1)
+  vim.api.nvim_buf_set_lines(self.hint_buf, 0, -1, false, { ' ' .. text })
+  vim.api.nvim_buf_add_highlight(self.hint_buf, self.ns, 'GitButlerHelp', 0, 0, -1)
   for _, range in ipairs(key_ranges) do
-    vim.api.nvim_buf_add_highlight(self.buf, self.ns, 'GitButlerHelpKey', idx - 1, range[1], range[2])
+    -- shift by 1 to account for leading space
+    vim.api.nvim_buf_add_highlight(self.hint_buf, self.ns, 'GitButlerHelpKey', 0, range[1] + 1, range[2] + 1)
   end
-  vim.bo[self.buf].modifiable = false
+  vim.bo[self.hint_buf].modifiable = false
 end
 
 ---Get the structured line data for the line under the cursor.
