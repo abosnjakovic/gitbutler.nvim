@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.2 — 2026-04-24
+
+- feat: context-aware bottom hint line
+- fix: after a insert required actin like creating a branch, go back to normal mode
+- fix: toggle diff mode with tab, tab now closes diff views
+
 ## 0.1.1 — 2026-04-09
 
 - make release target
