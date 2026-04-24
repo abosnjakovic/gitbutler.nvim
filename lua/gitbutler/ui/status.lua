@@ -1,5 +1,6 @@
 local cli = require('gitbutler.cli')
 local buffer_mod = require('gitbutler.ui.buffer')
+local hints = require('gitbutler.ui.hints')
 
 local M = {}
 
@@ -193,7 +194,7 @@ local function build_lines(buf, data)
     add('Base: ' .. (mb.commitId or ''):sub(1, 7) .. ' ' .. msg, 'GitButlerHelp', 'info', nil)
   end
 
-  add('Press ? for help', 'GitButlerHelp', 'help', nil)
+  add(hints.for_context('status', nil), 'GitButlerHelp', 'help', nil)
 
   return lines
 end
@@ -206,6 +207,7 @@ function M.open()
   end
 
   local buf = buffer_mod.Buffer.new()
+  buf.view = 'status'
   M.instance = buf
 
   local actions = require('gitbutler.actions')

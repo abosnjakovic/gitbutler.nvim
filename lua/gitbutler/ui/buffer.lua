@@ -32,6 +32,8 @@ function Buffer.new()
   self.keymaps = {}
   self.fold_state = {}
   self.selected = {}
+  self.view = nil
+  self.hint_line_idx = nil
   return self
 end
 
@@ -73,6 +75,11 @@ function Buffer:open()
   vim.wo[self.win].foldcolumn = '0'
   vim.wo[self.win].wrap = false
   vim.wo[self.win].cursorline = true
+
+  vim.api.nvim_create_autocmd('CursorMoved', {
+    buffer = self.buf,
+    callback = function() self:update_hint() end,
+  })
 end
 
 ---Close the buffer and window.
@@ -91,13 +98,15 @@ end
 ---@param lines GitButlerLine[]
 function Buffer:render(lines)
   self.lines = lines
+  self.hint_line_idx = nil
   if not self.buf or not vim.api.nvim_buf_is_valid(self.buf) then return end
 
   vim.bo[self.buf].modifiable = true
   vim.api.nvim_buf_clear_namespace(self.buf, self.ns, 0, -1)
 
   local text_lines = {}
-  for _, line in ipairs(lines) do
+  for i, line in ipairs(lines) do
+    if line.type == 'help' then self.hint_line_idx = i end
     local indent = string.rep('  ', line.indent or 0)
     local prefix = ''
     if line.foldable then
@@ -121,6 +130,36 @@ function Buffer:render(lines)
     end
   end
 
+  vim.bo[self.buf].modifiable = false
+
+  if self.hint_line_idx then self:update_hint() end
+end
+
+---Update the hint line in place to reflect the current cursor context.
+function Buffer:update_hint()
+  if not self.view or not self.hint_line_idx then return end
+  if not self.buf or not vim.api.nvim_buf_is_valid(self.buf) then return end
+  if not self.win or not vim.api.nvim_win_is_valid(self.win) then return end
+
+  local line = self:get_cursor_line()
+  local line_type = line and line.type or nil
+  local selectable = line ~= nil and (line.type == 'commit' or line.type == 'file' or line.type == 'committed_file')
+  local hints = require('gitbutler.ui.hints')
+  local text, key_ranges = hints.for_context(self.view, line_type, selectable)
+
+  local idx = self.hint_line_idx
+  local text_changed = not (self.lines[idx] and self.lines[idx].text == text)
+
+  vim.bo[self.buf].modifiable = true
+  vim.api.nvim_buf_clear_namespace(self.buf, self.ns, idx - 1, idx)
+  if text_changed then
+    vim.api.nvim_buf_set_lines(self.buf, idx - 1, idx, false, { text })
+    if self.lines[idx] then self.lines[idx].text = text end
+  end
+  vim.api.nvim_buf_add_highlight(self.buf, self.ns, 'GitButlerHelp', idx - 1, 0, -1)
+  for _, range in ipairs(key_ranges) do
+    vim.api.nvim_buf_add_highlight(self.buf, self.ns, 'GitButlerHelpKey', idx - 1, range[1], range[2])
+  end
   vim.bo[self.buf].modifiable = false
 end
 

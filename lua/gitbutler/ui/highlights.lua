@@ -14,7 +14,7 @@ function M.setup()
     GitButlerFileRenamed = { link = 'diffChanged' },
     GitButlerUnassigned = { link = 'WarningMsg' },
     GitButlerHelp = { link = 'Comment' },
-    GitButlerHelpKey = { link = 'Special' },
+    GitButlerHelpKey = { link = 'Identifier' },
     GitButlerSelected = { link = 'Visual' },
     GitButlerPickerSelected = { link = 'CursorLine' },
     GitButlerPickerBranch = { link = 'String' },
