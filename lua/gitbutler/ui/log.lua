@@ -91,7 +91,7 @@ local function build_lines(buf, data)
   end
 
   add('', nil, 'blank', nil)
-  add('d=diff  r=reword  S=squash  q=close  <Tab>=toggle', 'GitButlerHelp', 'help', nil)
+  add('d=diff  r=reword  S=squash  q=close  <Tab>=toggle/close-diff', 'GitButlerHelp', 'help', nil)
 
   return lines
 end
@@ -157,6 +157,7 @@ function M.open(branch_name)
         end
 
         vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = diff_buf })
+        vim.keymap.set('n', '<Tab>', '<cmd>close<CR>', { buffer = diff_buf })
         return
       end
 
