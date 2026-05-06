@@ -7,6 +7,7 @@ function M.setup()
     GitButlerBranchUnapplied = { link = 'Comment' },
     GitButlerCommitHash = { link = 'Identifier' },
     GitButlerCommitMessage = { link = 'Normal' },
+    GitButlerCommitBody = { link = 'Comment' },
     GitButlerSection = { link = 'Label' },
     GitButlerFileMod = { link = 'diffChanged' },
     GitButlerFileAdd = { link = 'diffAdded' },
