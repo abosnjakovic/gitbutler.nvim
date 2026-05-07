@@ -66,6 +66,30 @@ local function build_lines(buf, data)
       fold_id = fold_id,
     }, { foldable = true, folded = is_folded })
 
+    if not is_folded then
+      local body_lines = {}
+      if commit.full_message and commit.full_message ~= '' then
+        local parts = vim.split(commit.full_message, '\n', { plain = true })
+        table.remove(parts, 1)
+        while #parts > 0 and parts[#parts]:match('^%s*$') do
+          table.remove(parts)
+        end
+        while #parts > 0 and parts[1]:match('^%s*$') do
+          table.remove(parts, 1)
+        end
+        body_lines = parts
+      end
+
+      for _, body_line in ipairs(body_lines) do
+        add(body_line, 'GitButlerCommitBody', 'commit_body', nil, { indent = 1 })
+      end
+
+      local has_files = commit.files and #commit.files > 0
+      if #body_lines > 0 and has_files then
+        add('', nil, 'blank', nil, { indent = 1 })
+      end
+    end
+
     if not is_folded and commit.files then
       for _, file in ipairs(commit.files) do
         local status = file.status or 'modified'
