@@ -6,6 +6,12 @@ Zero dependencies. Requires neovim 0.10+ and the [`but` CLI](https://docs.gitbut
 
 <img width="2066" height="1202" alt="image" src="https://github.com/user-attachments/assets/a32f66e2-eb5b-49ac-a7e4-eeb9d823731f" />
 
+Expanded status view:
+<img width="1063" height="1871" alt="image" src="https://github.com/user-attachments/assets/3ffc858e-0bb7-4366-8f79-1de1f93e7328" />
+
+Timeline view (t):
+<img width="1065" height="469" alt="image" src="https://github.com/user-attachments/assets/e254c65a-f8a7-44a9-b9ee-9dd660a78bd7" />
+
 
 ## Installation
 
