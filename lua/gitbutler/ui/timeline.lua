@@ -105,17 +105,28 @@ function M.build_lines(buf, commits, days)
       fold_id = fold_id,
     }, { foldable = true, folded = is_folded })
 
-    -- Expanded file list (when unfolded)
-    if not is_folded and commit._files then
-      for _, file in ipairs(commit._files) do
-        local hl = 'GitButlerFileMod'
-        if file.status == 'A' then hl = 'GitButlerFileAdd'
-        elseif file.status == 'D' then hl = 'GitButlerFileDel'
+    -- Expanded body + file list (when unfolded)
+    if not is_folded then
+      if commit._body and #commit._body > 0 then
+        for _, body_line in ipairs(commit._body) do
+          add(body_line, 'GitButlerCommitBody', 'timeline_commit_body', nil, { indent = 1 })
         end
-        add(file.status .. '  ' .. file.path, hl, 'timeline_file', {
-          path = file.path,
-          sha = commit.sha,
-        }, { indent = 1 })
+      end
+
+      if commit._files and #commit._files > 0 then
+        if commit._body and #commit._body > 0 then
+          add('', nil, 'blank', nil, { indent = 1 })
+        end
+        for _, file in ipairs(commit._files) do
+          local hl = 'GitButlerFileMod'
+          if file.status == 'A' then hl = 'GitButlerFileAdd'
+          elseif file.status == 'D' then hl = 'GitButlerFileDel'
+          end
+          add(file.status .. '  ' .. file.path, hl, 'timeline_file', {
+            path = file.path,
+            sha = commit.sha,
+          }, { indent = 1 })
+        end
       end
     end
   end
@@ -159,6 +170,27 @@ function M.fetch_files(sha)
   ):wait()
   if result.code ~= 0 or not result.stdout then return {} end
   return M.parse_diff_tree(result.stdout)
+end
+
+---Fetch the full commit message body for a commit (sync).
+---Returns body lines (subject stripped, leading/trailing blanks trimmed).
+---@param sha string Full commit SHA
+---@return string[] body_lines
+function M.fetch_body(sha)
+  local result = vim.system(
+    { 'git', 'log', '-1', '--format=%B', sha },
+    { text = true }
+  ):wait()
+  if result.code ~= 0 or not result.stdout then return {} end
+  local parts = vim.split(result.stdout, '\n', { plain = true })
+  table.remove(parts, 1)
+  while #parts > 0 and parts[#parts]:match('^%s*$') do
+    table.remove(parts)
+  end
+  while #parts > 0 and parts[1]:match('^%s*$') do
+    table.remove(parts, 1)
+  end
+  return parts
 end
 
 ---Apply per-field highlights to timeline commit lines after render.
@@ -224,12 +256,15 @@ function M.open()
       if currently_folded == nil then currently_folded = true end
 
       if currently_folded then
-        -- Expanding: fetch files if not cached
+        -- Expanding: fetch files and body if not cached
         local sha = line.data.sha
         for _, c in ipairs(commits) do
           if c.sha == sha then
             if not c._files then
               c._files = M.fetch_files(sha)
+            end
+            if not c._body then
+              c._body = M.fetch_body(sha)
             end
             break
           end

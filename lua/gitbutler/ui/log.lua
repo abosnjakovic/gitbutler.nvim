@@ -17,7 +17,9 @@ end
 
 ---Build lines from `but show <branch> --json` output.
 ---Shape: { branch, commits: [{ sha, short_sha, message, full_message, author_name, timestamp, files_changed, insertions, deletions, files }] }
-local function build_lines(buf, data)
+---@param buf table GitButlerBuffer instance (for fold state)
+---@param data table show output
+function M.build_lines(buf, data)
   local lines = {}
 
   local function add(text, hl, line_type, data_tbl, opts)
@@ -164,7 +166,7 @@ function M.open(branch_name)
       if line.type == 'commit' and line.data and line.data.fold_id then
         local id = line.data.fold_id
         b.fold_state[id] = not b.fold_state[id]
-        local lines = build_lines(b, data)
+        local lines = M.build_lines(b, data)
         b:render(lines)
       end
     end)
@@ -229,7 +231,7 @@ function M.open(branch_name)
       end, { buffer = buf.buf, nowait = true })
     end
 
-    local lines = build_lines(buf, data)
+    local lines = M.build_lines(buf, data)
     buf:render(lines)
   end)
 end
@@ -245,7 +247,7 @@ function M.refresh(branch_name)
       return
     end
     if type(data) ~= 'table' then return end
-    local lines = build_lines(buf, data)
+    local lines = M.build_lines(buf, data)
     buf:render(lines)
   end)
 end
