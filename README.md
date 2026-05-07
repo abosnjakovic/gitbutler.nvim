@@ -125,7 +125,7 @@ q/Esc    Close
 
 ### Commit log (l)
 
-Shows commit history with per-file stats. Commits are foldable to reveal their changed files.
+Shows commit history with per-file stats. Commits are foldable to reveal the full message body and the changed files.
 
 ```
 <Tab>    Toggle file list / inline diff on files
