@@ -1,6 +1,6 @@
-local h = require('tests.gitbutler.helpers')
-local cli = require('gitbutler.cli')
 local actions = require('gitbutler.actions')
+local cli = require('gitbutler.cli')
+local h = require('tests.gitbutler.helpers')
 local test, assert_eq, assert_truthy = h.test, h.assert_eq, h.assert_truthy
 
 print('\n=== Action tests ===')
@@ -8,17 +8,23 @@ print('\n=== Action tests ===')
 test('actions.toggle_select moves cursor down if successful', function()
   local buf = h.mock_buffer()
   buf.buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(buf.buf, 0, -1, false, { "line 1", "line 2", "line 3" })
+  vim.api.nvim_buf_set_lines(buf.buf, 0, -1, false, { 'line 1', 'line 2', 'line 3' })
 
   buf.win = vim.api.nvim_open_win(buf.buf, true, {
-    relative = 'editor', width = 10, height = 10, row = 0, col = 0
+    relative = 'editor',
+    width = 10,
+    height = 10,
+    row = 0,
+    col = 0,
   })
 
   vim.api.nvim_win_set_cursor(buf.win, { 1, 0 })
 
-  buf.toggle_select = function() return true end
+  buf.toggle_select = function()
+    return true
+  end
   buf.render = function() end
-  buf.lines = { "dummy" }
+  buf.lines = { 'dummy' }
 
   actions.toggle_select(buf)
 
@@ -38,18 +44,20 @@ test('actions.push does a pull first', function()
 
   cli.pull = function(cb)
     pull_called = true
-    cb(nil, "pulled")
+    cb(nil, 'pulled')
   end
 
   cli.push = function(branch_name, cb)
     assert_truthy(pull_called, 'pull must be called before push')
     push_called = true
-    assert_eq("test-branch", branch_name)
-    cb(nil, "pushed")
+    assert_eq('test-branch', branch_name)
+    cb(nil, 'pushed')
   end
 
   local buf = h.mock_buffer()
-  buf.get_cursor_branch = function() return { name = "test-branch" } end
+  buf.get_cursor_branch = function()
+    return { name = 'test-branch' }
+  end
 
   local original_notify = vim.notify
   vim.notify = function() end
@@ -73,14 +81,14 @@ test('actions.push_all does a pull first', function()
 
   cli.pull = function(cb)
     pull_called = true
-    cb(nil, "pulled")
+    cb(nil, 'pulled')
   end
 
   cli.push = function(branch_name, cb)
     assert_truthy(pull_called, 'pull must be called before push_all')
     push_called = true
     assert_eq(nil, branch_name)
-    cb(nil, "pushed")
+    cb(nil, 'pushed')
   end
 
   local buf = h.mock_buffer()
@@ -134,8 +142,12 @@ test('commit with selected files passes only those file IDs via -p', function()
   }
   buf.selected = { f1 = true, f3 = true }
   buf._cursor_row = 1
-  buf.get_cursor_branch = function() return { name = 'new-feature' } end
-  buf.clear_selection = function(self) self.selected = {} end
+  buf.get_cursor_branch = function()
+    return { name = 'new-feature' }
+  end
+  buf.clear_selection = function(self)
+    self.selected = {}
+  end
 
   actions.commit(buf)
 
@@ -177,8 +189,12 @@ test('commit without selection commits all (no file_ids)', function()
   }
   buf.selected = {}
   buf._cursor_row = 1
-  buf.get_cursor_branch = function() return { name = 'main' } end
-  buf.clear_selection = function(self) self.selected = {} end
+  buf.get_cursor_branch = function()
+    return { name = 'main' }
+  end
+  buf.clear_selection = function(self)
+    self.selected = {}
+  end
 
   actions.commit(buf)
 

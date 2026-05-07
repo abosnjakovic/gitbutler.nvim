@@ -59,8 +59,8 @@ function M.setup(opts)
     require('gitbutler.ui.branch').open()
   end, { desc = 'GitButler branch management' })
 
-  vim.api.nvim_create_user_command('ButlerLog', function(opts)
-    local branch = opts.args ~= '' and opts.args or nil
+  vim.api.nvim_create_user_command('ButlerLog', function(cmd)
+    local branch = cmd.args ~= '' and cmd.args or nil
     if branch then
       require('gitbutler.ui.log').open(branch)
     else
@@ -73,9 +73,14 @@ function M.setup(opts)
         local name
         for _, stack in ipairs(data.appliedStacks or {}) do
           for _, head in ipairs(stack.heads or {}) do
-            if head.name then name = head.name; break end
+            if head.name then
+              name = head.name
+              break
+            end
           end
-          if name then break end
+          if name then
+            break
+          end
         end
         if name then
           require('gitbutler.ui.log').open(name)

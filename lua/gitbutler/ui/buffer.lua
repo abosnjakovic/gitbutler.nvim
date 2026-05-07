@@ -1,7 +1,5 @@
 local config = require('gitbutler.config')
 
-local M = {}
-
 ---@class GitButlerLine
 ---@field text string Display text for the line
 ---@field hl? string Highlight group name
@@ -49,10 +47,16 @@ end
 
 ---Create the floating hint window pinned to the bottom of self.win, if absent.
 function Buffer:_ensure_hint_window()
-  if not self.win or not vim.api.nvim_win_is_valid(self.win) then return end
+  if not self.win or not vim.api.nvim_win_is_valid(self.win) then
+    return
+  end
 
-  if self.hint_win and vim.api.nvim_win_is_valid(self.hint_win)
-     and self.hint_buf and vim.api.nvim_buf_is_valid(self.hint_buf) then
+  if
+    self.hint_win
+    and vim.api.nvim_win_is_valid(self.hint_win)
+    and self.hint_buf
+    and vim.api.nvim_buf_is_valid(self.hint_buf)
+  then
     self:_position_hint_window()
     return
   end
@@ -87,8 +91,12 @@ end
 
 ---Reposition the hint window after window resize.
 function Buffer:_position_hint_window()
-  if not self.hint_win or not vim.api.nvim_win_is_valid(self.hint_win) then return end
-  if not self.win or not vim.api.nvim_win_is_valid(self.win) then return end
+  if not self.hint_win or not vim.api.nvim_win_is_valid(self.hint_win) then
+    return
+  end
+  if not self.win or not vim.api.nvim_win_is_valid(self.win) then
+    return
+  end
   local width, row = self:_hint_geometry()
   vim.api.nvim_win_set_config(self.hint_win, {
     relative = 'win',
@@ -143,7 +151,8 @@ function Buffer:open()
     vim.api.nvim_win_set_buf(self.win, self.buf)
   elseif kind == 'float' then
     local float = require('gitbutler.ui.float')
-    _, self.win = float.open({ buf = self.buf })
+    local _, win = float.open({ buf = self.buf })
+    self.win = win
   else
     self.win = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(self.win, self.buf)
@@ -162,11 +171,15 @@ function Buffer:open()
   vim.api.nvim_create_autocmd('CursorMoved', {
     group = self.hint_augroup,
     buffer = self.buf,
-    callback = function() self:update_hint() end,
+    callback = function()
+      self:update_hint()
+    end,
   })
   vim.api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
     group = self.hint_augroup,
-    callback = function() self:_position_hint_window() end,
+    callback = function()
+      self:_position_hint_window()
+    end,
   })
   vim.api.nvim_create_autocmd('BufWinEnter', {
     group = self.hint_augroup,
@@ -180,7 +193,9 @@ function Buffer:open()
   vim.api.nvim_create_autocmd('BufWinLeave', {
     group = self.hint_augroup,
     buffer = self.buf,
-    callback = function() self:_close_hint_window() end,
+    callback = function()
+      self:_close_hint_window()
+    end,
   })
 end
 
@@ -201,7 +216,9 @@ end
 ---@param lines GitButlerLine[]
 function Buffer:render(lines)
   self.lines = lines
-  if not self.buf or not vim.api.nvim_buf_is_valid(self.buf) then return end
+  if not self.buf or not vim.api.nvim_buf_is_valid(self.buf) then
+    return
+  end
 
   vim.bo[self.buf].modifiable = true
   vim.api.nvim_buf_clear_namespace(self.buf, self.ns, 0, -1)
@@ -238,8 +255,12 @@ end
 
 ---Refresh the pinned hint window contents based on current cursor context.
 function Buffer:update_hint()
-  if not self.view then return end
-  if not self.hint_buf or not vim.api.nvim_buf_is_valid(self.hint_buf) then return end
+  if not self.view then
+    return
+  end
+  if not self.hint_buf or not vim.api.nvim_buf_is_valid(self.hint_buf) then
+    return
+  end
 
   local line = self:get_cursor_line()
   local line_type = line and line.type or nil
@@ -261,7 +282,9 @@ end
 ---Get the structured line data for the line under the cursor.
 ---@return GitButlerLine?
 function Buffer:get_cursor_line()
-  if not self.win or not vim.api.nvim_win_is_valid(self.win) then return nil end
+  if not self.win or not vim.api.nvim_win_is_valid(self.win) then
+    return nil
+  end
   local row = vim.api.nvim_win_get_cursor(self.win)[1]
   return self.lines[row]
 end
@@ -270,7 +293,9 @@ end
 ---Walk up from cursor to find the nearest branch header.
 ---@return table? branch data
 function Buffer:get_cursor_branch()
-  if not self.win or not vim.api.nvim_win_is_valid(self.win) then return nil end
+  if not self.win or not vim.api.nvim_win_is_valid(self.win) then
+    return nil
+  end
   local row = vim.api.nvim_win_get_cursor(self.win)[1]
   for i = row, 1, -1 do
     local line = self.lines[i]
@@ -285,7 +310,9 @@ end
 ---Walks up from cursor to find the closest foldable header.
 ---@return string?
 function Buffer:toggle_fold()
-  if not self.win or not vim.api.nvim_win_is_valid(self.win) then return nil end
+  if not self.win or not vim.api.nvim_win_is_valid(self.win) then
+    return nil
+  end
   local row = vim.api.nvim_win_get_cursor(self.win)[1]
 
   -- Walk up from cursor to find nearest foldable line
@@ -314,7 +341,9 @@ end
 ---@param line GitButlerLine
 ---@return string?
 function Buffer:select_key(line)
-  if not line or not line.data then return nil end
+  if not line or not line.data then
+    return nil
+  end
   if line.type == 'file' or line.type == 'committed_file' then
     return line.data.cli_id
   elseif line.type == 'commit' then
@@ -327,12 +356,16 @@ end
 function Buffer:toggle_select()
   local row = self._cursor_row
   if not row then
-    if not self.win or not vim.api.nvim_win_is_valid(self.win) then return end
+    if not self.win or not vim.api.nvim_win_is_valid(self.win) then
+      return
+    end
     row = vim.api.nvim_win_get_cursor(self.win)[1]
   end
   local line = self.lines[row]
   local key = self:select_key(line)
-  if not key then return false end
+  if not key then
+    return false
+  end
   if self.selected[key] then
     self.selected[key] = nil
   else

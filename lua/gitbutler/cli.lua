@@ -71,8 +71,7 @@ function M.run_sync(args, opts)
   local result = vim.system(cmd, { cwd = opts.cwd, text = true }):wait()
 
   if result.code ~= 0 then
-    local msg = (result.stderr and result.stderr ~= '') and result.stderr
-      or ('but exited with code ' .. result.code)
+    local msg = (result.stderr and result.stderr ~= '') and result.stderr or ('but exited with code ' .. result.code)
     return vim.trim(msg), nil
   end
 

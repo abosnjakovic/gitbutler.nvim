@@ -1,5 +1,5 @@
-local cli = require('gitbutler.cli')
 local buffer_mod = require('gitbutler.ui.buffer')
+local cli = require('gitbutler.cli')
 
 local M = {}
 
@@ -16,7 +16,9 @@ local change_display = {
 
 local function change_hl(change_type)
   local d = change_display[change_type]
-  if d then return d.prefix, d.hl end
+  if d then
+    return d.prefix, d.hl
+  end
   return 'M', 'GitButlerFileMod'
 end
 
@@ -221,7 +223,9 @@ function M.open()
   buf:on('push_all', actions.push_all)
   buf:on('pull', actions.pull)
   buf:on('close', actions.close)
-  buf:on('refresh', function() M.refresh() end)
+  buf:on('refresh', function()
+    M.refresh()
+  end)
   buf:on('branch_new', actions.branch_new)
   buf:on('discard', actions.discard)
   buf:on('toggle_fold', actions.toggle_fold)
@@ -239,11 +243,12 @@ end
 
 ---Fetch recent commits via git log (sync, fast).
 local function get_recent_commits(count)
-  local result = vim.system(
-    { 'git', 'log', '--oneline', '--no-decorate', '-n', tostring(count or 10) },
-    { text = true }
-  ):wait()
-  if result.code ~= 0 or not result.stdout then return {} end
+  local result = vim
+    .system({ 'git', 'log', '--oneline', '--no-decorate', '-n', tostring(count or 10) }, { text = true })
+    :wait()
+  if result.code ~= 0 or not result.stdout then
+    return {}
+  end
 
   local commits = {}
   for line in result.stdout:gmatch('[^\n]+') do
@@ -257,7 +262,9 @@ end
 
 ---Refresh the status buffer with fresh data from `but status`.
 function M.refresh()
-  if not M.instance then return end
+  if not M.instance then
+    return
+  end
   local buf = M.instance
 
   cli.status(function(err, data)

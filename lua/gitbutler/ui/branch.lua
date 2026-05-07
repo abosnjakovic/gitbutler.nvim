@@ -103,8 +103,12 @@ function M.open()
     end
 
     local function close()
-      if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
-      if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_delete(buf, { force = true }) end
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+      end
+      if vim.api.nvim_buf_is_valid(buf) then
+        vim.api.nvim_buf_delete(buf, { force = true })
+      end
     end
 
     local function get_entry()
@@ -116,19 +120,25 @@ function M.open()
       close()
       refresh_status()
       -- Small delay to let but process, then reopen
-      vim.defer_fn(function() M.open() end, 200)
+      vim.defer_fn(function()
+        M.open()
+      end, 200)
     end
 
     -- Apply branch
     vim.keymap.set('n', 'a', function()
       local e = get_entry()
-      if not e or e.applied then return end
+      if not e or e.applied then
+        return
+      end
       close()
       cli.apply(e.name, function(apply_err, _)
         notify('apply ' .. e.name, apply_err)
         if not apply_err then
           refresh_status()
-          vim.defer_fn(function() M.open() end, 200)
+          vim.defer_fn(function()
+            M.open()
+          end, 200)
         end
       end)
     end, { buffer = buf })
@@ -136,13 +146,17 @@ function M.open()
     -- Unapply branch
     vim.keymap.set('n', 'u', function()
       local e = get_entry()
-      if not e or not e.applied then return end
+      if not e or not e.applied then
+        return
+      end
       close()
       cli.unapply(e.name, function(unapply_err, _)
         notify('unapply ' .. e.name, unapply_err)
         if not unapply_err then
           refresh_status()
-          vim.defer_fn(function() M.open() end, 200)
+          vim.defer_fn(function()
+            M.open()
+          end, 200)
         end
       end)
     end, { buffer = buf })
@@ -156,7 +170,9 @@ function M.open()
         on_submit = function(name)
           cli.branch_new(name, function(new_err, _)
             notify('branch new ' .. name, new_err)
-            if not new_err then reopen() end
+            if not new_err then
+              reopen()
+            end
           end)
         end,
       })
@@ -165,13 +181,19 @@ function M.open()
     -- Delete branch
     vim.keymap.set('n', 'd', function()
       local e = get_entry()
-      if not e then return end
+      if not e then
+        return
+      end
       vim.ui.select({ 'Yes', 'No' }, { prompt = 'Delete branch ' .. e.name .. '?' }, function(choice)
-        if choice ~= 'Yes' then return end
+        if choice ~= 'Yes' then
+          return
+        end
         close()
         cli.branch_delete(e.name, function(del_err, _)
           notify('delete ' .. e.name, del_err)
-          if not del_err then reopen() end
+          if not del_err then
+            reopen()
+          end
         end)
       end)
     end, { buffer = buf })
@@ -179,7 +201,9 @@ function M.open()
     -- Rename branch
     vim.keymap.set('n', 'r', function()
       local e = get_entry()
-      if not e then return end
+      if not e then
+        return
+      end
       close()
       float.input({
         title = 'Rename ' .. e.name,
@@ -188,7 +212,9 @@ function M.open()
         on_submit = function(new_name)
           cli.run({ 'reword', e.name, '-m', new_name, '--json' }, function(ren_err, _)
             notify('rename → ' .. new_name, ren_err)
-            if not ren_err then reopen() end
+            if not ren_err then
+              reopen()
+            end
           end)
         end,
       })
@@ -201,7 +227,9 @@ function M.open()
     -- Enter: show branch details
     vim.keymap.set('n', '<CR>', function()
       local e = get_entry()
-      if not e then return end
+      if not e then
+        return
+      end
       close()
       -- Open status filtered to this branch context
       vim.notify('gitbutler: ' .. e.name .. (e.applied and ' (applied)' or ' (unapplied)'), vim.log.levels.INFO)

@@ -1,13 +1,8 @@
 local fixtures = require('tests.gitbutler.fixtures')
 
 describe('branch name extraction', function()
-  local actions -- loaded after setup
-
   setup(function()
     require('gitbutler').setup()
-    -- We need to access extract_branch_names which is local in actions.lua
-    -- Test through the branch list UI builder instead, or test the data we pass to the picker
-    actions = require('gitbutler.actions')
   end)
 
   it('branch list fixture has correct structure', function()
@@ -62,9 +57,7 @@ describe('branch UI builder', function()
     local float = require('gitbutler.ui.float')
     local original_open = float.open
 
-    local opened = false
-    float.open = function(opts)
-      opened = true
+    float.open = function(_opts)
       -- Return fake buf/win
       local buf = vim.api.nvim_create_buf(false, true)
       local win = vim.api.nvim_open_win(buf, false, {

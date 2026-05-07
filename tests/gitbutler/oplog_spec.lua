@@ -1,6 +1,7 @@
-local h = require('tests.gitbutler.helpers')
 local fixtures = require('tests.gitbutler.fixtures')
-local test, assert_eq, assert_truthy, assert_falsy, assert_type = h.test, h.assert_eq, h.assert_truthy, h.assert_falsy, h.assert_type
+local h = require('tests.gitbutler.helpers')
+local test, assert_eq, assert_truthy, assert_falsy, assert_type =
+  h.test, h.assert_eq, h.assert_truthy, h.assert_falsy, h.assert_type
 
 print('\n=== Oplog tests ===')
 

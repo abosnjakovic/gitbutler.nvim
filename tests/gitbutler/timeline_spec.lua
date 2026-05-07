@@ -1,5 +1,5 @@
-local h = require('tests.gitbutler.helpers')
 local fixtures = require('tests.gitbutler.fixtures')
+local h = require('tests.gitbutler.helpers')
 local timeline = require('gitbutler.ui.timeline')
 local test, assert_eq, assert_truthy = h.test, h.assert_eq, h.assert_truthy
 
@@ -61,7 +61,9 @@ test('build_lines groups commits by date', function()
 
   local headers = {}
   for _, l in ipairs(lines) do
-    if l.type == 'date_header' then table.insert(headers, l) end
+    if l.type == 'date_header' then
+      table.insert(headers, l)
+    end
   end
 
   assert_eq(2, #headers)
@@ -75,7 +77,9 @@ test('build_lines creates timeline_commit lines with correct data', function()
 
   local commits = {}
   for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit' then table.insert(commits, l) end
+    if l.type == 'timeline_commit' then
+      table.insert(commits, l)
+    end
   end
 
   assert_eq(3, #commits)
@@ -93,7 +97,10 @@ test('build_lines renders refs in commit text when present', function()
 
   local first_commit
   for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit' then first_commit = l; break end
+    if l.type == 'timeline_commit' then
+      first_commit = l
+      break
+    end
   end
 
   assert_truthy(first_commit.text:find('main'))
@@ -108,7 +115,10 @@ test('build_lines omits ref column when refs empty', function()
   for _, l in ipairs(lines) do
     if l.type == 'timeline_commit' then
       count = count + 1
-      if count == 3 then third_commit = l; break end
+      if count == 3 then
+        third_commit = l
+        break
+      end
     end
   end
 
@@ -122,7 +132,9 @@ test('build_lines handles empty commit list', function()
   assert_truthy(#lines >= 2)
   local commits = {}
   for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit' then table.insert(commits, l) end
+    if l.type == 'timeline_commit' then
+      table.insert(commits, l)
+    end
   end
   assert_eq(0, #commits)
 end)
@@ -131,7 +143,12 @@ test('build_lines renders body lines for expanded commit when _body cached', fun
   local buf = h.mock_buffer()
   local commits = {
     {
-      sha = 'aa', short_sha = 'aa', author = 'x', date = '2026-04-08', refs = '', message = 'subj',
+      sha = 'aa',
+      short_sha = 'aa',
+      author = 'x',
+      date = '2026-04-08',
+      refs = '',
+      message = 'subj',
       _body = { 'first body line', 'second body line' },
       _files = { { path = 'f.lua', status = 'M' } },
     },
@@ -141,8 +158,12 @@ test('build_lines renders body lines for expanded commit when _body cached', fun
   local body_count = 0
   local file_count = 0
   for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit_body' then body_count = body_count + 1 end
-    if l.type == 'timeline_file' then file_count = file_count + 1 end
+    if l.type == 'timeline_commit_body' then
+      body_count = body_count + 1
+    end
+    if l.type == 'timeline_file' then
+      file_count = file_count + 1
+    end
   end
   assert_eq(2, body_count)
   assert_eq(1, file_count)
@@ -152,7 +173,12 @@ test('build_lines omits body when _body empty', function()
   local buf = h.mock_buffer()
   local commits = {
     {
-      sha = 'bb', short_sha = 'bb', author = 'x', date = '2026-04-08', refs = '', message = 'subj',
+      sha = 'bb',
+      short_sha = 'bb',
+      author = 'x',
+      date = '2026-04-08',
+      refs = '',
+      message = 'subj',
       _body = {},
       _files = { { path = 'f.lua', status = 'M' } },
     },
@@ -160,7 +186,9 @@ test('build_lines omits body when _body empty', function()
   buf.fold_state['timeline:bb'] = false
   local lines = timeline.build_lines(buf, commits, 7)
   for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit_body' then error('unexpected body line') end
+    if l.type == 'timeline_commit_body' then
+      error('unexpected body line')
+    end
   end
 end)
 
@@ -170,7 +198,10 @@ test('build_lines marks commits as foldable', function()
 
   local commit
   for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit' then commit = l; break end
+    if l.type == 'timeline_commit' then
+      commit = l
+      break
+    end
   end
 
   assert_truthy(commit.foldable)

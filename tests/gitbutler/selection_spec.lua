@@ -1,5 +1,5 @@
-local h = require('tests.gitbutler.helpers')
 local buffer_mod = require('gitbutler.ui.buffer')
+local h = require('tests.gitbutler.helpers')
 local test, assert_eq, assert_truthy, assert_falsy = h.test, h.assert_eq, h.assert_truthy, h.assert_falsy
 
 print('\n=== Selection tests ===')

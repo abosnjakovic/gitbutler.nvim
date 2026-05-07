@@ -12,7 +12,9 @@ local function notify(action, err)
 end
 
 local function format_time(timestamp)
-  if not timestamp or type(timestamp) ~= 'number' then return '' end
+  if not timestamp or type(timestamp) ~= 'number' then
+    return ''
+  end
   return os.date('%Y-%m-%d %H:%M', timestamp)
 end
 
@@ -80,8 +82,12 @@ function M.open()
     end
 
     local function close()
-      if vim.api.nvim_win_is_valid(win) then vim.api.nvim_win_close(win, true) end
-      if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_delete(buf, { force = true }) end
+      if vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_win_close(win, true)
+      end
+      if vim.api.nvim_buf_is_valid(buf) then
+        vim.api.nvim_buf_delete(buf, { force = true })
+      end
     end
 
     local function get_entry()
@@ -92,12 +98,16 @@ function M.open()
     -- Restore to snapshot
     vim.keymap.set('n', 'r', function()
       local e = get_entry()
-      if not e then return end
+      if not e then
+        return
+      end
 
       vim.ui.select({ 'Yes', 'No' }, {
         prompt = 'Restore to ' .. e.id_short .. ' (' .. e.title .. ')?',
       }, function(choice)
-        if choice ~= 'Yes' then return end
+        if choice ~= 'Yes' then
+          return
+        end
         close()
         cli.oplog_restore(e.id, function(restore_err, _)
           notify('restore ' .. e.id_short, restore_err)
@@ -119,7 +129,9 @@ function M.open()
           cli.oplog_snapshot(message, function(snap_err, _)
             notify('snapshot', snap_err)
             if not snap_err then
-              vim.defer_fn(function() M.open() end, 200)
+              vim.defer_fn(function()
+                M.open()
+              end, 200)
             end
           end)
         end,

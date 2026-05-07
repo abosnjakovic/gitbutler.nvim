@@ -13,8 +13,12 @@ function M.open(opts)
   local height = opts.height or config.values.float.height
 
   -- Resolve fractional dimensions (values < 1 are treated as fractions of screen size)
-  if width < 1 then width = math.floor(ui.width * width) end
-  if height < 1 then height = math.floor(ui.height * height) end
+  if width < 1 then
+    width = math.floor(ui.width * width)
+  end
+  if height < 1 then
+    height = math.floor(ui.height * height)
+  end
 
   local row = opts.row or math.floor((ui.height - height) / 2)
   local col = opts.col or math.floor((ui.width - width) / 2)
@@ -77,7 +81,9 @@ function M.input(opts)
     vim.cmd('stopinsert')
     vim.api.nvim_win_close(win, true)
     vim.api.nvim_buf_delete(buf, { force = true })
-    if opts.on_abort then opts.on_abort() end
+    if opts.on_abort then
+      opts.on_abort()
+    end
   end
 
   if is_single then
@@ -149,7 +155,9 @@ function M.picker(opts)
   -- Abort with q or escape
   local function abort()
     close()
-    if opts.on_abort then opts.on_abort() end
+    if opts.on_abort then
+      opts.on_abort()
+    end
   end
 
   vim.keymap.set('n', 'q', abort, { buffer = buf })
