@@ -127,6 +127,43 @@ test('build_lines handles empty commit list', function()
   assert_eq(0, #commits)
 end)
 
+test('build_lines renders body lines for expanded commit when _body cached', function()
+  local buf = h.mock_buffer()
+  local commits = {
+    {
+      sha = 'aa', short_sha = 'aa', author = 'x', date = '2026-04-08', refs = '', message = 'subj',
+      _body = { 'first body line', 'second body line' },
+      _files = { { path = 'f.lua', status = 'M' } },
+    },
+  }
+  buf.fold_state['timeline:aa'] = false
+  local lines = timeline.build_lines(buf, commits, 7)
+  local body_count = 0
+  local file_count = 0
+  for _, l in ipairs(lines) do
+    if l.type == 'timeline_commit_body' then body_count = body_count + 1 end
+    if l.type == 'timeline_file' then file_count = file_count + 1 end
+  end
+  assert_eq(2, body_count)
+  assert_eq(1, file_count)
+end)
+
+test('build_lines omits body when _body empty', function()
+  local buf = h.mock_buffer()
+  local commits = {
+    {
+      sha = 'bb', short_sha = 'bb', author = 'x', date = '2026-04-08', refs = '', message = 'subj',
+      _body = {},
+      _files = { { path = 'f.lua', status = 'M' } },
+    },
+  }
+  buf.fold_state['timeline:bb'] = false
+  local lines = timeline.build_lines(buf, commits, 7)
+  for _, l in ipairs(lines) do
+    if l.type == 'timeline_commit_body' then error('unexpected body line') end
+  end
+end)
+
 test('build_lines marks commits as foldable', function()
   local buf = h.mock_buffer()
   local lines = timeline.build_lines(buf, fixtures.timeline_commits, 7)
