@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/abosnjakovic/gitbutler.nvim/compare/v0.1.4...v0.2.0) (2026-05-07)
+
+
+### Features
+
+* document commit body display in log view ([#17](https://github.com/abosnjakovic/gitbutler.nvim/issues/17)) ([4e7990a](https://github.com/abosnjakovic/gitbutler.nvim/commit/4e7990ac3c8eb02c18b4b1bc98218acf6d4f55e0))
+
 ## 0.1.4 — 2026-05-07
 
 - feat: show commit body in log view on expand
