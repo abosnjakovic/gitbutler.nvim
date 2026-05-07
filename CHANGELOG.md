@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4 — 2026-05-07
+
+- feat: show commit body in log view on expand
+
 ## 0.1.3 — 2026-04-24
 
 - feat: pin context hint to bottom of view
