@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }} / nvim ${{ matrix.neovim }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        neovim: [stable, nightly]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.neovim }}
+
+      - name: Run tests
+        run: make test
+
+  lint:
+    name: Lint (luacheck)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install luacheck
+        run: sudo apt-get update && sudo apt-get install -y luarocks && sudo luarocks install luacheck
+
+      - name: Run luacheck
+        run: make lint
+
+  fmt:
+    name: Format (stylua)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: latest
+          args: --check lua/ tests/

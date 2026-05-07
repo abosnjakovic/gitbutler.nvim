@@ -1,5 +1,5 @@
-local config = require('gitbutler.config')
 local buffer_mod = require('gitbutler.ui.buffer')
+local config = require('gitbutler.config')
 
 local M = {}
 
@@ -17,7 +17,9 @@ function M.parse_git_log(raw)
     local rest = line
     for _ = 1, 5 do
       local pos = rest:find('|', 1, true)
-      if not pos then break end
+      if not pos then
+        break
+      end
       table.insert(parts, rest:sub(1, pos - 1))
       rest = rest:sub(pos + 1)
     end
@@ -119,8 +121,10 @@ function M.build_lines(buf, commits, days)
         end
         for _, file in ipairs(commit._files) do
           local hl = 'GitButlerFileMod'
-          if file.status == 'A' then hl = 'GitButlerFileAdd'
-          elseif file.status == 'D' then hl = 'GitButlerFileDel'
+          if file.status == 'A' then
+            hl = 'GitButlerFileAdd'
+          elseif file.status == 'D' then
+            hl = 'GitButlerFileDel'
           end
           add(file.status .. '  ' .. file.path, hl, 'timeline_file', {
             path = file.path,
@@ -143,10 +147,14 @@ function M.fetch_commits(callback)
   local limit = cfg.limit or 200
 
   vim.system({
-    'git', 'log', '--all', '--date=short',
+    'git',
+    'log',
+    '--all',
+    '--date=short',
     '--format=%H|%h|%an|%ad|%D|%s',
     '--since=' .. days .. ' days ago',
-    '-n', tostring(limit),
+    '-n',
+    tostring(limit),
   }, { text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
@@ -164,11 +172,12 @@ end
 ---@param sha string Full commit SHA
 ---@return table[] files Array of {path}
 function M.fetch_files(sha)
-  local result = vim.system(
-    { 'git', 'diff-tree', '--no-commit-id', '-r', '--name-status', sha },
-    { text = true }
-  ):wait()
-  if result.code ~= 0 or not result.stdout then return {} end
+  local result = vim
+    .system({ 'git', 'diff-tree', '--no-commit-id', '-r', '--name-status', sha }, { text = true })
+    :wait()
+  if result.code ~= 0 or not result.stdout then
+    return {}
+  end
   return M.parse_diff_tree(result.stdout)
 end
 
@@ -177,11 +186,10 @@ end
 ---@param sha string Full commit SHA
 ---@return string[] body_lines
 function M.fetch_body(sha)
-  local result = vim.system(
-    { 'git', 'log', '-1', '--format=%B', sha },
-    { text = true }
-  ):wait()
-  if result.code ~= 0 or not result.stdout then return {} end
+  local result = vim.system({ 'git', 'log', '-1', '--format=%B', sha }, { text = true }):wait()
+  if result.code ~= 0 or not result.stdout then
+    return {}
+  end
   local parts = vim.split(result.stdout, '\n', { plain = true })
   table.remove(parts, 1)
   while #parts > 0 and parts[#parts]:match('^%s*$') do
@@ -197,12 +205,16 @@ end
 ---@param buf table GitButlerBuffer instance
 ---@param lines GitButlerLine[] The rendered lines
 local function apply_field_highlights(buf, lines)
-  if not buf.buf or not vim.api.nvim_buf_is_valid(buf.buf) then return end
+  if not buf.buf or not vim.api.nvim_buf_is_valid(buf.buf) then
+    return
+  end
   local ns = vim.api.nvim_create_namespace('gitbutler-timeline-fields')
   vim.api.nvim_buf_clear_namespace(buf.buf, ns, 0, -1)
 
   for i, line in ipairs(lines) do
-    if line.type ~= 'timeline_commit' or not line.data then goto continue end
+    if line.type ~= 'timeline_commit' or not line.data then
+      goto continue
+    end
 
     local rendered = vim.api.nvim_buf_get_lines(buf.buf, i - 1, i, false)[1] or ''
     local short_sha = line.data.short_sha or ''
@@ -212,14 +224,28 @@ local function apply_field_highlights(buf, lines)
     -- Find author position (after "▸ short_sha  ")
     local author_start = rendered:find(author, #short_sha + 1, true)
     if author_start then
-      vim.api.nvim_buf_add_highlight(buf.buf, ns, 'GitButlerTimelineAuthor', i - 1, author_start - 1, author_start - 1 + #author)
+      vim.api.nvim_buf_add_highlight(
+        buf.buf,
+        ns,
+        'GitButlerTimelineAuthor',
+        i - 1,
+        author_start - 1,
+        author_start - 1 + #author
+      )
     end
 
     -- Find refs position (after author)
     if refs ~= '' then
       local refs_start = rendered:find(refs, (author_start or 0) + #author, true)
       if refs_start then
-        vim.api.nvim_buf_add_highlight(buf.buf, ns, 'GitButlerTimelineRef', i - 1, refs_start - 1, refs_start - 1 + #refs)
+        vim.api.nvim_buf_add_highlight(
+          buf.buf,
+          ns,
+          'GitButlerTimelineRef',
+          i - 1,
+          refs_start - 1,
+          refs_start - 1 + #refs
+        )
       end
     end
 
@@ -248,12 +274,18 @@ function M.open()
 
     buf:on('toggle_fold', function(b)
       local line = b:get_cursor_line()
-      if not line or line.type ~= 'timeline_commit' then return end
-      if not line.data or not line.data.fold_id then return end
+      if not line or line.type ~= 'timeline_commit' then
+        return
+      end
+      if not line.data or not line.data.fold_id then
+        return
+      end
 
       local id = line.data.fold_id
       local currently_folded = b.fold_state[id]
-      if currently_folded == nil then currently_folded = true end
+      if currently_folded == nil then
+        currently_folded = true
+      end
 
       if currently_folded then
         -- Expanding: fetch files and body if not cached
@@ -279,19 +311,29 @@ function M.open()
 
     buf:on('yank_sha', function(b)
       local line = b:get_cursor_line()
-      if not line or line.type ~= 'timeline_commit' then return end
-      if not line.data or not line.data.sha then return end
+      if not line or line.type ~= 'timeline_commit' then
+        return
+      end
+      if not line.data or not line.data.sha then
+        return
+      end
       vim.fn.setreg('+', line.data.sha)
       vim.notify('Copied ' .. line.data.short_sha, vim.log.levels.INFO)
     end)
 
     buf:on('jump_to_log', function(b)
       local line = b:get_cursor_line()
-      if not line or line.type ~= 'timeline_commit' then return end
-      if not line.data or not line.data.refs or line.data.refs == '' then return end
+      if not line or line.type ~= 'timeline_commit' then
+        return
+      end
+      if not line.data or not line.data.refs or line.data.refs == '' then
+        return
+      end
       -- Take first ref, strip leading/trailing whitespace and remote prefix
       local ref = line.data.refs:match('^%s*(.-)%s*,') or line.data.refs:match('^%s*(.-)%s*$')
-      if not ref or ref == '' then return end
+      if not ref or ref == '' then
+        return
+      end
       -- Strip origin/ prefix for local branch name
       ref = ref:gsub('^origin/', '')
       buf:close()
@@ -312,7 +354,9 @@ function M.open()
     for key, action in pairs(timeline_keymaps) do
       vim.keymap.set('n', key, function()
         local handler = buf.keymaps[action]
-        if handler then handler(buf) end
+        if handler then
+          handler(buf)
+        end
       end, { buffer = buf.buf, nowait = true })
     end
 
@@ -324,7 +368,9 @@ end
 
 ---Refresh the timeline view with fresh data.
 function M.refresh()
-  if not M.instance then return end
+  if not M.instance then
+    return
+  end
   local buf = M.instance
   local cfg = config.values.timeline or {}
   local days = cfg.days or 7

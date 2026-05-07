@@ -6,9 +6,24 @@ local hints = {
   status = {
     default = { HELP, { 'r', 'Refresh' }, { 'q', 'Close' } },
     branch = { HELP, { '<Tab>', 'Fold' }, { 'l', 'Log' }, { 'p', 'Push' }, { '<Space>', 'Select' } },
-    commit = { HELP, { 'd', 'Reword' }, { 'S', 'Squash' }, { 'U', 'Uncommit' }, { 'm', 'Move' }, { '<Space>', 'Select' } },
+    commit = {
+      HELP,
+      { 'd', 'Reword' },
+      { 'S', 'Squash' },
+      { 'U', 'Uncommit' },
+      { 'm', 'Move' },
+      { '<Space>', 'Select' },
+    },
     committed_file = { HELP, { '<CR>', 'Open' }, { '<Tab>', 'Diff' }, { 'x', 'Discard' }, { '<Space>', 'Select' } },
-    file = { HELP, { '<CR>', 'Open' }, { 's', 'Assign' }, { 'a', 'Absorb' }, { 'c', 'Commit' }, { 'x', 'Discard' }, { '<Space>', 'Select' } },
+    file = {
+      HELP,
+      { '<CR>', 'Open' },
+      { 's', 'Assign' },
+      { 'a', 'Absorb' },
+      { 'c', 'Commit' },
+      { 'x', 'Discard' },
+      { '<Space>', 'Select' },
+    },
     recent_commit = { HELP, { '<CR>', 'Show' } },
   },
   log = {
@@ -53,7 +68,9 @@ function M.for_context(view, line_type, selectable)
   if not selectable then
     local filtered = {}
     for _, item in ipairs(items) do
-      if item[1] ~= '<Space>' then table.insert(filtered, item) end
+      if item[1] ~= '<Space>' then
+        table.insert(filtered, item)
+      end
     end
     items = filtered
   end

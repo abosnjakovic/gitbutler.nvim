@@ -13,7 +13,7 @@ require('tests.gitbutler.timeline_spec')
 
 -- Summary
 local h = require('tests.gitbutler.helpers')
-local pass, fail, errors = h.summary()
+local pass, fail = h.summary()
 
 print(string.format('\n%d passed, %d failed\n', pass, fail))
 if fail > 0 then

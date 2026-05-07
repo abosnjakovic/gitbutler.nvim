@@ -1,6 +1,6 @@
+local buffer_mod = require('gitbutler.ui.buffer')
 local cli = require('gitbutler.cli')
 local float = require('gitbutler.ui.float')
-local buffer_mod = require('gitbutler.ui.buffer')
 
 local M = {}
 
@@ -97,14 +97,23 @@ function M.build_lines(buf, data)
         local status = file.status or 'modified'
         local prefix = status:sub(1, 1):upper()
         local file_stats = ''
-        if file.insertions and file.insertions > 0 then file_stats = file_stats .. '+' .. file.insertions end
-        if file.deletions and file.deletions > 0 then file_stats = file_stats .. '-' .. file.deletions end
-        if file_stats ~= '' then file_stats = '  ' .. file_stats end
+        if file.insertions and file.insertions > 0 then
+          file_stats = file_stats .. '+' .. file.insertions
+        end
+        if file.deletions and file.deletions > 0 then
+          file_stats = file_stats .. '-' .. file.deletions
+        end
+        if file_stats ~= '' then
+          file_stats = '  ' .. file_stats
+        end
 
         local hl = 'GitButlerFileMod'
-        if status == 'added' then hl = 'GitButlerFileAdd'
-        elseif status == 'deleted' then hl = 'GitButlerFileDel'
-        elseif status == 'renamed' then hl = 'GitButlerFileRenamed'
+        if status == 'added' then
+          hl = 'GitButlerFileAdd'
+        elseif status == 'deleted' then
+          hl = 'GitButlerFileDel'
+        elseif status == 'renamed' then
+          hl = 'GitButlerFileRenamed'
         end
 
         add(prefix .. '  ' .. file.path .. file_stats, hl, 'log_file', {
@@ -150,7 +159,9 @@ function M.open(branch_name)
 
     buf:on('toggle_fold', function(b)
       local line = b:get_cursor_line()
-      if not line then return end
+      if not line then
+        return
+      end
 
       -- On file lines, show inline diff in a split below
       if line.type == 'log_file' and line.data and line.data.commit_sha then
@@ -197,7 +208,9 @@ function M.open(branch_name)
 
     buf:on('describe', function(b)
       local line = b:get_cursor_line()
-      if not line or line.type ~= 'commit' or not line.data then return end
+      if not line or line.type ~= 'commit' or not line.data then
+        return
+      end
 
       local sha = line.data.sha
       local current = line.data.full_message or line.data.message or ''
@@ -208,7 +221,9 @@ function M.open(branch_name)
         on_submit = function(message)
           cli.reword(sha, message, function(reword_err, _)
             notify('reword', reword_err)
-            if not reword_err then M.refresh(branch_name) end
+            if not reword_err then
+              M.refresh(branch_name)
+            end
           end)
         end,
       })
@@ -216,17 +231,23 @@ function M.open(branch_name)
 
     buf:on('squash', function(b)
       local line = b:get_cursor_line()
-      if not line or line.type ~= 'commit' or not line.data then return end
+      if not line or line.type ~= 'commit' or not line.data then
+        return
+      end
 
       cli.squash(line.data.sha, function(squash_err, _)
         notify('squash', squash_err)
-        if not squash_err then M.refresh(branch_name) end
+        if not squash_err then
+          M.refresh(branch_name)
+        end
       end)
     end)
 
     buf:on('open_file', function(b)
       local line = b:get_cursor_line()
-      if not line then return end
+      if not line then
+        return
+      end
 
       if line.type == 'log_file' and line.data and line.data.path then
         buf:close()
@@ -251,7 +272,9 @@ function M.open(branch_name)
     for key, action in pairs(log_keymaps) do
       vim.keymap.set('n', key, function()
         local handler = buf.keymaps[action]
-        if handler then handler(buf) end
+        if handler then
+          handler(buf)
+        end
       end, { buffer = buf.buf, nowait = true })
     end
 
@@ -262,7 +285,9 @@ end
 
 ---Refresh the log view.
 function M.refresh(branch_name)
-  if not M.instance then return end
+  if not M.instance then
+    return
+  end
   local buf = M.instance
 
   cli.show(branch_name, function(err, data)
@@ -270,7 +295,9 @@ function M.refresh(branch_name)
       vim.notify('gitbutler log: ' .. err, vim.log.levels.ERROR)
       return
     end
-    if type(data) ~= 'table' then return end
+    if type(data) ~= 'table' then
+      return
+    end
     local lines = M.build_lines(buf, data)
     buf:render(lines)
   end)

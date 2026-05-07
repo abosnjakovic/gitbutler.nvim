@@ -1,5 +1,5 @@
-local h = require('tests.gitbutler.helpers')
 local fixtures = require('tests.gitbutler.fixtures')
+local h = require('tests.gitbutler.helpers')
 local test, assert_eq, assert_falsy, assert_type = h.test, h.assert_eq, h.assert_falsy, h.assert_type
 
 print('\n=== Branch data tests ===')

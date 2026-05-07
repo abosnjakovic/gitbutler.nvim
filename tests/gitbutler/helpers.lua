@@ -48,7 +48,9 @@ end
 
 function M.mock_buffer()
   local buf = buffer_mod.Buffer.new()
-  buf.is_folded = function(_, _) return false end
+  buf.is_folded = function(_, _)
+    return false
+  end
   buf._cursor_row = nil
   return buf
 end
@@ -56,11 +58,15 @@ end
 function M.capture_lines(fixture_data)
   local captured
   local original = cli.status
-  cli.status = function(callback) callback(nil, fixture_data) end
+  cli.status = function(callback)
+    callback(nil, fixture_data)
+  end
 
   local buf = M.mock_buffer()
   status.instance = buf
-  buf.render = function(_, lines) captured = lines end
+  buf.render = function(_, lines)
+    captured = lines
+  end
   status.refresh()
 
   cli.status = original

@@ -1,5 +1,5 @@
-local h = require('tests.gitbutler.helpers')
 local fixtures = require('tests.gitbutler.fixtures')
+local h = require('tests.gitbutler.helpers')
 local test, assert_eq, assert_truthy, assert_falsy = h.test, h.assert_eq, h.assert_truthy, h.assert_falsy
 
 print('\n=== Status view tests ===')
@@ -10,7 +10,10 @@ test('renders branch from stacks', function()
 
   local branch_line
   for _, l in ipairs(lines) do
-    if l.type == 'branch' then branch_line = l; break end
+    if l.type == 'branch' then
+      branch_line = l
+      break
+    end
   end
 
   assert_truthy(branch_line)
@@ -23,7 +26,10 @@ test('renders commits with sha and message', function()
 
   local commit
   for _, l in ipairs(lines) do
-    if l.type == 'commit' then commit = l; break end
+    if l.type == 'commit' then
+      commit = l
+      break
+    end
   end
 
   assert_truthy(commit)
@@ -38,7 +44,9 @@ test('renders committed files with cli_id', function()
 
   local files = {}
   for _, l in ipairs(lines) do
-    if l.type == 'committed_file' then table.insert(files, l) end
+    if l.type == 'committed_file' then
+      table.insert(files, l)
+    end
   end
 
   assert_eq(2, #files)
@@ -94,7 +102,9 @@ test('truncates multiline commit messages', function()
 
   local commits = {}
   for _, l in ipairs(lines) do
-    if l.type == 'commit' then table.insert(commits, l) end
+    if l.type == 'commit' then
+      table.insert(commits, l)
+    end
   end
 
   assert_truthy(#commits >= 2)

@@ -53,6 +53,16 @@ vim.opt.rtp:prepend(vim.fn.expand('~/path/to/gitbutler.nvim'))
 require('gitbutler').setup()
 ```
 
+### Pin to a release tag
+
+Releases follow [Conventional Commits](https://www.conventionalcommits.org/) and are cut by [release-please](https://github.com/googleapis/release-please) when a release PR is merged. To pin to a stable version:
+
+```lua
+{ 'abosnjakovic/gitbutler.nvim', tag = 'v0.1.4' }
+```
+
+See the [releases page](https://github.com/abosnjakovic/gitbutler.nvim/releases) for the changelog.
+
 ## Usage
 
 Open the status buffer with `:Butler` or bind it to a key:

@@ -1,12 +1,14 @@
-local h = require('tests.gitbutler.helpers')
 local fixtures = require('tests.gitbutler.fixtures')
+local h = require('tests.gitbutler.helpers')
 local log = require('gitbutler.ui.log')
-local test, assert_eq, assert_truthy, assert_type = h.test, h.assert_eq, h.assert_truthy, h.assert_type
+local test, assert_eq, assert_truthy = h.test, h.assert_eq, h.assert_truthy
 
 local function mock_buf(folded_ids)
   folded_ids = folded_ids or {}
   return {
-    is_folded = function(_, id) return folded_ids[id] == true end,
+    is_folded = function(_, id)
+      return folded_ids[id] == true
+    end,
     fold_state = {},
   }
 end
@@ -14,7 +16,9 @@ end
 local function find_lines(lines, line_type)
   local out = {}
   for _, line in ipairs(lines) do
-    if line.type == line_type then table.insert(out, line) end
+    if line.type == line_type then
+      table.insert(out, line)
+    end
   end
   return out
 end
@@ -79,7 +83,9 @@ test('build_lines emits blank separator only when body and files both present', 
   -- Commit 1 has body + files: expect a blank with indent=1 after body
   local indented_blanks = 0
   for _, line in ipairs(lines) do
-    if line.type == 'blank' and line.indent == 1 then indented_blanks = indented_blanks + 1 end
+    if line.type == 'blank' and line.indent == 1 then
+      indented_blanks = indented_blanks + 1
+    end
   end
   assert_eq(1, indented_blanks, 'one indented separator (commit 1 only; commit 2 has no body)')
 end)

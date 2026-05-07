@@ -57,16 +57,19 @@ function M.open_file(buf)
 
   -- Single file / recent commit: existing behaviour
   local line = buf:get_cursor_line()
-  if not line or not line.data then return end
+  if not line or not line.data then
+    return
+  end
 
   if line.type == 'recent_commit' then
     local sha = line.data.sha
-    if not sha then return end
+    if not sha then
+      return
+    end
 
-    local result = vim.system(
-      { 'git', 'show', '--patch', '--stat', '--format=%H%n%an <%ae>%n%aD%n%n%B', sha },
-      { text = true }
-    ):wait()
+    local result = vim
+      .system({ 'git', 'show', '--patch', '--stat', '--format=%H%n%an <%ae>%n%aD%n%n%B', sha }, { text = true })
+      :wait()
 
     if result.code ~= 0 or not result.stdout then
       vim.notify('gitbutler: failed to show commit', vim.log.levels.ERROR)
@@ -86,7 +89,9 @@ function M.open_file(buf)
     return
   end
 
-  if not line.data.path then return end
+  if not line.data.path then
+    return
+  end
   local path = line.data.path
 
   buf:close()
@@ -103,7 +108,9 @@ function M.assign_to_branch(buf)
     targets = selected
   else
     local line = buf:get_cursor_line()
-    if not line or (line.type ~= 'file' and line.type ~= 'committed_file') or not line.data then return end
+    if not line or (line.type ~= 'file' and line.type ~= 'committed_file') or not line.data then
+      return
+    end
     targets = { line }
   end
 
@@ -223,9 +230,13 @@ function M.squash(buf)
 
   -- Single commit fallback
   local line = buf:get_cursor_line()
-  if not line or line.type ~= 'commit' or not line.data then return end
+  if not line or line.type ~= 'commit' or not line.data then
+    return
+  end
   local sha = line.data.sha
-  if not sha then return end
+  if not sha then
+    return
+  end
   notify_start('squash')
   cli.squash(sha, function(err, result)
     notify_result('squash', err, result)
@@ -240,7 +251,9 @@ function M.move(buf)
     targets = selected
   else
     local line = buf:get_cursor_line()
-    if not line or line.type ~= 'commit' or not line.data then return end
+    if not line or line.type ~= 'commit' or not line.data then
+      return
+    end
     targets = { line }
   end
 
@@ -286,11 +299,15 @@ end
 ---Describe/reword a commit or branch.
 function M.describe(buf)
   local line = buf:get_cursor_line()
-  if not line or not line.data then return end
+  if not line or not line.data then
+    return
+  end
 
   if line.type == 'commit' then
     local sha = line.data.sha
-    if not sha then return end
+    if not sha then
+      return
+    end
     local current_msg = line.data.commit and line.data.commit.message or ''
 
     float.input({
@@ -305,7 +322,9 @@ function M.describe(buf)
     })
   elseif line.type == 'branch' then
     local name = line.data.name
-    if not name then return end
+    if not name then
+      return
+    end
 
     float.input({
       title = 'Rename branch',
@@ -395,7 +414,9 @@ function M.discard(buf)
     targets = selected
   else
     local line = buf:get_cursor_line()
-    if not line or line.type ~= 'file' or not line.data then return end
+    if not line or line.type ~= 'file' or not line.data then
+      return
+    end
     targets = { line }
   end
 
@@ -406,7 +427,9 @@ function M.discard(buf)
   local prompt = 'Discard changes to ' .. table.concat(paths, ', ') .. '?'
 
   vim.ui.select({ 'Yes', 'No' }, { prompt = prompt }, function(choice)
-    if choice ~= 'Yes' then return end
+    if choice ~= 'Yes' then
+      return
+    end
     notify_start('discard')
     local i = 0
     local function discard_next()
@@ -434,12 +457,16 @@ end
 ---Toggle fold on branch headers, show diff on file lines.
 function M.toggle_fold(buf)
   local line = buf:get_cursor_line()
-  if not line then return end
+  if not line then
+    return
+  end
 
   -- File lines: show inline diff in a split below
   if line.type == 'file' or line.type == 'committed_file' then
     local cli_id = line.data and line.data.cli_id
-    if not cli_id then return end
+    if not cli_id then
+      return
+    end
 
     local err, result = cli.run_sync({ 'diff', cli_id })
     if err then
@@ -567,7 +594,9 @@ function M.log(buf)
       local names = {}
       for _, stack in ipairs(data.appliedStacks or {}) do
         for _, head in ipairs(stack.heads or {}) do
-          if head.name then table.insert(names, head.name) end
+          if head.name then
+            table.insert(names, head.name)
+          end
         end
       end
       if #names == 1 then
@@ -576,7 +605,9 @@ function M.log(buf)
         float.picker({
           title = 'Log for branch',
           items = names,
-          on_select = function(selected) require('gitbutler.ui.log').open(selected) end,
+          on_select = function(selected)
+            require('gitbutler.ui.log').open(selected)
+          end,
         })
       end
     end)
@@ -599,7 +630,9 @@ function M.uncommit(buf)
     targets = selected
   else
     local line = buf:get_cursor_line()
-    if not line or line.type ~= 'committed_file' or not line.data then return end
+    if not line or line.type ~= 'committed_file' or not line.data then
+      return
+    end
     targets = { line }
   end
 

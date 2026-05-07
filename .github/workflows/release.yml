@@ -1,7 +1,9 @@
 name: Release
 
 on:
-  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
@@ -10,60 +12,48 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Read current version
-        id: current
-        run: echo "version=$(cat version.txt)" >> "$GITHUB_OUTPUT"
-
-      - name: Bump patch version
-        id: bump
+      - name: Resolve version from tag
+        id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          IFS='.' read -r major minor patch <<< "${{ steps.current.outputs.version }}"
-          new_version="${major}.${minor}.$((patch + 1))"
-          echo "version=${new_version}" >> "$GITHUB_OUTPUT"
-          echo "${new_version}" > version.txt
+          set -euo pipefail
+          version="${REF_NAME#v}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
-      - name: Generate changelog entry
+      - name: Extract changelog entry
         id: changelog
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          new_version="${{ steps.bump.outputs.version }}"
-          date=$(date +%Y-%m-%d)
-          prev_tag=$(git describe --tags --abbrev=0 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          set -euo pipefail
+          tmp=$(mktemp)
+          awk -v ver="$VERSION" '
+            BEGIN { in_section = 0 }
+            /^## / {
+              if (in_section) exit
+              if ($0 ~ "^## \\[?" ver) { in_section = 1; next }
+            }
+            in_section { print }
+          ' CHANGELOG.md > "$tmp"
 
           {
-            echo "entry<<CHANGELOG_EOF"
-            echo "## ${new_version} — ${date}"
-            echo ""
-            git log "${prev_tag}..HEAD" --pretty=format:"- %s" --no-merges
-            echo ""
+            echo "body<<CHANGELOG_EOF"
+            cat "$tmp"
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
-
-      - name: Update CHANGELOG.md
-        run: |
-          tmp=$(mktemp)
-          head -1 CHANGELOG.md > "$tmp"
-          echo "" >> "$tmp"
-          echo '${{ steps.changelog.outputs.entry }}' >> "$tmp"
-          tail -n +2 CHANGELOG.md >> "$tmp"
-          mv "$tmp" CHANGELOG.md
-
-      - name: Commit and tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add version.txt CHANGELOG.md
-          git commit -m "release v${{ steps.bump.outputs.version }}"
-          git tag "v${{ steps.bump.outputs.version }}"
-          git push origin main --tags
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          BODY: ${{ steps.changelog.outputs.body }}
         run: |
-          gh release create "v${{ steps.bump.outputs.version }}" \
-            --title "v${{ steps.bump.outputs.version }}" \
-            --notes '${{ steps.changelog.outputs.entry }}'
+          set -euo pipefail
+          gh release create "v${VERSION}" \
+            --title "v${VERSION}" \
+            --notes "${BODY}"
