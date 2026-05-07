@@ -1,6 +1,23 @@
 local h = require('tests.gitbutler.helpers')
 local fixtures = require('tests.gitbutler.fixtures')
+local log = require('gitbutler.ui.log')
 local test, assert_eq, assert_truthy, assert_type = h.test, h.assert_eq, h.assert_truthy, h.assert_type
+
+local function mock_buf(folded_ids)
+  folded_ids = folded_ids or {}
+  return {
+    is_folded = function(_, id) return folded_ids[id] == true end,
+    fold_state = {},
+  }
+end
+
+local function find_lines(lines, line_type)
+  local out = {}
+  for _, line in ipairs(lines) do
+    if line.type == line_type then table.insert(out, line) end
+  end
+  return out
+end
 
 print('\n=== Log view tests ===')
 
@@ -31,4 +48,38 @@ test('show_branch full_message preserves multiline', function()
   local msg = fixtures.show_branch.commits[1].full_message
   assert_truthy(msg:find('\n'), 'full_message has newline')
   assert_truthy(msg:find('JWT'), 'full_message has body')
+end)
+
+test('build_lines renders body when commit expanded', function()
+  local lines = log.build_lines(mock_buf(), fixtures.show_branch)
+  local body = find_lines(lines, 'commit_body')
+  assert_eq(1, #body, 'one body line for first commit (subject-only commit 2 has none)')
+  assert_eq('Implements the /login route with JWT', body[1].text)
+  assert_eq('GitButlerCommitBody', body[1].hl)
+  assert_eq(1, body[1].indent)
+end)
+
+test('build_lines hides body when commit folded', function()
+  local folded = { ['commit:9331c55fb5b4f279474e60e07f106a9b354f8cad'] = true }
+  local lines = log.build_lines(mock_buf(folded), fixtures.show_branch)
+  local body = find_lines(lines, 'commit_body')
+  assert_eq(0, #body, 'folded commit emits no body lines')
+end)
+
+test('build_lines stores full_message in commit data for reword', function()
+  local lines = log.build_lines(mock_buf(), fixtures.show_branch)
+  local commits = find_lines(lines, 'commit')
+  assert_eq(2, #commits)
+  assert_eq('add login endpoint\n\nImplements the /login route with JWT', commits[1].data.full_message)
+  assert_eq('initial setup', commits[2].data.full_message)
+end)
+
+test('build_lines emits blank separator only when body and files both present', function()
+  local lines = log.build_lines(mock_buf(), fixtures.show_branch)
+  -- Commit 1 has body + files: expect a blank with indent=1 after body
+  local indented_blanks = 0
+  for _, line in ipairs(lines) do
+    if line.type == 'blank' and line.indent == 1 then indented_blanks = indented_blanks + 1 end
+  end
+  assert_eq(1, indented_blanks, 'one indented separator (commit 1 only; commit 2 has no body)')
 end)
