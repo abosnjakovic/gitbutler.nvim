@@ -36,5 +36,20 @@ echo "bump kind: ${bump}"
 echo "next:      ${next}"
 echo
 echo "--- changelog preview ---"
-git log "${prev_tag}..HEAD" --pretty=format:"- %s" --no-merges || true
-echo
+
+commits=$(git log "${prev_tag}..HEAD" --no-merges --pretty=format:"- %s" || true)
+features=$(printf '%s\n' "$commits" | grep -E '^- feat(\(.+\))?!?: ' || true)
+fixes=$(printf '%s\n' "$commits" | grep -E '^- fix(\(.+\))?!?: ' || true)
+perf=$(printf '%s\n' "$commits"     | grep -E '^- perf(\(.+\))?!?: ' || true)
+
+if [ "$bump" != "none" ]; then
+  echo "## [${next}] - $(date -u +%Y-%m-%d)"
+  echo
+fi
+if [ -n "$features" ]; then echo "### Features";    echo; echo "$features"; echo; fi
+if [ -n "$fixes" ];    then echo "### Bug Fixes";   echo; echo "$fixes";    echo; fi
+if [ -n "$perf" ];     then echo "### Performance"; echo; echo "$perf";     echo; fi
+
+if [ -z "$features$fixes$perf" ]; then
+  echo "(no feat/fix/perf entries)"
+fi
