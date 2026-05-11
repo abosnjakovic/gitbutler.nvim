@@ -20,15 +20,23 @@ while IFS= read -r line; do
     feat:*|feat\(*\):*)                 [ "$bump" != "major" ] && bump="minor" ;;
     fix:*|fix\(*\):*|perf:*|perf\(*\):*) [ "$bump" = "none" ] && bump="patch" ;;
   esac
-done < <(git log "${prev_tag}..HEAD" --pretty=format:"%s" --no-merges)
+done < <(git log "${prev_tag}..HEAD" --pretty=tformat:"%s" --no-merges)
+
+resolved="$bump"
+if [ "$bump" = "none" ]; then
+  resolved="patch"
+fi
 
 IFS='.' read -r major minor patch <<< "$current"
-case "$bump" in
+case "$resolved" in
   major) next="$((major + 1)).0.0" ;;
   minor) next="${major}.$((minor + 1)).0" ;;
   patch) next="${major}.${minor}.$((patch + 1))" ;;
-  none)  next="(no release — no feat/fix/perf commits since ${prev_tag})" ;;
 esac
+
+if [ "$bump" = "none" ]; then
+  bump="none (would fall back to patch)"
+fi
 
 echo "current:   ${current}"
 echo "previous:  ${prev_tag}"
@@ -36,5 +44,20 @@ echo "bump kind: ${bump}"
 echo "next:      ${next}"
 echo
 echo "--- changelog preview ---"
-git log "${prev_tag}..HEAD" --pretty=format:"- %s" --no-merges || true
-echo
+
+commits=$(git log "${prev_tag}..HEAD" --no-merges --pretty=format:"- %s" || true)
+features=$(printf '%s\n' "$commits" | grep -E '^- feat(\(.+\))?!?: ' || true)
+fixes=$(printf '%s\n' "$commits" | grep -E '^- fix(\(.+\))?!?: ' || true)
+perf=$(printf '%s\n' "$commits"     | grep -E '^- perf(\(.+\))?!?: ' || true)
+
+if [ "$bump" != "none" ]; then
+  echo "## [${next}] - $(date -u +%Y-%m-%d)"
+  echo
+fi
+if [ -n "$features" ]; then echo "### Features";    echo; echo "$features"; echo; fi
+if [ -n "$fixes" ];    then echo "### Bug Fixes";   echo; echo "$fixes";    echo; fi
+if [ -n "$perf" ];     then echo "### Performance"; echo; echo "$perf";     echo; fi
+
+if [ -z "$features$fixes$perf" ]; then
+  echo "(no feat/fix/perf entries)"
+fi
