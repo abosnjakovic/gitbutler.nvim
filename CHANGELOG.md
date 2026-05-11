@@ -1,3 +1,14 @@
+## [0.3.0] - 2026-05-11
+
+### Features
+
+- feat: collapse release flow to one manual action (#19)
+
+### Bug Fixes
+
+- fix(ci): remove unresolved conflict markers from release.yml (#21)
+- fix(release): drop ref pin, fallback auto-bump, fix trailing-newline parse (#20)
+
 # Changelog
 
 ## [0.2.0](https://github.com/abosnjakovic/gitbutler.nvim/compare/v0.1.4...v0.2.0) (2026-05-07)
