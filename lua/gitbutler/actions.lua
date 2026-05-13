@@ -364,6 +364,120 @@ function M.push(buf)
   end)
 end
 
+---Resolve the local target branch name (e.g. 'main' or 'master') via origin/HEAD,
+---falling back to a local-branch probe if origin has no HEAD ref.
+local function resolve_target_branch()
+  local head = vim.system({ 'git', 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD' }, { text = true }):wait()
+  if head.code == 0 and head.stdout then
+    local ref = vim.trim(head.stdout)
+    local stripped = ref:gsub('^origin/', '')
+    if stripped ~= '' then
+      return stripped
+    end
+  end
+
+  for _, name in ipairs({ 'main', 'master' }) do
+    local probe = vim.system({ 'git', 'rev-parse', '--verify', name }, { text = true }):wait()
+    if probe.code == 0 then
+      return name
+    end
+  end
+
+  return nil
+end
+
+---Push <target> to origin via raw git. The target ref sits outside GitButler's
+---virtual-branch surface, so `but push` is not the right tool here.
+local function git_push_target(target, callback)
+  vim.system({ 'git', 'push', 'origin', target }, { text = true }, function(result)
+    vim.schedule(function()
+      if result.code ~= 0 then
+        local msg = (result.stderr and result.stderr ~= '') and result.stderr
+          or ('git push exited with code ' .. result.code)
+        callback(vim.trim(msg))
+      else
+        callback(nil)
+      end
+    end)
+  end)
+end
+
+---Commit selected (or unassigned) files onto an ephemeral virtual branch,
+---merge it into the local target, then push the target to origin.
+function M.direct_to_main(buf)
+  local file_ids = {}
+  local selected = buf:get_selected_lines({ 'file' })
+  if #selected > 0 then
+    for _, line in ipairs(selected) do
+      if line.data and line.data.cli_id then
+        table.insert(file_ids, line.data.cli_id)
+      end
+    end
+  else
+    for _, line in ipairs(buf.lines or {}) do
+      if line.type == 'file' and line.data and line.data.unassigned and line.data.cli_id then
+        table.insert(file_ids, line.data.cli_id)
+      end
+    end
+  end
+
+  if #file_ids == 0 then
+    vim.notify('gitbutler: no unassigned changes', vim.log.levels.WARN)
+    return
+  end
+
+  local title = 'Commit to main (' .. #file_ids .. ' file' .. (#file_ids > 1 and 's' or '') .. ')'
+  float.input({
+    title = title,
+    on_submit = function(message)
+      if not message or vim.trim(message) == '' then
+        return
+      end
+
+      local branch_name = 'direct-to-main-' .. os.time()
+
+      notify_start('commit')
+      cli.commit(branch_name, message, function(commit_err, _)
+        if commit_err then
+          buf:clear_selection()
+          vim.notify('gitbutler commit: ' .. commit_err, vim.log.levels.ERROR)
+          refresh()
+          return
+        end
+
+        notify_start('merge → target')
+        cli.merge(branch_name, function(merge_err, _)
+          if merge_err then
+            buf:clear_selection()
+            vim.notify('gitbutler merge: ' .. merge_err, vim.log.levels.ERROR)
+            refresh()
+            return
+          end
+
+          local target = resolve_target_branch()
+          if not target then
+            buf:clear_selection()
+            vim.notify('gitbutler: could not resolve target branch for push', vim.log.levels.ERROR)
+            refresh()
+            return
+          end
+
+          notify_start('git push ' .. target)
+          git_push_target(target, function(push_err)
+            buf:clear_selection()
+            if push_err then
+              vim.notify('git push: ' .. push_err, vim.log.levels.ERROR)
+            else
+              vim.notify('gitbutler: direct-to-main done (' .. target .. ')', vim.log.levels.INFO)
+            end
+            refresh()
+          end)
+        end)
+      end, file_ids, true)
+    end,
+  })
+end
+
 ---Push all branches (syncs with upstream first).
 function M.push_all(_buf)
   notify_start('sync all (pull + push)')
@@ -538,6 +652,7 @@ function M.help(_buf)
     'u        Undo last operation',
     'p        Push branch',
     'P        Push all branches',
+    'M        Commit & push selected (or unassigned) to main',
     'F        Pull / sync from upstream',
     'B        Branch management',
     'b        New branch',

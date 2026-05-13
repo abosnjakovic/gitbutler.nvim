@@ -236,6 +236,7 @@ function M.open()
   buf:on('oplog', actions.oplog)
   buf:on('timeline', actions.timeline)
   buf:on('uncommit', actions.uncommit)
+  buf:on('direct_to_main', actions.direct_to_main)
 
   buf:open()
   M.refresh()

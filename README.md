@@ -96,6 +96,7 @@ d        Describe/reword a commit or rename a branch
 u        Undo last operation
 p        Push the branch under cursor
 P        Push all branches
+M        Commit selected (or unassigned) files straight to main, then push
 F        Pull / sync from upstream
 b        Create a new branch
 B        Branch management popup

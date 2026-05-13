@@ -76,6 +76,7 @@ M.defaults = {
       ['O'] = 'oplog',
       ['t'] = 'timeline',
       ['U'] = 'uncommit',
+      ['M'] = 'direct_to_main',
       ['?'] = 'help',
     },
   },

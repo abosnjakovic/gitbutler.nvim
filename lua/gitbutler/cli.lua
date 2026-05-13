@@ -93,10 +93,14 @@ end
 ---@param message? string Commit message
 ---@param callback fun(err?: string, result?: any)
 ---@param file_ids? string[] Uncommitted file CLI IDs to include (omit for all)
-function M.commit(branch, message, callback, file_ids)
+---@param create? boolean Pass -c to create the branch if it does not exist
+function M.commit(branch, message, callback, file_ids, create)
   local args = { 'commit' }
   if branch then
     table.insert(args, branch)
+  end
+  if create then
+    table.insert(args, '-c')
   end
   if message then
     vim.list_extend(args, { '-m', message })
@@ -108,6 +112,13 @@ function M.commit(branch, message, callback, file_ids)
   end
   table.insert(args, '--json')
   M.run(args, callback)
+end
+
+---Convenience: but merge (merge a virtual branch into the local target branch)
+---@param branch string Branch name or CLI ID
+---@param callback fun(err?: string, result?: any)
+function M.merge(branch, callback)
+  M.run({ 'merge', branch, '--json' }, callback)
 end
 
 ---Convenience: but absorb
