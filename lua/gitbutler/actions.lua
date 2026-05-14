@@ -364,6 +364,21 @@ function M.push(buf)
   end)
 end
 
+---Build the ephemeral branch name used by direct_to_main.
+---@param ts integer Unix timestamp (typically os.time())
+---@return string
+function M.ephemeral_branch_name(ts)
+  return 'direct-to-main-' .. tostring(ts)
+end
+
+---Format a step-tagged error message used by surface_error/surface_warn.
+---@param step string Step label (e.g. 'commit', 'push')
+---@param body string Error body
+---@return string
+function M.format_step_error(step, body)
+  return '[gitbutler ' .. step .. '] ' .. body
+end
+
 ---Resolve the local target branch name (e.g. 'main' or 'master') via origin/HEAD,
 ---falling back to a local-branch probe if origin has no HEAD ref.
 local function resolve_target_branch()
