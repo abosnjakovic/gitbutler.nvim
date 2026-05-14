@@ -267,34 +267,34 @@ M.timeline_diff_tree = {
   { path = 'src/token.lua', status = 'A' },
 }
 
-M.gh_run_list_json = [[
+M.gh_pr_checks_json = [[
 [
   {
-    "databaseId": 12345,
-    "name": "build",
-    "status": "completed",
-    "conclusion": "success",
+    "bucket": "pass",
+    "completedAt": "2026-05-14T01:02:14Z",
+    "link": "https://github.com/foo/bar/actions/runs/12345/job/9001",
+    "name": "Format (stylua)",
     "startedAt": "2026-05-14T01:00:00Z",
-    "updatedAt": "2026-05-14T01:02:14Z",
-    "url": "https://github.com/foo/bar/actions/runs/12345"
+    "state": "SUCCESS",
+    "workflow": "CI"
   },
   {
-    "databaseId": 12346,
-    "name": "test",
-    "status": "completed",
-    "conclusion": "failure",
+    "bucket": "fail",
+    "completedAt": "2026-05-14T01:01:37Z",
+    "link": "https://github.com/foo/bar/actions/runs/12345/job/9002",
+    "name": "Test (ubuntu-latest / nvim nightly)",
     "startedAt": "2026-05-14T01:00:05Z",
-    "updatedAt": "2026-05-14T01:01:37Z",
-    "url": "https://github.com/foo/bar/actions/runs/12346"
+    "state": "FAILURE",
+    "workflow": "CI"
   },
   {
-    "databaseId": 12347,
-    "name": "deploy",
-    "status": "in_progress",
-    "conclusion": null,
+    "bucket": "pending",
+    "completedAt": null,
+    "link": "https://github.com/foo/bar/actions/runs/12345/job/9003",
+    "name": "Deploy",
     "startedAt": "2026-05-14T01:02:00Z",
-    "updatedAt": "2026-05-14T01:04:05Z",
-    "url": "https://github.com/foo/bar/actions/runs/12347"
+    "state": "IN_PROGRESS",
+    "workflow": "Release"
   }
 ]
 ]]

@@ -10,7 +10,25 @@ function M.detect(url)
   return url:find('github.com', 1, true) ~= nil
 end
 
----Parse the JSON output of `gh run list --json ...` into the adapter check shape.
+---Map a `gh pr checks` bucket to the {status, conclusion} pair the glyph mapper expects.
+---@param bucket? string
+---@return string status
+---@return string? conclusion
+local function bucket_to_status(bucket)
+  if bucket == 'pass' then
+    return 'completed', 'success'
+  elseif bucket == 'fail' then
+    return 'completed', 'failure'
+  elseif bucket == 'pending' then
+    return 'in_progress', nil
+  elseif bucket == 'cancel' or bucket == 'skipping' then
+    return 'completed', 'cancelled'
+  end
+  return 'queued', nil
+end
+
+---Parse `gh pr checks --json name,state,bucket,workflow,startedAt,completedAt,link`
+---into the adapter check shape. One row per workflow job.
 ---@param json_text string
 ---@return table[]
 function M.parse_checks(json_text)
@@ -19,15 +37,23 @@ function M.parse_checks(json_text)
     return {}
   end
   local checks = {}
-  for _, run in ipairs(decoded) do
+  for _, c in ipairs(decoded) do
+    local status, conclusion = bucket_to_status(c.bucket)
+    local job_id = c.link and tostring(c.link):match('/job/(%d+)') or nil
+    local label
+    if c.workflow and c.workflow ~= '' then
+      label = c.workflow .. ' / ' .. (c.name or '?')
+    else
+      label = c.name or '?'
+    end
     table.insert(checks, {
-      id = tostring(run.databaseId),
-      name = run.name,
-      status = run.status,
-      conclusion = run.conclusion,
-      started_at = run.startedAt,
-      completed_at = run.updatedAt,
-      url = run.url,
+      id = job_id or c.link or '?',
+      name = label,
+      status = status,
+      conclusion = conclusion,
+      started_at = c.startedAt,
+      completed_at = c.completedAt,
+      url = c.link,
     })
   end
   return checks
@@ -50,6 +76,8 @@ local function require_gh(callback)
   return false
 end
 
+---List per-job checks for the branch's PR. Requires an open PR on the branch;
+---if there's no PR the callback receives a clear error.
 ---@param branch string
 ---@param callback fun(err?: string, checks?: table[])
 function M.list_checks(branch, callback)
@@ -58,21 +86,25 @@ function M.list_checks(branch, callback)
   end
   local args = {
     'gh',
-    'run',
-    'list',
-    '--branch',
+    'pr',
+    'checks',
     branch,
     '--json',
-    'databaseId,name,status,conclusion,startedAt,updatedAt,url',
-    '--limit',
-    '30',
+    'name,state,bucket,workflow,startedAt,completedAt,link',
   }
   vim.system(args, { text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
-        local msg = (result.stderr and result.stderr ~= '') and result.stderr
-          or ('gh run list exited with code ' .. result.code)
-        callback(vim.trim(msg))
+        local stderr = vim.trim(result.stderr or '')
+        local msg
+        if stderr:lower():find('no pull requests', 1, true) or stderr:lower():find('no open pull request', 1, true) then
+          msg = 'no open PR for ' .. branch .. ' — push and run `R` to open one'
+        elseif stderr ~= '' then
+          msg = stderr
+        else
+          msg = 'gh pr checks exited with code ' .. result.code
+        end
+        callback(msg)
         return
       end
       callback(nil, M.parse_checks(result.stdout or '[]'))
@@ -80,13 +112,14 @@ function M.list_checks(branch, callback)
   end)
 end
 
----@param check_id string
+---Open the log for a single job in a scratch buffer's source text.
+---@param check_id string Job ID (extracted from the check's link)
 ---@param callback fun(err?: string, log_text?: string)
 function M.view_log(check_id, callback)
   if not require_gh(callback) then
     return
   end
-  vim.system({ 'gh', 'run', 'view', check_id, '--log' }, { text = true }, function(result)
+  vim.system({ 'gh', 'run', 'view', '--job', check_id, '--log' }, { text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
         local msg = (result.stderr and result.stderr ~= '') and result.stderr
@@ -99,13 +132,14 @@ function M.view_log(check_id, callback)
   end)
 end
 
----@param check_id string
+---Re-run a single failed job.
+---@param check_id string Job ID
 ---@param callback fun(err?: string)
 function M.rerun(check_id, callback)
   if not require_gh(callback) then
     return
   end
-  vim.system({ 'gh', 'run', 'rerun', check_id, '--failed' }, { text = true }, function(result)
+  vim.system({ 'gh', 'run', 'rerun', '--job', check_id }, { text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
         local msg = (result.stderr and result.stderr ~= '') and result.stderr

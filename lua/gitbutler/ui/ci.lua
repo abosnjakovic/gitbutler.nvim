@@ -47,11 +47,19 @@ function M.build_lines(branch, checks)
     return lines
   end
 
+  local name_width = 30
+  for _, check in ipairs(checks) do
+    local n = #(check.name or '?')
+    if n > name_width then
+      name_width = n
+    end
+  end
+
   for _, check in ipairs(checks) do
     local glyph, hl = status_mod.ci_glyph(check)
     local dur = duration(check.started_at, check.completed_at)
     local right = dur ~= '' and dur or (check.status or '')
-    local text = string.format('%s  %-30s %s', glyph, check.name or '?', right)
+    local text = string.format('%s  %-' .. name_width .. 's  %s', glyph, check.name or '?', right)
     add(text, hl, 'ci_check', check)
   end
 
