@@ -22,6 +22,11 @@ function M.setup()
     GitButlerTimelineDate = { link = 'Title' },
     GitButlerTimelineAuthor = { link = 'Special' },
     GitButlerTimelineRef = { link = 'Comment' },
+    GitButlerCIQueued = { link = 'Comment' },
+    GitButlerCIRunning = { link = 'WarningMsg' },
+    GitButlerCIPass = { link = 'DiagnosticOk' },
+    GitButlerCIFail = { link = 'DiagnosticError' },
+    GitButlerCIUnknown = { link = 'Comment' },
   }
 
   for name, def in pairs(groups) do

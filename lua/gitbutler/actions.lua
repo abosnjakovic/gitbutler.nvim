@@ -1,5 +1,6 @@
 local cli = require('gitbutler.cli')
 local float = require('gitbutler.ui.float')
+local spinner = require('gitbutler.ui.spinner')
 
 local M = {}
 
@@ -86,6 +87,9 @@ function M.open_file(buf)
     vim.bo[diff_buf].filetype = 'diff'
     vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = diff_buf })
     vim.keymap.set('n', '<Tab>', '<cmd>close<CR>', { buffer = diff_buf })
+    -- Commits are immutable; absorb `r`/`<C-r>` so they don't fall through to vim's replace.
+    vim.keymap.set('n', 'r', '<cmd>close<CR>', { buffer = diff_buf })
+    vim.keymap.set('n', '<C-r>', '<cmd>close<CR>', { buffer = diff_buf })
     return
   end
 
@@ -364,6 +368,331 @@ function M.push(buf)
   end)
 end
 
+---Build the ephemeral branch name used by direct_to_main.
+---@param ts integer Unix timestamp (typically os.time())
+---@return string
+function M.ephemeral_branch_name(ts)
+  return 'direct-to-main-' .. tostring(ts)
+end
+
+---Format a step-tagged error message used by surface_error/surface_warn.
+---@param step string Step label (e.g. 'commit', 'push')
+---@param body string Error body
+---@return string
+function M.format_step_error(step, body)
+  return '[gitbutler ' .. step .. '] ' .. body
+end
+
+---Notify ERROR + write to :messages history so the user can recall it later.
+local function surface_error(step, body)
+  local msg = M.format_step_error(step, body)
+  vim.notify(msg, vim.log.levels.ERROR)
+  vim.api.nvim_echo({ { msg, 'ErrorMsg' } }, true, {})
+end
+
+---Notify WARN + write to :messages history. Used for non-fatal cleanup steps.
+local function surface_warn(step, body)
+  local msg = M.format_step_error(step, body)
+  vim.notify(msg, vim.log.levels.WARN)
+  vim.api.nvim_echo({ { msg, 'WarningMsg' } }, true, {})
+end
+
+---Check whether advancing `target` to `ephemeral_sha` would be a fast-forward,
+---i.e. whether `target` is an ancestor of `ephemeral_sha`.
+---@return boolean? true if FF-safe, false if not, nil on git error
+local function is_fast_forward(target, ephemeral_sha)
+  local r = vim.system({ 'git', 'merge-base', '--is-ancestor', target, ephemeral_sha }, { text = true }):wait()
+  if r.code == 0 then
+    return true
+  elseif r.code == 1 then
+    return false
+  end
+  return nil
+end
+
+---Resolve the local target branch name (e.g. 'main' or 'master') via origin/HEAD,
+---falling back to a local-branch probe if origin has no HEAD ref.
+local function resolve_target_branch()
+  local head = vim.system({ 'git', 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD' }, { text = true }):wait()
+  if head.code == 0 and head.stdout then
+    local ref = vim.trim(head.stdout)
+    local stripped = ref:gsub('^origin/', '')
+    if stripped ~= '' then
+      return stripped
+    end
+  end
+
+  for _, name in ipairs({ 'main', 'master' }) do
+    local probe = vim.system({ 'git', 'rev-parse', '--verify', name }, { text = true }):wait()
+    if probe.code == 0 then
+      return name
+    end
+  end
+
+  return nil
+end
+
+---Push <target> to origin via raw git. The target ref sits outside GitButler's
+---virtual-branch surface, so `but push` is not the right tool here.
+local function git_push_target(target, callback)
+  vim.system({ 'git', 'push', 'origin', target .. ':' .. target }, { text = true }, function(result)
+    vim.schedule(function()
+      if result.code ~= 0 then
+        local msg = (result.stderr and result.stderr ~= '') and result.stderr
+          or ('git push exited with code ' .. result.code)
+        callback(vim.trim(msg))
+      else
+        callback(nil)
+      end
+    end)
+  end)
+end
+
+---Commit selected (or unassigned) files onto an ephemeral virtual branch,
+---advance the local target ref via git update-ref after a fast-forward
+---pre-flight, push the target to origin, then sync the workspace via
+---but pull + but clean and delete the remote ephemeral ref.
+function M.direct_to_main(buf)
+  local file_ids = {}
+  local selected = buf:get_selected_lines({ 'file' })
+  if #selected > 0 then
+    for _, line in ipairs(selected) do
+      if line.data and line.data.cli_id then
+        table.insert(file_ids, line.data.cli_id)
+      end
+    end
+  else
+    for _, line in ipairs(buf.lines or {}) do
+      if line.type == 'file' and line.data and line.data.unassigned and line.data.cli_id then
+        table.insert(file_ids, line.data.cli_id)
+      end
+    end
+  end
+
+  if #file_ids == 0 then
+    vim.notify('gitbutler: no unassigned changes', vim.log.levels.WARN)
+    return
+  end
+
+  local title = 'Commit to main (' .. #file_ids .. ' file' .. (#file_ids > 1 and 's' or '') .. ')'
+  float.input({
+    title = title,
+    on_submit = function(message)
+      if not message or vim.trim(message) == '' then
+        return
+      end
+
+      local ts = os.time()
+      local ephemeral_name = M.ephemeral_branch_name(ts)
+
+      local sp = spinner.start('committing ' .. #file_ids .. ' file(s)')
+      cli.commit(ephemeral_name, message, function(commit_err, commit_result)
+        if commit_err then
+          sp:stop()
+          buf:clear_selection()
+          surface_error('commit', commit_err)
+          refresh()
+          return
+        end
+
+        local ephemeral_sha = type(commit_result) == 'table' and commit_result.commit_id or nil
+        if not ephemeral_sha or ephemeral_sha == '' then
+          sp:stop()
+          buf:clear_selection()
+          surface_error('commit', 'no commit_id in response from but commit')
+          refresh()
+          return
+        end
+
+        local target = resolve_target_branch()
+        if not target then
+          sp:stop()
+          buf:clear_selection()
+          surface_error('target-resolve', 'could not resolve target branch (no origin/HEAD, no local main/master)')
+          refresh()
+          return
+        end
+
+        -- Step 3: refresh remote-tracking ref (non-fatal).
+        sp:update('fetching origin/' .. target)
+        local fetch = vim.system({ 'git', 'fetch', 'origin', target }, { text = true }):wait()
+        if fetch.code ~= 0 then
+          surface_warn('fetch', vim.trim(fetch.stderr or ('exit ' .. fetch.code)))
+        end
+
+        -- Step 4: fast-forward pre-flight.
+        sp:update('pre-flight: fast-forward check')
+        local ff = is_fast_forward(target, ephemeral_sha)
+        if ff == false then
+          sp:stop()
+          buf:clear_selection()
+          local local_sha =
+            vim.trim((vim.system({ 'git', 'rev-parse', '--short', target }, { text = true }):wait().stdout or ''))
+          local origin_sha = vim.trim(
+            (vim.system({ 'git', 'rev-parse', '--short', 'origin/' .. target }, { text = true }):wait().stdout or '')
+          )
+          surface_error(
+            'preflight',
+            'local '
+              .. target
+              .. ' not ancestor of new commit — reconcile manually before retrying.\n'
+              .. 'local '
+              .. target
+              .. ' is at '
+              .. local_sha
+              .. ', origin/'
+              .. target
+              .. ' is at '
+              .. origin_sha
+              .. '. Try:\n'
+              .. '  git fetch origin && git reset --hard origin/'
+              .. target
+          )
+          refresh()
+          return
+        elseif ff == nil then
+          sp:stop()
+          buf:clear_selection()
+          surface_error('preflight', 'git merge-base --is-ancestor failed')
+          refresh()
+          return
+        end
+
+        -- Step 5: advance local target ref.
+        sp:update('advancing local ' .. target)
+        local upd = vim.system({ 'git', 'update-ref', 'refs/heads/' .. target, ephemeral_sha }, { text = true }):wait()
+        if upd.code ~= 0 then
+          sp:stop()
+          buf:clear_selection()
+          surface_error('update-ref', vim.trim(upd.stderr or ('exit ' .. upd.code)))
+          refresh()
+          return
+        end
+
+        -- Step 6: push target to origin.
+        sp:update('pushing ' .. target .. ' to origin')
+        git_push_target(target, function(push_err)
+          if push_err then
+            sp:stop()
+            buf:clear_selection()
+            surface_error('push', push_err .. ' (local ' .. target .. ' already advanced; remote is now behind)')
+            refresh()
+            return
+          end
+
+          -- Step 7: but pull (non-fatal).
+          sp:update('but pull (sync workspace)')
+          cli.pull(function(pull_err, _)
+            if pull_err then
+              surface_warn('pull', pull_err)
+            end
+
+            -- Step 8: but clean (non-fatal).
+            sp:update('but clean (drop empty branches)')
+            cli.clean(function(clean_err, _)
+              if clean_err then
+                surface_warn('clean', clean_err)
+              end
+
+              -- Step 9: delete remote ephemeral ref (non-fatal).
+              sp:update('deleting remote ' .. ephemeral_name)
+              vim.system({ 'git', 'push', 'origin', ':' .. ephemeral_name }, { text = true }, function(del)
+                vim.schedule(function()
+                  sp:stop()
+                  if del.code ~= 0 then
+                    surface_warn('delete-remote-ephemeral', vim.trim(del.stderr or ('exit ' .. del.code)))
+                  end
+
+                  buf:clear_selection()
+                  vim.notify(
+                    'gitbutler: direct-to-main done (' .. target .. ' ← ' .. ephemeral_sha:sub(1, 7) .. ')',
+                    vim.log.levels.INFO
+                  )
+                  refresh()
+                end)
+              end)
+            end)
+          end)
+        end)
+      end, file_ids, true)
+    end,
+  })
+end
+
+---Headless variant of direct_to_main used by tests/manual/direct_to_main.sh.
+---Looks up cliIds via `but status --json`, runs the same pipeline synchronously.
+---Returns nil on success, a string error on the first failed step.
+---@param file_path string Path of the unassigned file to commit (relative to cwd)
+---@param message string Commit message
+---@return string? err
+function M.direct_to_main_test_harness(file_path, message)
+  local status_res = vim.system({ 'but', 'status', '--json' }, { text = true }):wait()
+  if status_res.code ~= 0 then
+    return 'but status: ' .. vim.trim(status_res.stderr or '')
+  end
+  local ok, decoded = pcall(vim.json.decode, status_res.stdout or '')
+  if not ok or type(decoded) ~= 'table' then
+    return 'but status: invalid JSON'
+  end
+
+  local cli_id
+  for _, c in ipairs(decoded.unassignedChanges or {}) do
+    if c.filePath == file_path then
+      cli_id = c.cliId
+      break
+    end
+  end
+  if not cli_id then
+    return 'file not in unassignedChanges: ' .. file_path
+  end
+
+  local ts = os.time()
+  local ephemeral_name = M.ephemeral_branch_name(ts)
+
+  -- but commit -c <ephemeral> -m <msg> -p <cli_id> --json
+  local commit_res = vim
+    .system({ 'but', 'commit', ephemeral_name, '-c', '-m', message, '-p', cli_id, '--json' }, { text = true })
+    :wait()
+  if commit_res.code ~= 0 then
+    return 'commit: ' .. vim.trim(commit_res.stderr or '')
+  end
+  local commit_ok, commit_decoded = pcall(vim.json.decode, commit_res.stdout or '')
+  local ephemeral_sha = commit_ok and type(commit_decoded) == 'table' and commit_decoded.commit_id or nil
+  if not ephemeral_sha then
+    return 'commit: no commit_id in response'
+  end
+
+  local target = resolve_target_branch()
+  if not target then
+    return 'target-resolve: could not resolve target branch'
+  end
+
+  vim.system({ 'git', 'fetch', 'origin', target }, { text = true }):wait()
+
+  local ff = is_fast_forward(target, ephemeral_sha)
+  if ff == false then
+    return 'preflight: local ' .. target .. ' not ancestor of new commit'
+  elseif ff == nil then
+    return 'preflight: git merge-base failed'
+  end
+
+  local upd = vim.system({ 'git', 'update-ref', 'refs/heads/' .. target, ephemeral_sha }, { text = true }):wait()
+  if upd.code ~= 0 then
+    return 'update-ref: ' .. vim.trim(upd.stderr or '')
+  end
+
+  local push = vim.system({ 'git', 'push', 'origin', target .. ':' .. target }, { text = true }):wait()
+  if push.code ~= 0 then
+    return 'push: ' .. vim.trim(push.stderr or '')
+  end
+
+  vim.system({ 'but', 'pull', '--json' }, { text = true }):wait()
+  vim.system({ 'but', 'clean', '--json' }, { text = true }):wait()
+  vim.system({ 'git', 'push', 'origin', ':' .. ephemeral_name }, { text = true }):wait()
+
+  return nil
+end
+
 ---Push all branches (syncs with upstream first).
 function M.push_all(_buf)
   notify_start('sync all (pull + push)')
@@ -376,6 +705,121 @@ function M.push_all(_buf)
       notify_result('push all', err2, result2)
     end)
   end)
+end
+
+---Create a forge review (PR/MR) for the branch under cursor. Pre-fills the
+---title/body float with the most recent commit's subject and body.
+function M.pr_create(buf)
+  local branch = buf:get_cursor_branch()
+  local name = branch and branch.name or nil
+  if not name then
+    vim.notify('gitbutler: no branch under cursor', vim.log.levels.WARN)
+    return
+  end
+
+  -- Pre-fill from latest commit.
+  local commits = branch and branch.commits or {}
+  local latest = commits[#commits]
+  local content
+  if latest and latest.message and latest.message ~= '' then
+    content = vim.split(latest.message, '\n')
+  end
+
+  float.input({
+    title = 'New PR for ' .. name,
+    content = content,
+    on_submit = function(message)
+      if not message or vim.trim(message) == '' then
+        return
+      end
+      notify_start('pr new')
+      local sp = spinner.start('creating PR for ' .. name)
+      cli.pr_new(name, message, function(err, result)
+        sp:stop()
+        if err then
+          vim.notify('gitbutler pr: ' .. err, vim.log.levels.ERROR)
+          refresh()
+          return
+        end
+        local url = type(result) == 'table' and (result.url or result.htmlUrl) or nil
+        vim.notify('gitbutler pr: created' .. (url and (' — ' .. url) or ''), vim.log.levels.INFO)
+        refresh()
+      end)
+    end,
+  })
+end
+
+---Toggle draft/ready state of the PR for the branch under cursor.
+---State is read from `branch.reviewState` when present; otherwise the action
+---calls `set-draft` first and the user can press D again to flip if needed.
+function M.pr_toggle_draft(buf)
+  local branch = buf:get_cursor_branch()
+  local name = branch and branch.name or nil
+  if not name then
+    vim.notify('gitbutler: no branch under cursor', vim.log.levels.WARN)
+    return
+  end
+  if not branch.reviewId then
+    vim.notify('gitbutler: no PR for this branch', vim.log.levels.WARN)
+    return
+  end
+
+  local is_draft = branch.reviewState == 'draft'
+  if is_draft then
+    notify_start('pr set-ready')
+    cli.pr_set_ready(name, function(err, _)
+      notify_result('pr set-ready', err, nil)
+    end)
+  else
+    notify_start('pr set-draft')
+    cli.pr_set_draft(name, function(err, _)
+      notify_result('pr set-draft', err, nil)
+    end)
+  end
+end
+
+---Toggle auto-merge for the PR on the branch under cursor or named explicitly.
+---@param buf_or_name table|string Either the status buffer or a branch name string
+function M.pr_auto_merge(buf_or_name)
+  local name
+  if type(buf_or_name) == 'string' then
+    name = buf_or_name
+  elseif type(buf_or_name) == 'table' then
+    local branch = buf_or_name:get_cursor_branch()
+    name = branch and branch.name or nil
+  end
+  if not name then
+    vim.notify('gitbutler: no branch specified', vim.log.levels.WARN)
+    return
+  end
+
+  notify_start('pr auto-merge')
+  cli.pr_auto_merge(name, function(err, _)
+    notify_result('pr auto-merge', err, nil)
+  end)
+end
+
+---Open the CI view for the branch under cursor. The adapter decides whether
+---there are runs to show; `branch.ci` from `but status` is often null even
+---when `gh` has runs, so we don't gate on it here.
+---
+---When the cursor branch is part of a stack, query the stack HEAD branch —
+---that's what the forge has CI for (the PR's head ref). Base branches in a
+---stack typically have no runs of their own.
+function M.ci_open(buf)
+  local data = buf:get_cursor_branch()
+  if not data or not data.name then
+    vim.notify('gitbutler: no branch under cursor', vim.log.levels.WARN)
+    return
+  end
+
+  local query_name = data.name
+  local stack_branches = data.stack and data.stack.branches or nil
+  if stack_branches and stack_branches[1] and stack_branches[1].name then
+    query_name = stack_branches[1].name
+  end
+
+  require('gitbutler.ui.ci').open(query_name)
 end
 
 ---Pull (sync) from upstream.
@@ -478,24 +922,44 @@ function M.toggle_fold(buf)
     vim.cmd('belowright split')
     local diff_buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_win_set_buf(0, diff_buf)
-    vim.api.nvim_buf_set_lines(diff_buf, 0, -1, false, diff_lines)
     vim.bo[diff_buf].buftype = 'nofile'
     vim.bo[diff_buf].bufhidden = 'wipe'
     vim.bo[diff_buf].filetype = 'gitbutler-diff'
 
     local ns = vim.api.nvim_create_namespace('gitbutler-diff')
-    for i, l in ipairs(diff_lines) do
-      if l:match('│%+') then
-        vim.api.nvim_buf_add_highlight(diff_buf, ns, 'DiffAdd', i - 1, 0, -1)
-      elseif l:match('│%-') then
-        vim.api.nvim_buf_add_highlight(diff_buf, ns, 'DiffDelete', i - 1, 0, -1)
-      elseif l:match('^[─╮╯╭]') or l:match('^%s*[─╮╯╭]') then
-        vim.api.nvim_buf_add_highlight(diff_buf, ns, 'Comment', i - 1, 0, -1)
+
+    local function render(lines_to_render)
+      pcall(vim.api.nvim_buf_set_lines, diff_buf, 0, -1, false, lines_to_render)
+      vim.api.nvim_buf_clear_namespace(diff_buf, ns, 0, -1)
+      for i, l in ipairs(lines_to_render) do
+        if l:match('│%+') then
+          vim.api.nvim_buf_add_highlight(diff_buf, ns, 'DiffAdd', i - 1, 0, -1)
+        elseif l:match('│%-') then
+          vim.api.nvim_buf_add_highlight(diff_buf, ns, 'DiffDelete', i - 1, 0, -1)
+        elseif l:match('^[─╮╯╭]') or l:match('^%s*[─╮╯╭]') then
+          vim.api.nvim_buf_add_highlight(diff_buf, ns, 'Comment', i - 1, 0, -1)
+        end
       end
+    end
+
+    render(diff_lines)
+
+    local function refetch()
+      if not vim.api.nvim_buf_is_valid(diff_buf) then
+        return
+      end
+      local re_err, re_result = cli.run_sync({ 'diff', cli_id })
+      if re_err then
+        vim.notify('gitbutler diff: ' .. re_err, vim.log.levels.ERROR)
+        return
+      end
+      render(vim.split(tostring(re_result), '\n'))
     end
 
     vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = diff_buf })
     vim.keymap.set('n', '<Tab>', '<cmd>close<CR>', { buffer = diff_buf })
+    vim.keymap.set('n', 'r', refetch, { buffer = diff_buf, desc = 'gitbutler: refresh file diff' })
+    vim.keymap.set('n', '<C-r>', refetch, { buffer = diff_buf, desc = 'gitbutler: refresh file diff' })
     return
   end
 
@@ -538,6 +1002,10 @@ function M.help(_buf)
     'u        Undo last operation',
     'p        Push branch',
     'P        Push all branches',
+    'R        Create PR for the branch under cursor',
+    'D        Toggle PR draft/ready',
+    'C        Open CI view for branch',
+    'M        Commit & push selected (or unassigned) to main',
     'F        Pull / sync from upstream',
     'B        Branch management',
     'b        New branch',
@@ -545,7 +1013,7 @@ function M.help(_buf)
     'O        Operations log',
     'x        Discard file changes',
     '<Tab>    Diff / toggle fold',
-    'r        Refresh',
+    '<C-r>    Refresh',
     'q        Close',
     '<Space>  Select / deselect',
     '?        This help',

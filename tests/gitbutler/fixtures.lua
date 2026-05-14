@@ -267,4 +267,36 @@ M.timeline_diff_tree = {
   { path = 'src/token.lua', status = 'A' },
 }
 
+M.gh_pr_checks_json = [[
+[
+  {
+    "bucket": "pass",
+    "completedAt": "2026-05-14T01:02:14Z",
+    "link": "https://github.com/foo/bar/actions/runs/12345/job/9001",
+    "name": "Format (stylua)",
+    "startedAt": "2026-05-14T01:00:00Z",
+    "state": "SUCCESS",
+    "workflow": "CI"
+  },
+  {
+    "bucket": "fail",
+    "completedAt": "2026-05-14T01:01:37Z",
+    "link": "https://github.com/foo/bar/actions/runs/12345/job/9002",
+    "name": "Test (ubuntu-latest / nvim nightly)",
+    "startedAt": "2026-05-14T01:00:05Z",
+    "state": "FAILURE",
+    "workflow": "CI"
+  },
+  {
+    "bucket": "pending",
+    "completedAt": null,
+    "link": "https://github.com/foo/bar/actions/runs/12345/job/9003",
+    "name": "Deploy",
+    "startedAt": "2026-05-14T01:02:00Z",
+    "state": "IN_PROGRESS",
+    "workflow": "Release"
+  }
+]
+]]
+
 return M

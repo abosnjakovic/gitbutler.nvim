@@ -343,7 +343,8 @@ function M.open()
 
     local timeline_keymaps = {
       ['q'] = 'close',
-      ['r'] = 'refresh',
+      ['<C-r>'] = 'refresh',
+      ['r'] = 'refresh', -- undocumented alias; advertised binding is <C-r>
       ['<Tab>'] = 'toggle_fold',
       ['y'] = 'yank_sha',
       ['l'] = 'jump_to_log',

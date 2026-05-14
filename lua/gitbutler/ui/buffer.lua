@@ -417,7 +417,7 @@ function Buffer:on(name, handler)
 end
 
 function Buffer:_set_keymaps()
-  local mappings = config.values.keymaps.status or {}
+  local mappings = (config.values.keymaps and config.values.keymaps[self.view or 'status']) or {}
   for key, action in pairs(mappings) do
     if action then
       vim.keymap.set('n', key, function()
