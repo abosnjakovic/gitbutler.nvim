@@ -587,6 +587,80 @@ function M.direct_to_main(buf)
   })
 end
 
+---Headless variant of direct_to_main used by tests/manual/direct_to_main.sh.
+---Looks up cliIds via `but status --json`, runs the same pipeline synchronously.
+---Returns nil on success, a string error on the first failed step.
+---@param file_path string Path of the unassigned file to commit (relative to cwd)
+---@param message string Commit message
+---@return string? err
+function M.direct_to_main_test_harness(file_path, message)
+  local status_res = vim.system({ 'but', 'status', '--json' }, { text = true }):wait()
+  if status_res.code ~= 0 then
+    return 'but status: ' .. vim.trim(status_res.stderr or '')
+  end
+  local ok, decoded = pcall(vim.json.decode, status_res.stdout or '')
+  if not ok or type(decoded) ~= 'table' then
+    return 'but status: invalid JSON'
+  end
+
+  local cli_id
+  for _, c in ipairs(decoded.unassignedChanges or {}) do
+    if c.filePath == file_path then
+      cli_id = c.cliId
+      break
+    end
+  end
+  if not cli_id then
+    return 'file not in unassignedChanges: ' .. file_path
+  end
+
+  local ts = os.time()
+  local ephemeral_name = M.ephemeral_branch_name(ts)
+
+  -- but commit -c <ephemeral> -m <msg> -p <cli_id> --json
+  local commit_res = vim
+    .system({ 'but', 'commit', ephemeral_name, '-c', '-m', message, '-p', cli_id, '--json' }, { text = true })
+    :wait()
+  if commit_res.code ~= 0 then
+    return 'commit: ' .. vim.trim(commit_res.stderr or '')
+  end
+  local commit_ok, commit_decoded = pcall(vim.json.decode, commit_res.stdout or '')
+  local ephemeral_sha = commit_ok and type(commit_decoded) == 'table' and commit_decoded.commit_id or nil
+  if not ephemeral_sha then
+    return 'commit: no commit_id in response'
+  end
+
+  local target = resolve_target_branch()
+  if not target then
+    return 'target-resolve: could not resolve target branch'
+  end
+
+  vim.system({ 'git', 'fetch', 'origin', target }, { text = true }):wait()
+
+  local ff = is_fast_forward(target, ephemeral_sha)
+  if ff == false then
+    return 'preflight: local ' .. target .. ' not ancestor of new commit'
+  elseif ff == nil then
+    return 'preflight: git merge-base failed'
+  end
+
+  local upd = vim.system({ 'git', 'update-ref', 'refs/heads/' .. target, ephemeral_sha }, { text = true }):wait()
+  if upd.code ~= 0 then
+    return 'update-ref: ' .. vim.trim(upd.stderr or '')
+  end
+
+  local push = vim.system({ 'git', 'push', 'origin', target .. ':' .. target }, { text = true }):wait()
+  if push.code ~= 0 then
+    return 'push: ' .. vim.trim(push.stderr or '')
+  end
+
+  vim.system({ 'but', 'pull', '--json' }, { text = true }):wait()
+  vim.system({ 'but', 'clean', '--json' }, { text = true }):wait()
+  vim.system({ 'git', 'push', 'origin', ':' .. ephemeral_name }, { text = true }):wait()
+
+  return nil
+end
+
 ---Push all branches (syncs with upstream first).
 function M.push_all(_buf)
   notify_start('sync all (pull + push)')
