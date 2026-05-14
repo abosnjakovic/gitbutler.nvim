@@ -89,8 +89,10 @@ function M.open(branch, injected_adapter)
     if not line or line.type ~= 'ci_check' or not line.data then
       return
     end
-    local sp = spinner.start('fetching log: ' .. (line.data.name or '?'))
-    adapter.view_log(line.data.id, function(err, text)
+    local check_id = line.data.id
+    local check_name = line.data.name or '?'
+    local sp = spinner.start('fetching log: ' .. check_name)
+    adapter.view_log(check_id, function(err, text)
       sp:stop()
       if err then
         vim.notify('gh view log: ' .. err, vim.log.levels.ERROR)
@@ -103,7 +105,28 @@ function M.open(branch, injected_adapter)
       vim.bo[log_buf].buftype = 'nofile'
       vim.bo[log_buf].bufhidden = 'wipe'
       vim.bo[log_buf].filetype = 'log'
+
+      local function refetch()
+        if not vim.api.nvim_buf_is_valid(log_buf) then
+          return
+        end
+        local refresh_sp = spinner.start('refetching log: ' .. check_name)
+        adapter.view_log(check_id, function(re_err, re_text)
+          refresh_sp:stop()
+          if re_err then
+            vim.notify('gh view log: ' .. re_err, vim.log.levels.ERROR)
+            return
+          end
+          if not vim.api.nvim_buf_is_valid(log_buf) then
+            return
+          end
+          pcall(vim.api.nvim_buf_set_lines, log_buf, 0, -1, false, vim.split(re_text or '', '\n'))
+        end)
+      end
+
       vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = log_buf })
+      vim.keymap.set('n', 'r', refetch, { buffer = log_buf, desc = 'gitbutler: refetch CI log' })
+      vim.keymap.set('n', '<C-r>', refetch, { buffer = log_buf, desc = 'gitbutler: refetch CI log' })
     end)
   end)
 
