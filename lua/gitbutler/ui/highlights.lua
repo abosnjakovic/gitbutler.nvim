@@ -22,17 +22,16 @@ function M.setup()
     GitButlerTimelineDate = { link = 'Title' },
     GitButlerTimelineAuthor = { link = 'Special' },
     GitButlerTimelineRef = { link = 'Comment' },
+    GitButlerCIQueued = { link = 'Comment' },
+    GitButlerCIRunning = { link = 'WarningMsg' },
+    GitButlerCIPass = { link = 'DiagnosticOk' },
+    GitButlerCIFail = { link = 'DiagnosticError' },
+    GitButlerCIUnknown = { link = 'Comment' },
   }
 
   for name, def in pairs(groups) do
     vim.api.nvim_set_hl(0, name, vim.tbl_extend('keep', def, { default = true }))
   end
-
-  vim.api.nvim_set_hl(0, 'GitButlerCIQueued', { link = 'Comment', default = true })
-  vim.api.nvim_set_hl(0, 'GitButlerCIRunning', { link = 'WarningMsg', default = true })
-  vim.api.nvim_set_hl(0, 'GitButlerCIPass', { link = 'DiagnosticOk', default = true })
-  vim.api.nvim_set_hl(0, 'GitButlerCIFail', { link = 'DiagnosticError', default = true })
-  vim.api.nvim_set_hl(0, 'GitButlerCIUnknown', { link = 'Comment', default = true })
 end
 
 return M

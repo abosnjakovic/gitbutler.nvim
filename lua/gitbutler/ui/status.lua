@@ -104,11 +104,11 @@ local function build_lines(buf, data)
       end
       local suffix = #parts > 0 and ('  (' .. table.concat(parts, ', ') .. ')') or ''
 
-      local glyph, _glyph_hl = M.ci_glyph(branch.ci)
+      local glyph = M.ci_glyph(branch.ci)
       local prefix = glyph ~= '' and (glyph .. ' ') or ''
       local review_suffix = ''
       if branch.reviewId and branch.reviewId ~= vim.NIL then
-        review_suffix = '  #' .. tostring(branch.reviewId):sub(1, 7)
+        review_suffix = '  #' .. tostring(branch.reviewId)
       end
 
       local fold_id = 'branch:' .. name
