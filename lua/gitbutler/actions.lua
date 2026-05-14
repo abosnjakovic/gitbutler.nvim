@@ -478,43 +478,108 @@ function M.direct_to_main(buf)
         return
       end
 
-      local branch_name = 'direct-to-main-' .. os.time()
+      local ts = os.time()
+      local ephemeral_name = M.ephemeral_branch_name(ts)
 
       notify_start('commit')
-      cli.commit(branch_name, message, function(commit_err, _)
+      cli.commit(ephemeral_name, message, function(commit_err, commit_result)
         if commit_err then
           buf:clear_selection()
-          vim.notify('gitbutler commit: ' .. commit_err, vim.log.levels.ERROR)
+          surface_error('commit', commit_err)
           refresh()
           return
         end
 
-        notify_start('merge → target')
-        cli.merge(branch_name, function(merge_err, _)
-          if merge_err then
+        local ephemeral_sha = type(commit_result) == 'table' and commit_result.commit_id or nil
+        if not ephemeral_sha or ephemeral_sha == '' then
+          buf:clear_selection()
+          surface_error('commit', 'no commit_id in response from but commit')
+          refresh()
+          return
+        end
+
+        local target = resolve_target_branch()
+        if not target then
+          buf:clear_selection()
+          surface_error('target-resolve', 'could not resolve target branch (no origin/HEAD, no local main/master)')
+          refresh()
+          return
+        end
+
+        -- Step 3: refresh remote-tracking ref (non-fatal).
+        local fetch = vim.system({ 'git', 'fetch', 'origin', target }, { text = true }):wait()
+        if fetch.code ~= 0 then
+          surface_warn('fetch', vim.trim(fetch.stderr or ('exit ' .. fetch.code)))
+        end
+
+        -- Step 4: fast-forward pre-flight.
+        local ff = is_fast_forward(target, ephemeral_sha)
+        if ff == false then
+          buf:clear_selection()
+          local local_sha = vim.trim((vim.system({ 'git', 'rev-parse', '--short', target }, { text = true }):wait().stdout or ''))
+          local origin_sha = vim.trim((vim.system({ 'git', 'rev-parse', '--short', 'origin/' .. target }, { text = true }):wait().stdout or ''))
+          surface_error(
+            'preflight',
+            'local ' .. target .. ' not ancestor of new commit — reconcile manually before retrying.\n'
+              .. 'local ' .. target .. ' is at ' .. local_sha .. ', origin/' .. target .. ' is at ' .. origin_sha .. '. Try:\n'
+              .. '  git fetch origin && git reset --hard origin/' .. target
+          )
+          refresh()
+          return
+        elseif ff == nil then
+          buf:clear_selection()
+          surface_error('preflight', 'git merge-base --is-ancestor failed')
+          refresh()
+          return
+        end
+
+        -- Step 5: advance local target ref.
+        local upd = vim.system({ 'git', 'update-ref', 'refs/heads/' .. target, ephemeral_sha }, { text = true }):wait()
+        if upd.code ~= 0 then
+          buf:clear_selection()
+          surface_error('update-ref', vim.trim(upd.stderr or ('exit ' .. upd.code)))
+          refresh()
+          return
+        end
+
+        -- Step 6: push target to origin.
+        notify_start('git push ' .. target)
+        git_push_target(target, function(push_err)
+          if push_err then
             buf:clear_selection()
-            vim.notify('gitbutler merge: ' .. merge_err, vim.log.levels.ERROR)
+            surface_error('push', push_err .. ' (local ' .. target .. ' already advanced; remote is now behind)')
             refresh()
             return
           end
 
-          local target = resolve_target_branch()
-          if not target then
-            buf:clear_selection()
-            vim.notify('gitbutler: could not resolve target branch for push', vim.log.levels.ERROR)
-            refresh()
-            return
-          end
-
-          notify_start('git push ' .. target)
-          git_push_target(target, function(push_err)
-            buf:clear_selection()
-            if push_err then
-              vim.notify('git push: ' .. push_err, vim.log.levels.ERROR)
-            else
-              vim.notify('gitbutler: direct-to-main done (' .. target .. ')', vim.log.levels.INFO)
+          -- Step 7: but pull (non-fatal).
+          cli.pull(function(pull_err, _)
+            if pull_err then
+              surface_warn('pull', pull_err)
             end
-            refresh()
+
+            -- Step 8: but clean (non-fatal).
+            cli.clean(function(clean_err, _)
+              if clean_err then
+                surface_warn('clean', clean_err)
+              end
+
+              -- Step 9: delete remote ephemeral ref (non-fatal).
+              vim.system({ 'git', 'push', 'origin', ':' .. ephemeral_name }, { text = true }, function(del)
+                vim.schedule(function()
+                  if del.code ~= 0 then
+                    surface_warn('delete-remote-ephemeral', vim.trim(del.stderr or ('exit ' .. del.code)))
+                  end
+
+                  buf:clear_selection()
+                  vim.notify(
+                    'gitbutler: direct-to-main done (' .. target .. ' ← ' .. ephemeral_sha:sub(1, 7) .. ')',
+                    vim.log.levels.INFO
+                  )
+                  refresh()
+                end)
+              end)
+            end)
           end)
         end)
       end, file_ids, true)
