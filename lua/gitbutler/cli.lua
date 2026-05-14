@@ -269,4 +269,9 @@ function M.pr_auto_merge(branch, callback)
   M.run({ 'pr', 'auto-merge', branch, '--json' }, callback)
 end
 
+---Convenience: but clean (remove empty branches from workspace)
+function M.clean(callback)
+  M.run({ 'clean', '--json' }, callback)
+end
+
 return M
