@@ -532,6 +532,35 @@ function M.pr_create(buf)
   })
 end
 
+---Toggle draft/ready state of the PR for the branch under cursor.
+---State is read from `branch.reviewState` when present; otherwise the action
+---calls `set-draft` first and the user can press D again to flip if needed.
+function M.pr_toggle_draft(buf)
+  local branch = buf:get_cursor_branch()
+  local name = branch and branch.name or nil
+  if not name then
+    vim.notify('gitbutler: no branch under cursor', vim.log.levels.WARN)
+    return
+  end
+  if not branch.reviewId then
+    vim.notify('gitbutler: no PR for this branch', vim.log.levels.WARN)
+    return
+  end
+
+  local is_draft = branch.reviewState == 'draft'
+  if is_draft then
+    notify_start('pr set-ready')
+    cli.pr_set_ready(name, function(err, _)
+      notify_result('pr set-ready', err, nil)
+    end)
+  else
+    notify_start('pr set-draft')
+    cli.pr_set_draft(name, function(err, _)
+      notify_result('pr set-draft', err, nil)
+    end)
+  end
+end
+
 ---Pull (sync) from upstream.
 function M.pull(_buf)
   notify_start('pull')
@@ -693,6 +722,7 @@ function M.help(_buf)
     'p        Push branch',
     'P        Push all branches',
     'R        Create PR for the branch under cursor',
+    'D        Toggle PR draft/ready',
     'M        Commit & push selected (or unassigned) to main',
     'F        Pull / sync from upstream',
     'B        Branch management',
