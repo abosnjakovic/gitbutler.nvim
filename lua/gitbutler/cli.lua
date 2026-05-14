@@ -246,4 +246,27 @@ function M.oplog_snapshot(message, callback)
   M.run(args, callback)
 end
 
+---Convenience: but pr new <branch> -m <message>
+---@param branch string Branch name or CLI ID
+---@param message string PR title + body (first line = title)
+---@param callback fun(err?: string, result?: any)
+function M.pr_new(branch, message, callback)
+  M.run({ 'pr', 'new', branch, '-m', message, '--json' }, callback)
+end
+
+---Convenience: but pr set-draft <branch>
+function M.pr_set_draft(branch, callback)
+  M.run({ 'pr', 'set-draft', branch, '--json' }, callback)
+end
+
+---Convenience: but pr set-ready <branch>
+function M.pr_set_ready(branch, callback)
+  M.run({ 'pr', 'set-ready', branch, '--json' }, callback)
+end
+
+---Convenience: but pr auto-merge <branch>
+function M.pr_auto_merge(branch, callback)
+  M.run({ 'pr', 'auto-merge', branch, '--json' }, callback)
+end
+
 return M
