@@ -87,6 +87,9 @@ function M.open_file(buf)
     vim.bo[diff_buf].filetype = 'diff'
     vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = diff_buf })
     vim.keymap.set('n', '<Tab>', '<cmd>close<CR>', { buffer = diff_buf })
+    -- Commits are immutable; absorb `r`/`<C-r>` so they don't fall through to vim's replace.
+    vim.keymap.set('n', 'r', '<cmd>close<CR>', { buffer = diff_buf })
+    vim.keymap.set('n', '<C-r>', '<cmd>close<CR>', { buffer = diff_buf })
     return
   end
 
@@ -919,24 +922,44 @@ function M.toggle_fold(buf)
     vim.cmd('belowright split')
     local diff_buf = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_win_set_buf(0, diff_buf)
-    vim.api.nvim_buf_set_lines(diff_buf, 0, -1, false, diff_lines)
     vim.bo[diff_buf].buftype = 'nofile'
     vim.bo[diff_buf].bufhidden = 'wipe'
     vim.bo[diff_buf].filetype = 'gitbutler-diff'
 
     local ns = vim.api.nvim_create_namespace('gitbutler-diff')
-    for i, l in ipairs(diff_lines) do
-      if l:match('│%+') then
-        vim.api.nvim_buf_add_highlight(diff_buf, ns, 'DiffAdd', i - 1, 0, -1)
-      elseif l:match('│%-') then
-        vim.api.nvim_buf_add_highlight(diff_buf, ns, 'DiffDelete', i - 1, 0, -1)
-      elseif l:match('^[─╮╯╭]') or l:match('^%s*[─╮╯╭]') then
-        vim.api.nvim_buf_add_highlight(diff_buf, ns, 'Comment', i - 1, 0, -1)
+
+    local function render(lines_to_render)
+      pcall(vim.api.nvim_buf_set_lines, diff_buf, 0, -1, false, lines_to_render)
+      vim.api.nvim_buf_clear_namespace(diff_buf, ns, 0, -1)
+      for i, l in ipairs(lines_to_render) do
+        if l:match('│%+') then
+          vim.api.nvim_buf_add_highlight(diff_buf, ns, 'DiffAdd', i - 1, 0, -1)
+        elseif l:match('│%-') then
+          vim.api.nvim_buf_add_highlight(diff_buf, ns, 'DiffDelete', i - 1, 0, -1)
+        elseif l:match('^[─╮╯╭]') or l:match('^%s*[─╮╯╭]') then
+          vim.api.nvim_buf_add_highlight(diff_buf, ns, 'Comment', i - 1, 0, -1)
+        end
       end
+    end
+
+    render(diff_lines)
+
+    local function refetch()
+      if not vim.api.nvim_buf_is_valid(diff_buf) then
+        return
+      end
+      local re_err, re_result = cli.run_sync({ 'diff', cli_id })
+      if re_err then
+        vim.notify('gitbutler diff: ' .. re_err, vim.log.levels.ERROR)
+        return
+      end
+      render(vim.split(tostring(re_result), '\n'))
     end
 
     vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = diff_buf })
     vim.keymap.set('n', '<Tab>', '<cmd>close<CR>', { buffer = diff_buf })
+    vim.keymap.set('n', 'r', refetch, { buffer = diff_buf, desc = 'gitbutler: refresh file diff' })
+    vim.keymap.set('n', '<C-r>', refetch, { buffer = diff_buf, desc = 'gitbutler: refresh file diff' })
     return
   end
 
