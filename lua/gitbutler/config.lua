@@ -81,6 +81,13 @@ M.defaults = {
       ['M'] = 'direct_to_main',
       ['?'] = 'help',
     },
+    ci = {
+      ['<CR>'] = 'open_log',
+      ['o'] = 'open_in_browser',
+      ['R'] = 'rerun',
+      ['<C-r>'] = 'refresh',
+      ['q'] = 'close',
+    },
   },
 }
 

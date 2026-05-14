@@ -13,6 +13,7 @@ require('tests.gitbutler.timeline_spec')
 require('tests.gitbutler.status_glyph_spec')
 require('tests.gitbutler.forge_init_spec')
 require('tests.gitbutler.forge_gh_spec')
+require('tests.gitbutler.ci_view_spec')
 
 -- Summary
 local h = require('tests.gitbutler.helpers')
