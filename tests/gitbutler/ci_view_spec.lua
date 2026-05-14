@@ -1,5 +1,5 @@
-local h = require('tests.gitbutler.helpers')
 local ci = require('gitbutler.ui.ci')
+local h = require('tests.gitbutler.helpers')
 local test, assert_eq, assert_truthy = h.test, h.assert_eq, h.assert_truthy
 
 print('\n=== CI view tests ===')
@@ -7,7 +7,7 @@ print('\n=== CI view tests ===')
 test('build_lines renders header + one line per check', function()
   local checks = {
     { id = '1', name = 'build', status = 'completed', conclusion = 'success', url = 'u1' },
-    { id = '2', name = 'test',  status = 'completed', conclusion = 'failure', url = 'u2' },
+    { id = '2', name = 'test', status = 'completed', conclusion = 'failure', url = 'u2' },
     { id = '3', name = 'deploy', status = 'in_progress', url = 'u3' },
   }
   local lines = ci.build_lines('feat/x', checks)

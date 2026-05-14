@@ -1,5 +1,5 @@
-local h = require('tests.gitbutler.helpers')
 local forge = require('gitbutler.forge')
+local h = require('tests.gitbutler.helpers')
 local test, assert_eq = h.test, h.assert_eq
 
 print('\n=== Forge registry tests ===')
@@ -7,7 +7,9 @@ print('\n=== Forge registry tests ===')
 -- Stub adapter: only `name` and `detect` are exercised here.
 local stub_gh = {
   name = 'github',
-  detect = function(url) return url:find('github.com', 1, true) ~= nil end,
+  detect = function(url)
+    return url:find('github.com', 1, true) ~= nil
+  end,
 }
 
 test('register + get_adapter round-trip', function()

@@ -57,16 +57,20 @@ function M.list_checks(branch, callback)
     return
   end
   local args = {
-    'gh', 'run', 'list',
-    '--branch', branch,
-    '--json', 'databaseId,name,status,conclusion,startedAt,updatedAt,url',
-    '--limit', '30',
+    'gh',
+    'run',
+    'list',
+    '--branch',
+    branch,
+    '--json',
+    'databaseId,name,status,conclusion,startedAt,updatedAt,url',
+    '--limit',
+    '30',
   }
   vim.system(args, { text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
-        local msg = (result.stderr and result.stderr ~= '')
-            and result.stderr
+        local msg = (result.stderr and result.stderr ~= '') and result.stderr
           or ('gh run list exited with code ' .. result.code)
         callback(vim.trim(msg))
         return
@@ -85,8 +89,7 @@ function M.view_log(check_id, callback)
   vim.system({ 'gh', 'run', 'view', check_id, '--log' }, { text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
-        local msg = (result.stderr and result.stderr ~= '')
-            and result.stderr
+        local msg = (result.stderr and result.stderr ~= '') and result.stderr
           or ('gh run view exited with code ' .. result.code)
         callback(vim.trim(msg))
         return
@@ -105,8 +108,7 @@ function M.rerun(check_id, callback)
   vim.system({ 'gh', 'run', 'rerun', check_id, '--failed' }, { text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
-        local msg = (result.stderr and result.stderr ~= '')
-            and result.stderr
+        local msg = (result.stderr and result.stderr ~= '') and result.stderr
           or ('gh run rerun exited with code ' .. result.code)
         callback(vim.trim(msg))
         return

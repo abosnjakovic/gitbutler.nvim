@@ -1,6 +1,6 @@
-local h = require('tests.gitbutler.helpers')
-local gh = require('gitbutler.forge.gh')
 local fixtures = require('tests.gitbutler.fixtures')
+local gh = require('gitbutler.forge.gh')
+local h = require('tests.gitbutler.helpers')
 local test, assert_eq, assert_truthy = h.test, h.assert_eq, h.assert_truthy
 
 print('\n=== GitHub forge adapter tests ===')
