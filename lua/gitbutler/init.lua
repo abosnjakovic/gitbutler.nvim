@@ -100,22 +100,12 @@ function M.setup(opts)
   end, { desc = 'GitButler commit timeline' })
 
   vim.api.nvim_create_user_command('ButlerAutoMerge', function(cmd)
-    local name = cmd.args ~= '' and cmd.args or nil
-    if not name then
-      vim.notify('gitbutler: branch name required (`:ButlerAutoMerge <branch>`)', vim.log.levels.WARN)
-      return
-    end
-    require('gitbutler.actions').pr_auto_merge(name)
-  end, { nargs = '?', desc = 'GitButler toggle PR auto-merge' })
+    require('gitbutler.actions').pr_auto_merge(cmd.args)
+  end, { nargs = 1, desc = 'GitButler toggle PR auto-merge' })
 
   vim.api.nvim_create_user_command('ButlerCI', function(cmd)
-    local name = cmd.args ~= '' and cmd.args or nil
-    if not name then
-      vim.notify('gitbutler: branch name required (`:ButlerCI <branch>`)', vim.log.levels.WARN)
-      return
-    end
-    require('gitbutler.ui.ci').open(name)
-  end, { nargs = '?', desc = 'GitButler CI view for branch' })
+    require('gitbutler.ui.ci').open(cmd.args)
+  end, { nargs = 1, desc = 'GitButler CI view for branch' })
 end
 
 return M

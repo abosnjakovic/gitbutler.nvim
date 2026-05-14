@@ -1,6 +1,6 @@
 local buffer_mod = require('gitbutler.ui.buffer')
-local status_mod = require('gitbutler.ui.status')
 local forge = require('gitbutler.forge')
+local status_mod = require('gitbutler.ui.status')
 
 local M = {}
 
@@ -14,11 +14,15 @@ local function duration(started, completed)
   end
   local function parse(ts)
     local y, mo, d, h, mi, s = ts:match('(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)')
-    if not y then return nil end
+    if not y then
+      return nil
+    end
     return os.time({ year = y, month = mo, day = d, hour = h, min = mi, sec = s })
   end
   local a, b = parse(started), parse(completed)
-  if not a or not b or b < a then return '' end
+  if not a or not b or b < a then
+    return ''
+  end
   local secs = b - a
   local m = math.floor(secs / 60)
   local s = secs % 60
@@ -87,6 +91,7 @@ function M.open(branch, injected_adapter)
       vim.api.nvim_buf_set_lines(log_buf, 0, -1, false, vim.split(text or '', '\n'))
       vim.bo[log_buf].buftype = 'nofile'
       vim.bo[log_buf].bufhidden = 'wipe'
+      vim.bo[log_buf].filetype = 'log'
       vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = log_buf })
     end)
   end)
@@ -100,7 +105,9 @@ function M.open(branch, injected_adapter)
 
   buf:on('rerun', function(b)
     local line = b:get_cursor_line()
-    if not line or line.type ~= 'ci_check' or not line.data then return end
+    if not line or line.type ~= 'ci_check' or not line.data then
+      return
+    end
     adapter.rerun(line.data.id, function(err)
       if err then
         vim.notify('gh rerun: ' .. err, vim.log.levels.ERROR)
@@ -111,15 +118,21 @@ function M.open(branch, injected_adapter)
     end)
   end)
 
-  buf:on('refresh', function() M.refresh(branch, adapter) end)
-  buf:on('close', function() M.close() end)
+  buf:on('refresh', function()
+    M.refresh(branch, adapter)
+  end)
+  buf:on('close', function()
+    M.close()
+  end)
 
   buf:open()
   M.refresh(branch, adapter)
 end
 
 function M.refresh(branch, adapter)
-  if not M.instance then return end
+  if not M.instance then
+    return
+  end
   local buf = M.instance
   adapter.list_checks(branch, function(err, checks)
     if err then
