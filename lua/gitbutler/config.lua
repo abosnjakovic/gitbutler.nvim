@@ -65,6 +65,7 @@ M.defaults = {
       ['p'] = 'push',
       ['B'] = 'branches',
       ['P'] = 'push_all',
+      ['R'] = 'pr_create',
       ['F'] = 'pull',
       ['q'] = 'close',
       ['r'] = 'refresh',

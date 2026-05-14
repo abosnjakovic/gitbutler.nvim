@@ -492,6 +492,46 @@ function M.push_all(_buf)
   end)
 end
 
+---Create a forge review (PR/MR) for the branch under cursor. Pre-fills the
+---title/body float with the most recent commit's subject and body.
+function M.pr_create(buf)
+  local branch = buf:get_cursor_branch()
+  local name = branch and branch.name or nil
+  if not name then
+    vim.notify('gitbutler: no branch under cursor', vim.log.levels.WARN)
+    return
+  end
+
+  -- Pre-fill from latest commit.
+  local commits = branch and branch.commits or {}
+  local latest = commits[#commits]
+  local content
+  if latest and latest.message and latest.message ~= '' then
+    content = vim.split(latest.message, '\n')
+  end
+
+  float.input({
+    title = 'New PR for ' .. name,
+    content = content,
+    on_submit = function(message)
+      if not message or vim.trim(message) == '' then
+        return
+      end
+      notify_start('pr new')
+      cli.pr_new(name, message, function(err, result)
+        if err then
+          vim.notify('gitbutler pr: ' .. err, vim.log.levels.ERROR)
+          refresh()
+          return
+        end
+        local url = type(result) == 'table' and (result.url or result.htmlUrl) or nil
+        vim.notify('gitbutler pr: created' .. (url and (' — ' .. url) or ''), vim.log.levels.INFO)
+        refresh()
+      end)
+    end,
+  })
+end
+
 ---Pull (sync) from upstream.
 function M.pull(_buf)
   notify_start('pull')
@@ -652,6 +692,7 @@ function M.help(_buf)
     'u        Undo last operation',
     'p        Push branch',
     'P        Push all branches',
+    'R        Create PR for the branch under cursor',
     'M        Commit & push selected (or unassigned) to main',
     'F        Pull / sync from upstream',
     'B        Branch management',
