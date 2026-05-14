@@ -379,6 +379,35 @@ function M.format_step_error(step, body)
   return '[gitbutler ' .. step .. '] ' .. body
 end
 
+---Notify ERROR + write to :messages history so the user can recall it later.
+local function surface_error(step, body)
+  local msg = M.format_step_error(step, body)
+  vim.notify(msg, vim.log.levels.ERROR)
+  vim.api.nvim_echo({ { msg, 'ErrorMsg' } }, true, {})
+end
+
+---Notify WARN + write to :messages history. Used for non-fatal cleanup steps.
+local function surface_warn(step, body)
+  local msg = M.format_step_error(step, body)
+  vim.notify(msg, vim.log.levels.WARN)
+  vim.api.nvim_echo({ { msg, 'WarningMsg' } }, true, {})
+end
+
+---Check whether advancing `target` to `ephemeral_sha` would be a fast-forward,
+---i.e. whether `target` is an ancestor of `ephemeral_sha`.
+---@return boolean? true if FF-safe, false if not, nil on git error
+local function is_fast_forward(target, ephemeral_sha)
+  local r = vim
+    .system({ 'git', 'merge-base', '--is-ancestor', target, ephemeral_sha }, { text = true })
+    :wait()
+  if r.code == 0 then
+    return true
+  elseif r.code == 1 then
+    return false
+  end
+  return nil
+end
+
 ---Resolve the local target branch name (e.g. 'main' or 'master') via origin/HEAD,
 ---falling back to a local-branch probe if origin has no HEAD ref.
 local function resolve_target_branch()
