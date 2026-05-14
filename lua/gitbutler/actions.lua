@@ -433,7 +433,7 @@ end
 ---Push <target> to origin via raw git. The target ref sits outside GitButler's
 ---virtual-branch surface, so `but push` is not the right tool here.
 local function git_push_target(target, callback)
-  vim.system({ 'git', 'push', 'origin', target }, { text = true }, function(result)
+  vim.system({ 'git', 'push', 'origin', target .. ':' .. target }, { text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
         local msg = (result.stderr and result.stderr ~= '') and result.stderr
@@ -447,7 +447,9 @@ local function git_push_target(target, callback)
 end
 
 ---Commit selected (or unassigned) files onto an ephemeral virtual branch,
----merge it into the local target, then push the target to origin.
+---advance the local target ref via git update-ref after a fast-forward
+---pre-flight, push the target to origin, then sync the workspace via
+---but pull + but clean and delete the remote ephemeral ref.
 function M.direct_to_main(buf)
   local file_ids = {}
   local selected = buf:get_selected_lines({ 'file' })

@@ -81,6 +81,7 @@ rc=$?
 set -e
 
 [ "$rc" -ne 0 ] || fail "scenario 2: harness should have failed but returned 0"
+git branch | grep -q "direct-to-main-" || fail "scenario 2: expected ephemeral branch from the failed harness run"
 
 after_local=$(git rev-parse main)
 after_origin=$(git rev-parse origin/main)

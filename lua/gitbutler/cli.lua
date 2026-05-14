@@ -114,13 +114,6 @@ function M.commit(branch, message, callback, file_ids, create)
   M.run(args, callback)
 end
 
----Convenience: but merge (merge a virtual branch into the local target branch)
----@param branch string Branch name or CLI ID
----@param callback fun(err?: string, result?: any)
-function M.merge(branch, callback)
-  M.run({ 'merge', branch, '--json' }, callback)
-end
-
 ---Convenience: but absorb
 function M.absorb(callback)
   M.run({ 'absorb', '--json' }, callback)
