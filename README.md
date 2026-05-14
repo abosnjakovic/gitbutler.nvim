@@ -28,6 +28,17 @@ cd your-repo
 but setup
 ```
 
+### Optional: deep CI surfacing
+
+The CI view (`:ButlerCI`, `C` in `:Butler`) shells out to the GitHub CLI. Install with:
+
+```sh
+brew install gh
+gh auth login
+```
+
+Without `gh`, the CI features are no-ops (`R`/PR creation still works through `but pr`).
+
 ### lazy.nvim
 
 ```lua
@@ -73,7 +84,7 @@ vim.keymap.set('n', '<leader>bb', ':Butler<CR>', { desc = 'gitbutler' })
 
 ### Commands
 
-`:Butler` toggles the status view. `:ButlerBranches` opens the branch management popup. `:ButlerLog [branch]` shows the commit log for a branch (defaults to the first applied branch). `:ButlerTimeline` shows a chronological view of recent commits across all branches and contributors. `:ButlerOplog` opens the operations history. `:ButlerAbsorb`, `:ButlerPush`, `:ButlerPull`, and `:ButlerUndo` run the corresponding operations directly.
+`:Butler` toggles the status view. `:ButlerBranches` opens the branch management popup. `:ButlerLog [branch]` shows the commit log for a branch (defaults to the first applied branch). `:ButlerTimeline` shows a chronological view of recent commits across all branches and contributors. `:ButlerOplog` opens the operations history. `:ButlerAbsorb`, `:ButlerPush`, `:ButlerPull`, and `:ButlerUndo` run the corresponding operations directly. `:ButlerCI [branch]` opens the CI view for a branch. `:ButlerAutoMerge <branch>` toggles auto-merge on the PR for that branch.
 
 ### Multi-select
 
@@ -96,6 +107,9 @@ d        Describe/reword a commit or rename a branch
 u        Undo last operation
 p        Push the branch under cursor
 P        Push all branches
+R        Create PR for the branch under cursor
+D        Toggle PR draft / ready
+C        Open CI view for the branch under cursor
 M        Commit selected (or unassigned) files straight to main, then push
 F        Pull / sync from upstream
 b        Create a new branch
