@@ -782,14 +782,24 @@ end
 ---Open the CI view for the branch under cursor. The adapter decides whether
 ---there are runs to show; `branch.ci` from `but status` is often null even
 ---when `gh` has runs, so we don't gate on it here.
+---
+---When the cursor branch is part of a stack, query the stack HEAD branch —
+---that's what the forge has CI for (the PR's head ref). Base branches in a
+---stack typically have no runs of their own.
 function M.ci_open(buf)
-  local branch = buf:get_cursor_branch()
-  local name = branch and branch.name or nil
-  if not name then
+  local data = buf:get_cursor_branch()
+  if not data or not data.name then
     vim.notify('gitbutler: no branch under cursor', vim.log.levels.WARN)
     return
   end
-  require('gitbutler.ui.ci').open(name)
+
+  local query_name = data.name
+  local stack_branches = data.stack and data.stack.branches or nil
+  if stack_branches and stack_branches[1] and stack_branches[1].name then
+    query_name = stack_branches[1].name
+  end
+
+  require('gitbutler.ui.ci').open(query_name)
 end
 
 ---Pull (sync) from upstream.
