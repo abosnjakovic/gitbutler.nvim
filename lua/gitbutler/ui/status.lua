@@ -14,6 +14,30 @@ local change_display = {
   renamed = { prefix = 'R', hl = 'GitButlerFileRenamed' },
 }
 
+---Map a branch.ci object from `but status --json` to a display glyph + highlight group.
+---@param ci? { status?: string, conclusion?: string }
+---@return string glyph
+---@return string? highlight
+function M.ci_glyph(ci)
+  if ci == nil then
+    return '', nil
+  end
+  local status_val = ci.status
+  if status_val == 'queued' then
+    return '○', 'GitButlerCIQueued'
+  elseif status_val == 'in_progress' then
+    return '◐', 'GitButlerCIRunning'
+  elseif status_val == 'completed' then
+    local c = ci.conclusion
+    if c == 'success' then
+      return '✓', 'GitButlerCIPass'
+    elseif c == 'failure' or c == 'cancelled' or c == 'timed_out' then
+      return '✗', 'GitButlerCIFail'
+    end
+  end
+  return '?', 'GitButlerCIUnknown'
+end
+
 local function change_hl(change_type)
   local d = change_display[change_type]
   if d then

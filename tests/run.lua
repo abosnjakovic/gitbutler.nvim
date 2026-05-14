@@ -10,6 +10,7 @@ require('tests.gitbutler.oplog_spec')
 require('tests.gitbutler.selection_spec')
 require('tests.gitbutler.action_spec')
 require('tests.gitbutler.timeline_spec')
+require('tests.gitbutler.status_glyph_spec')
 
 -- Summary
 local h = require('tests.gitbutler.helpers')
