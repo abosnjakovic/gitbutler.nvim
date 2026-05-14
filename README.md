@@ -4,13 +4,16 @@ A neovim interface for [Git Butler](https://gitbutler.com) virtual branches. Man
 
 Requires neovim 0.10+ and the [`but` CLI](https://docs.gitbutler.com/cli-overview). The CI view also uses the [`gh` CLI](https://cli.github.com) when available; everything else has zero runtime dependencies.
 
-<img width="2066" height="1202" alt="image" src="https://github.com/user-attachments/assets/a32f66e2-eb5b-49ac-a7e4-eeb9d823731f" />
+<img width="6016" height="3384" alt="image" src="https://github.com/user-attachments/assets/22bf9735-0d5a-4118-8562-31febf1bb875" />
 
-Expanded status view:
-<img width="1063" height="1871" alt="image" src="https://github.com/user-attachments/assets/3ffc858e-0bb7-4366-8f79-1de1f93e7328" />
+Timlineview (t)
+Greate for a birds eye view on work being done around you
+<img width="6016" height="3384" alt="image" src="https://github.com/user-attachments/assets/e23f355e-c21c-43c7-885e-4cadbefa9c82" />
 
-Timeline view (t):
-<img width="1065" height="469" alt="image" src="https://github.com/user-attachments/assets/e254c65a-f8a7-44a9-b9ee-9dd660a78bd7" />
+Expanded CI view (C)
+It shows logs and status via gh cli
+<img width="6016" height="3384" alt="image" src="https://github.com/user-attachments/assets/6f0d8040-01d6-4b46-b3bf-73e3cfdec10f" />
+
 
 
 ## Installation
