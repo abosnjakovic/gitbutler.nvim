@@ -6,6 +6,113 @@ local M = {}
 ---@type GitButlerBuffer?
 M.instance = nil
 
+---Per-session aggregate CI cache keyed by stack head branch name.
+---Value: { state = 'pass' | 'fail' | 'pending' | 'unknown', sha = string }
+---Invalidated when the cached sha mismatches the current head sha.
+M._ci_cache = M._ci_cache or {}
+
+---Map an aggregate state to a single suffix glyph + highlight.
+---@param state? string
+---@return string glyph
+---@return string? highlight
+local function aggregate_glyph(state)
+  if state == 'pass' then
+    return '✓', 'GitButlerCIPass'
+  elseif state == 'fail' then
+    return '✗', 'GitButlerCIFail'
+  elseif state == 'pending' then
+    return '◐', 'GitButlerCIRunning'
+  end
+  return '', nil
+end
+
+---Aggregate adapter `check[]` results into a single state.
+---fail > pending > pass.
+---@param checks table[]
+---@return string state
+local function aggregate_state(checks)
+  local has_fail, has_pending, has_pass = false, false, false
+  for _, c in ipairs(checks) do
+    if c.status == 'in_progress' or c.status == 'queued' then
+      has_pending = true
+    elseif c.status == 'completed' then
+      if c.conclusion == 'success' then
+        has_pass = true
+      else
+        has_fail = true
+      end
+    end
+  end
+  if has_fail then
+    return 'fail'
+  elseif has_pending then
+    return 'pending'
+  elseif has_pass then
+    return 'pass'
+  end
+  return 'unknown'
+end
+
+---Kick off background CI fetches for any stack head with a PR whose
+---aggregate isn't in cache (or whose sha has moved). On completion,
+---re-render the status buffer so the new glyph appears.
+---@param data table Decoded `but status --json` payload
+local function kick_off_ci_fetches(data)
+  local forge_ok, forge = pcall(require, 'gitbutler.forge')
+  if not forge_ok then
+    return
+  end
+  local adapter = forge.detect_from_remote and forge.detect_from_remote() or nil
+  if not adapter or not adapter.list_checks then
+    return
+  end
+
+  for _, stack in ipairs(data.stacks or {}) do
+    local head = stack.branches and stack.branches[1] or nil
+    if head and head.name and head.reviewId and head.reviewId ~= vim.NIL then
+      local head_sha = (head.commits and head.commits[1] and head.commits[1].commitId) or ''
+      local cached = M._ci_cache[head.name]
+      if not cached or cached.sha ~= head_sha then
+        -- Mark as in-flight (state=pending, sha=head_sha) so concurrent renders don't refetch.
+        M._ci_cache[head.name] = { state = 'pending', sha = head_sha, in_flight = true }
+        adapter.list_checks(head.name, function(err, checks)
+          if err or not checks then
+            -- Leave the placeholder so we don't hammer a failing endpoint.
+            M._ci_cache[head.name].in_flight = false
+            return
+          end
+          M._ci_cache[head.name] = { state = aggregate_state(checks), sha = head_sha }
+          -- Trigger a refresh so the new glyph appears. The next render's
+          -- kick_off_ci_fetches will see the cache populated and not refetch.
+          if M.instance then
+            M.refresh()
+          end
+        end)
+      end
+    end
+  end
+end
+
+---Look up the cached CI aggregate glyph for a stack. All branches in a
+---stack share the head's PR, so all rows in the stack get the same glyph.
+---@param stack table
+---@return string glyph
+local function stack_ci_suffix(stack)
+  local head = stack.branches and stack.branches[1] or nil
+  if not head or not head.name then
+    return ''
+  end
+  local cached = M._ci_cache[head.name]
+  if not cached or not cached.state or cached.state == 'unknown' then
+    return ''
+  end
+  local glyph = aggregate_glyph(cached.state)
+  if glyph == '' then
+    return ''
+  end
+  return '  ' .. glyph
+end
+
 ---Map changeType strings to display prefix and highlight group.
 local change_display = {
   added = { prefix = 'A', hl = 'GitButlerFileAdd' },
@@ -110,11 +217,12 @@ local function build_lines(buf, data)
       if branch.reviewId and branch.reviewId ~= vim.NIL then
         review_suffix = '  #' .. tostring(branch.reviewId)
       end
+      local ci_aggregate_suffix = stack_ci_suffix(stack)
 
       local fold_id = 'branch:' .. name
       local is_folded = buf:is_folded(fold_id)
 
-      add(glyph_prefix .. name .. suffix .. review_suffix, 'GitButlerBranchApplied', 'branch', {
+      add(glyph_prefix .. name .. suffix .. review_suffix .. ci_aggregate_suffix, 'GitButlerBranchApplied', 'branch', {
         branch = branch,
         stack = stack,
         name = name,
@@ -318,6 +426,11 @@ function M.refresh()
 
     local lines = build_lines(buf, data)
     buf:render(lines)
+
+    -- Kick off async CI aggregate fetches for stack heads with PRs.
+    -- The callback will trigger another refresh when results arrive; the
+    -- cache prevents refetch loops.
+    kick_off_ci_fetches(data)
   end)
 end
 
