@@ -779,16 +779,14 @@ function M.pr_auto_merge(buf_or_name)
   end)
 end
 
----Open the CI view for the branch under cursor.
+---Open the CI view for the branch under cursor. The adapter decides whether
+---there are runs to show; `branch.ci` from `but status` is often null even
+---when `gh` has runs, so we don't gate on it here.
 function M.ci_open(buf)
   local branch = buf:get_cursor_branch()
   local name = branch and branch.name or nil
   if not name then
     vim.notify('gitbutler: no branch under cursor', vim.log.levels.WARN)
-    return
-  end
-  if not branch.ci or branch.ci == vim.NIL then
-    vim.notify('gitbutler: no CI runs for this branch', vim.log.levels.WARN)
     return
   end
   require('gitbutler.ui.ci').open(name)
