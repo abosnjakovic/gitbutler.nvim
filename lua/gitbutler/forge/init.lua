@@ -63,4 +63,6 @@ function M._reset()
   adapters = {}
 end
 
+M.register(require('gitbutler.forge.gh'))
+
 return M
