@@ -267,4 +267,36 @@ M.timeline_diff_tree = {
   { path = 'src/token.lua', status = 'A' },
 }
 
+M.gh_run_list_json = [[
+[
+  {
+    "databaseId": 12345,
+    "name": "build",
+    "status": "completed",
+    "conclusion": "success",
+    "startedAt": "2026-05-14T01:00:00Z",
+    "updatedAt": "2026-05-14T01:02:14Z",
+    "url": "https://github.com/foo/bar/actions/runs/12345"
+  },
+  {
+    "databaseId": 12346,
+    "name": "test",
+    "status": "completed",
+    "conclusion": "failure",
+    "startedAt": "2026-05-14T01:00:05Z",
+    "updatedAt": "2026-05-14T01:01:37Z",
+    "url": "https://github.com/foo/bar/actions/runs/12346"
+  },
+  {
+    "databaseId": 12347,
+    "name": "deploy",
+    "status": "in_progress",
+    "conclusion": null,
+    "startedAt": "2026-05-14T01:02:00Z",
+    "updatedAt": "2026-05-14T01:04:05Z",
+    "url": "https://github.com/foo/bar/actions/runs/12347"
+  }
+]
+]]
+
 return M
