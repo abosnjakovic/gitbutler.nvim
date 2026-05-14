@@ -1,8 +1,8 @@
 # gitbutler.nvim
 
-A neovim interface for [Git Butler](https://gitbutler.com) virtual branches. Manage parallel branches, select and assign files, commit, absorb, squash, reword, and push — all from a buffer-based UI without leaving your editor.
+A neovim interface for [Git Butler](https://gitbutler.com) virtual branches. Manage parallel branches, select and assign files, commit, absorb, squash, reword, push, open pull requests, and inspect CI — all from a buffer-based UI without leaving your editor.
 
-Zero dependencies. Requires neovim 0.10+ and the [`but` CLI](https://docs.gitbutler.com/cli-overview).
+Requires neovim 0.10+ and the [`but` CLI](https://docs.gitbutler.com/cli-overview). The CI view also uses the [`gh` CLI](https://cli.github.com) when available; everything else has zero runtime dependencies.
 
 <img width="2066" height="1202" alt="image" src="https://github.com/user-attachments/assets/a32f66e2-eb5b-49ac-a7e4-eeb9d823731f" />
 
@@ -173,6 +173,30 @@ r        Restore to snapshot (with confirmation)
 s        Create a new snapshot
 q/Esc    Close
 ```
+
+### CI view (C)
+
+`C` on a branch line opens the CI view (`:ButlerCI [branch]` also works). Branch lines in `:Butler` show a glyph reflecting CI state pulled from `but status --json` (`○` queued, `◐` running, `✓` pass, `✗` fail). When a branch has an open PR, the PR number is appended as `#<id>`.
+
+```
+<CR>     Open log for the check under cursor (scratch buffer)
+o        Open the check's URL in the browser
+R        Re-run failed jobs for the check
+<C-r>    Refresh the check list
+q        Close
+```
+
+The CI view shells out to `gh run list` / `gh run view` / `gh run rerun` via a pluggable forge adapter (`lua/gitbutler/forge/`). Without `gh` on PATH, the view shows an install hint and degrades to a no-op.
+
+### Pull request creation (R, D)
+
+`R` on a branch line opens a multiline float pre-filled with the latest commit's subject and body. Submit sends `but pr new <branch> -m "<title>\n\n<body>"` and prints the resulting PR URL. `D` toggles the PR between draft and ready states. `:ButlerAutoMerge <branch>` toggles auto-merge.
+
+### Commit straight to main (M)
+
+Solo flow: `M` in `:Butler` commits selected (or unassigned) files directly to the local target branch and pushes to origin. The action commits to an ephemeral branch, fast-forwards the target via `git update-ref` (refuses if local target has diverged from origin), pushes, then `but pull`s and cleans up both the local and remote ephemeral refs.
+
+Pre-flight failures surface to `:messages` with concrete recovery advice (typically `git fetch origin && git reset --hard origin/<target>`).
 
 ## Configuration
 
