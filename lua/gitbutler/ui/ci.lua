@@ -1,5 +1,6 @@
 local buffer_mod = require('gitbutler.ui.buffer')
 local forge = require('gitbutler.forge')
+local spinner = require('gitbutler.ui.spinner')
 local status_mod = require('gitbutler.ui.status')
 
 local M = {}
@@ -88,7 +89,9 @@ function M.open(branch, injected_adapter)
     if not line or line.type ~= 'ci_check' or not line.data then
       return
     end
+    local sp = spinner.start('fetching log: ' .. (line.data.name or '?'))
     adapter.view_log(line.data.id, function(err, text)
+      sp:stop()
       if err then
         vim.notify('gh view log: ' .. err, vim.log.levels.ERROR)
         return
@@ -116,7 +119,9 @@ function M.open(branch, injected_adapter)
     if not line or line.type ~= 'ci_check' or not line.data then
       return
     end
+    local sp = spinner.start('re-running: ' .. (line.data.name or '?'))
     adapter.rerun(line.data.id, function(err)
+      sp:stop()
       if err then
         vim.notify('gh rerun: ' .. err, vim.log.levels.ERROR)
         return
@@ -142,7 +147,9 @@ function M.refresh(branch, adapter)
     return
   end
   local buf = M.instance
+  local sp = spinner.start('fetching CI for ' .. branch)
   adapter.list_checks(branch, function(err, checks)
+    sp:stop()
     if err then
       vim.notify('gh list checks: ' .. err, vim.log.levels.ERROR)
       return
