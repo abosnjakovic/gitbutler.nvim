@@ -397,9 +397,7 @@ end
 ---i.e. whether `target` is an ancestor of `ephemeral_sha`.
 ---@return boolean? true if FF-safe, false if not, nil on git error
 local function is_fast_forward(target, ephemeral_sha)
-  local r = vim
-    .system({ 'git', 'merge-base', '--is-ancestor', target, ephemeral_sha }, { text = true })
-    :wait()
+  local r = vim.system({ 'git', 'merge-base', '--is-ancestor', target, ephemeral_sha }, { text = true }):wait()
   if r.code == 0 then
     return true
   elseif r.code == 1 then
@@ -518,13 +516,27 @@ function M.direct_to_main(buf)
         local ff = is_fast_forward(target, ephemeral_sha)
         if ff == false then
           buf:clear_selection()
-          local local_sha = vim.trim((vim.system({ 'git', 'rev-parse', '--short', target }, { text = true }):wait().stdout or ''))
-          local origin_sha = vim.trim((vim.system({ 'git', 'rev-parse', '--short', 'origin/' .. target }, { text = true }):wait().stdout or ''))
+          local local_sha =
+            vim.trim((vim.system({ 'git', 'rev-parse', '--short', target }, { text = true }):wait().stdout or ''))
+          local origin_sha = vim.trim(
+            (vim.system({ 'git', 'rev-parse', '--short', 'origin/' .. target }, { text = true }):wait().stdout or '')
+          )
           surface_error(
             'preflight',
-            'local ' .. target .. ' not ancestor of new commit — reconcile manually before retrying.\n'
-              .. 'local ' .. target .. ' is at ' .. local_sha .. ', origin/' .. target .. ' is at ' .. origin_sha .. '. Try:\n'
-              .. '  git fetch origin && git reset --hard origin/' .. target
+            'local '
+              .. target
+              .. ' not ancestor of new commit — reconcile manually before retrying.\n'
+              .. 'local '
+              .. target
+              .. ' is at '
+              .. local_sha
+              .. ', origin/'
+              .. target
+              .. ' is at '
+              .. origin_sha
+              .. '. Try:\n'
+              .. '  git fetch origin && git reset --hard origin/'
+              .. target
           )
           refresh()
           return

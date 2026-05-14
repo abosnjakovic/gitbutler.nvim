@@ -1,5 +1,5 @@
-local h = require('tests.gitbutler.helpers')
 local actions = require('gitbutler.actions')
+local h = require('tests.gitbutler.helpers')
 local test, assert_eq, assert_truthy = h.test, h.assert_eq, h.assert_truthy
 
 print('\n=== direct_to_main helper tests ===')

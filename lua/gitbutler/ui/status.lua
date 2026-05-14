@@ -105,7 +105,7 @@ local function build_lines(buf, data)
       local suffix = #parts > 0 and ('  (' .. table.concat(parts, ', ') .. ')') or ''
 
       local glyph = M.ci_glyph(branch.ci)
-      local prefix = glyph ~= '' and (glyph .. ' ') or ''
+      local glyph_prefix = glyph ~= '' and (glyph .. ' ') or ''
       local review_suffix = ''
       if branch.reviewId and branch.reviewId ~= vim.NIL then
         review_suffix = '  #' .. tostring(branch.reviewId)
@@ -114,7 +114,7 @@ local function build_lines(buf, data)
       local fold_id = 'branch:' .. name
       local is_folded = buf:is_folded(fold_id)
 
-      add(prefix .. name .. suffix .. review_suffix, 'GitButlerBranchApplied', 'branch', {
+      add(glyph_prefix .. name .. suffix .. review_suffix, 'GitButlerBranchApplied', 'branch', {
         branch = branch,
         stack = stack,
         name = name,
