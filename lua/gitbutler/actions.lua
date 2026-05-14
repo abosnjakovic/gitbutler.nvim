@@ -561,6 +561,27 @@ function M.pr_toggle_draft(buf)
   end
 end
 
+---Toggle auto-merge for the PR on the branch under cursor or named explicitly.
+---@param buf_or_name table|string Either the status buffer or a branch name string
+function M.pr_auto_merge(buf_or_name)
+  local name
+  if type(buf_or_name) == 'string' then
+    name = buf_or_name
+  elseif type(buf_or_name) == 'table' then
+    local branch = buf_or_name:get_cursor_branch()
+    name = branch and branch.name or nil
+  end
+  if not name then
+    vim.notify('gitbutler: no branch specified', vim.log.levels.WARN)
+    return
+  end
+
+  notify_start('pr auto-merge')
+  cli.pr_auto_merge(name, function(err, _)
+    notify_result('pr auto-merge', err, nil)
+  end)
+end
+
 ---Pull (sync) from upstream.
 function M.pull(_buf)
   notify_start('pull')
