@@ -19,7 +19,7 @@ local change_display = {
 ---@return string glyph
 ---@return string? highlight
 function M.ci_glyph(ci)
-  if ci == nil then
+  if ci == nil or ci == vim.NIL then
     return '', nil
   end
   local status_val = ci.status
@@ -104,10 +104,17 @@ local function build_lines(buf, data)
       end
       local suffix = #parts > 0 and ('  (' .. table.concat(parts, ', ') .. ')') or ''
 
+      local glyph, _glyph_hl = M.ci_glyph(branch.ci)
+      local prefix = glyph ~= '' and (glyph .. ' ') or ''
+      local review_suffix = ''
+      if branch.reviewId and branch.reviewId ~= vim.NIL then
+        review_suffix = '  #' .. tostring(branch.reviewId):sub(1, 7)
+      end
+
       local fold_id = 'branch:' .. name
       local is_folded = buf:is_folded(fold_id)
 
-      add(name .. suffix, 'GitButlerBranchApplied', 'branch', {
+      add(prefix .. name .. suffix .. review_suffix, 'GitButlerBranchApplied', 'branch', {
         branch = branch,
         stack = stack,
         name = name,
