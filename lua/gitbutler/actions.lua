@@ -582,6 +582,21 @@ function M.pr_auto_merge(buf_or_name)
   end)
 end
 
+---Open the CI view for the branch under cursor.
+function M.ci_open(buf)
+  local branch = buf:get_cursor_branch()
+  local name = branch and branch.name or nil
+  if not name then
+    vim.notify('gitbutler: no branch under cursor', vim.log.levels.WARN)
+    return
+  end
+  if not branch.ci or branch.ci == vim.NIL then
+    vim.notify('gitbutler: no CI runs for this branch', vim.log.levels.WARN)
+    return
+  end
+  require('gitbutler.ui.ci').open(name)
+end
+
 ---Pull (sync) from upstream.
 function M.pull(_buf)
   notify_start('pull')
@@ -744,6 +759,7 @@ function M.help(_buf)
     'P        Push all branches',
     'R        Create PR for the branch under cursor',
     'D        Toggle PR draft/ready',
+    'C        Open CI view for branch',
     'M        Commit & push selected (or unassigned) to main',
     'F        Pull / sync from upstream',
     'B        Branch management',

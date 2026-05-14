@@ -67,6 +67,7 @@ M.defaults = {
       ['P'] = 'push_all',
       ['R'] = 'pr_create',
       ['D'] = 'pr_toggle_draft',
+      ['C'] = 'ci_open',
       ['F'] = 'pull',
       ['q'] = 'close',
       ['r'] = 'refresh',

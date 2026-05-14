@@ -270,6 +270,7 @@ function M.open()
   buf:on('timeline', actions.timeline)
   buf:on('uncommit', actions.uncommit)
   buf:on('direct_to_main', actions.direct_to_main)
+  buf:on('ci_open', actions.ci_open)
 
   buf:open()
   M.refresh()
