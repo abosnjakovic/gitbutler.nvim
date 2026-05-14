@@ -5,8 +5,9 @@ local test, assert_eq = h.test, h.assert_eq
 print('\n=== Status glyph tests ===')
 
 test('ci_glyph returns blank for nil', function()
-  local g, _hl = status.ci_glyph(nil)
+  local g, hl = status.ci_glyph(nil)
   assert_eq('', g)
+  assert_eq(nil, hl)
 end)
 
 test('ci_glyph maps queued', function()
@@ -35,6 +36,12 @@ end)
 
 test('ci_glyph maps completed cancelled as fail', function()
   local g, hl = status.ci_glyph({ status = 'completed', conclusion = 'cancelled' })
+  assert_eq('✗', g)
+  assert_eq('GitButlerCIFail', hl)
+end)
+
+test('ci_glyph maps completed timed_out as fail', function()
+  local g, hl = status.ci_glyph({ status = 'completed', conclusion = 'timed_out' })
   assert_eq('✗', g)
   assert_eq('GitButlerCIFail', hl)
 end)
