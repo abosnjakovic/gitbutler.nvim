@@ -259,7 +259,8 @@ function M.open(branch_name)
     -- Override keymaps for log context
     local log_keymaps = {
       ['q'] = 'close',
-      ['r'] = 'refresh',
+      ['<C-r>'] = 'refresh',
+      ['r'] = 'refresh', -- undocumented alias; advertised binding is <C-r>
       ['<Tab>'] = 'toggle_fold',
       ['d'] = 'describe',
       ['S'] = 'squash',

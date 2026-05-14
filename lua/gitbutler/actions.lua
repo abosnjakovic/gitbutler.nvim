@@ -1013,7 +1013,7 @@ function M.help(_buf)
     'O        Operations log',
     'x        Discard file changes',
     '<Tab>    Diff / toggle fold',
-    'r        Refresh',
+    '<C-r>    Refresh',
     'q        Close',
     '<Space>  Select / deselect',
     '?        This help',

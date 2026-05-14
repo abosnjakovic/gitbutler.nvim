@@ -120,7 +120,7 @@ O        Operations log
 U        Uncommit file from commit back to unstaged
 x        Discard file changes (with confirmation)
 <Tab>    Inline diff on files, fold toggle on branch headers
-r        Refresh
+<C-r>    Refresh
 q        Close
 ?        Help
 ```
@@ -158,7 +158,7 @@ Shows a chronological view of recent commits across all branches and contributor
 <Tab>    Toggle file list for a commit
 y        Yank full SHA to clipboard
 l        Jump to commit log for that branch
-r        Refresh
+<C-r>    Refresh
 q        Close
 ```
 
