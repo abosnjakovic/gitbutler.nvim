@@ -1,3 +1,9 @@
+## [0.3.1] - 2026-06-23
+
+### Bug Fixes
+
+- fix(cli): use --format=json for but 0.20.3 compatibility (#25)
+
 ## [0.3.0] - 2026-05-11
 
 ### Features
