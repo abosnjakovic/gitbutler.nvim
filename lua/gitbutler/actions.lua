@@ -626,7 +626,7 @@ end
 ---@param message string Commit message
 ---@return string? err
 function M.direct_to_main_test_harness(file_path, message)
-  local status_res = vim.system({ 'but', 'status', '--json' }, { text = true }):wait()
+  local status_res = vim.system({ 'but', 'status', '--format=json' }, { text = true }):wait()
   if status_res.code ~= 0 then
     return 'but status: ' .. vim.trim(status_res.stderr or '')
   end
@@ -651,7 +651,7 @@ function M.direct_to_main_test_harness(file_path, message)
 
   -- but commit -c <ephemeral> -m <msg> -p <cli_id> --json
   local commit_res = vim
-    .system({ 'but', 'commit', ephemeral_name, '-c', '-m', message, '-p', cli_id, '--json' }, { text = true })
+    .system({ 'but', 'commit', ephemeral_name, '-c', '-m', message, '-p', cli_id, '--format=json' }, { text = true })
     :wait()
   if commit_res.code ~= 0 then
     return 'commit: ' .. vim.trim(commit_res.stderr or '')
@@ -686,8 +686,8 @@ function M.direct_to_main_test_harness(file_path, message)
     return 'push: ' .. vim.trim(push.stderr or '')
   end
 
-  vim.system({ 'but', 'pull', '--json' }, { text = true }):wait()
-  vim.system({ 'but', 'clean', '--json' }, { text = true }):wait()
+  vim.system({ 'but', 'pull', '--format=json' }, { text = true }):wait()
+  vim.system({ 'but', 'clean', '--format=json' }, { text = true }):wait()
   vim.system({ 'git', 'push', 'origin', ':' .. ephemeral_name }, { text = true }):wait()
 
   return nil
