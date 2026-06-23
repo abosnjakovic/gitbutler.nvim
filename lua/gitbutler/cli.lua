@@ -2,6 +2,20 @@ local config = require('gitbutler.config')
 
 local M = {}
 
+---The `but` CLI emits JSON via `--format=json`; older versions used a boolean
+---`--json` flag. Callers throughout this module still pass the `--json` token,
+---so normalise it to the current spelling in one place. If the CLI's flag
+---changes again, this is the only line to update.
+---@param args string[]
+---@return string[]
+local function normalise_args(args)
+  local out = {}
+  for _, a in ipairs(args) do
+    out[#out + 1] = (a == '--json') and '--format=json' or a
+  end
+  return out
+end
+
 ---Run a but CLI command asynchronously.
 ---@param args string[] Command arguments (e.g. {"status", "--json", "-f", "-v"})
 ---@param opts? {cwd?: string, on_stdout?: fun(data: string), raw?: boolean}
@@ -13,7 +27,7 @@ function M.run(args, opts, callback)
   end
   opts = opts or {}
 
-  local cmd = vim.list_extend({ config.values.cmd }, args)
+  local cmd = vim.list_extend({ config.values.cmd }, normalise_args(args))
   local stdout_chunks = {}
   local stderr_chunks = {}
 
@@ -67,7 +81,7 @@ end
 ---@return any result
 function M.run_sync(args, opts)
   opts = opts or {}
-  local cmd = vim.list_extend({ config.values.cmd }, args)
+  local cmd = vim.list_extend({ config.values.cmd }, normalise_args(args))
   local result = vim.system(cmd, { cwd = opts.cwd, text = true }):wait()
 
   if result.code ~= 0 then
