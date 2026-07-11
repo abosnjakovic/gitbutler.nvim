@@ -1,3 +1,13 @@
+## [0.4.0] - 2026-07-11
+
+### Features
+
+- feat(cli): land M-key directly via `but land`
+
+### Bug Fixes
+
+- fix(fmt): satisfy stylua; add `make ci` target
+
 ## [0.3.1] - 2026-06-23
 
 ### Bug Fixes
