@@ -476,10 +476,7 @@ function M.direct_to_main(buf)
             refresh()
             return
           end
-          vim.notify(
-            'gitbutler: direct-to-main done (landed ' .. ephemeral_sha:sub(1, 7) .. ')',
-            vim.log.levels.INFO
-          )
+          vim.notify('gitbutler: direct-to-main done (landed ' .. ephemeral_sha:sub(1, 7) .. ')', vim.log.levels.INFO)
           refresh()
         end)
       end, file_ids, true)
