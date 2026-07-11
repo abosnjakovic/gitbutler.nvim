@@ -3,9 +3,9 @@
 
 local M = {}
 
--- `but status --json -f -v` with one stack, one branch, one commit, committed files, and unassigned changes
+-- `but status --json -f -v` with one stack, one branch, one commit, committed files, and uncommitted changes
 M.status_full = {
-  unassignedChanges = {
+  uncommittedChanges = {
     {
       cliId = 'up',
       filePath = 'neovim/.config/nvim/plugin/git.lua',
@@ -97,7 +97,7 @@ M.status_full = {
 
 -- `but status --json -f -v` with empty workspace
 M.status_empty = {
-  unassignedChanges = {},
+  uncommittedChanges = {},
   stacks = {},
   mergeBase = {
     cliId = '',
@@ -109,7 +109,7 @@ M.status_empty = {
 
 -- `but status --json -f -v` with upstream behind
 M.status_behind = {
-  unassignedChanges = {},
+  uncommittedChanges = {},
   stacks = {},
   mergeBase = { cliId = '', commitId = 'aaa', message = 'init\n' },
   upstreamState = { behind = 3 },

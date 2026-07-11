@@ -375,7 +375,7 @@ function M.ephemeral_branch_name(ts)
   return 'direct-to-main-' .. tostring(ts)
 end
 
----Format a step-tagged error message used by surface_error/surface_warn.
+---Format a step-tagged error message used by surface_error.
 ---@param step string Step label (e.g. 'commit', 'push')
 ---@param body string Error body
 ---@return string
@@ -390,68 +390,28 @@ local function surface_error(step, body)
   vim.api.nvim_echo({ { msg, 'ErrorMsg' } }, true, {})
 end
 
----Notify WARN + write to :messages history. Used for non-fatal cleanup steps.
-local function surface_warn(step, body)
-  local msg = M.format_step_error(step, body)
-  vim.notify(msg, vim.log.levels.WARN)
-  vim.api.nvim_echo({ { msg, 'WarningMsg' } }, true, {})
-end
-
----Check whether advancing `target` to `ephemeral_sha` would be a fast-forward,
----i.e. whether `target` is an ancestor of `ephemeral_sha`.
----@return boolean? true if FF-safe, false if not, nil on git error
-local function is_fast_forward(target, ephemeral_sha)
-  local r = vim.system({ 'git', 'merge-base', '--is-ancestor', target, ephemeral_sha }, { text = true }):wait()
-  if r.code == 0 then
-    return true
-  elseif r.code == 1 then
-    return false
+---Pull the new commit's SHA out of a `but commit --json` result. Current CLIs
+---nest it as `{ result = { commit_id } }`; older ones returned a flat
+---`{ commit_id }`. Tolerate both so the feature survives either shape.
+---@param result any Decoded JSON from cli.commit
+---@return string? sha
+function M.commit_id_of(result)
+  if type(result) ~= 'table' then
+    return nil
+  end
+  local nested = type(result.result) == 'table' and result.result.commit_id or nil
+  local sha = nested or result.commit_id
+  if type(sha) == 'string' and sha ~= '' then
+    return sha
   end
   return nil
 end
-
----Resolve the local target branch name (e.g. 'main' or 'master') via origin/HEAD,
----falling back to a local-branch probe if origin has no HEAD ref.
-local function resolve_target_branch()
-  local head = vim.system({ 'git', 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD' }, { text = true }):wait()
-  if head.code == 0 and head.stdout then
-    local ref = vim.trim(head.stdout)
-    local stripped = ref:gsub('^origin/', '')
-    if stripped ~= '' then
-      return stripped
-    end
-  end
-
-  for _, name in ipairs({ 'main', 'master' }) do
-    local probe = vim.system({ 'git', 'rev-parse', '--verify', name }, { text = true }):wait()
-    if probe.code == 0 then
-      return name
-    end
-  end
-
-  return nil
-end
-
----Push <target> to origin via raw git. The target ref sits outside GitButler's
----virtual-branch surface, so `but push` is not the right tool here.
-local function git_push_target(target, callback)
-  vim.system({ 'git', 'push', 'origin', target .. ':' .. target }, { text = true }, function(result)
-    vim.schedule(function()
-      if result.code ~= 0 then
-        local msg = (result.stderr and result.stderr ~= '') and result.stderr
-          or ('git push exited with code ' .. result.code)
-        callback(vim.trim(msg))
-      else
-        callback(nil)
-      end
-    end)
-  end)
-end
+local commit_id_of = M.commit_id_of
 
 ---Commit selected (or unassigned) files onto an ephemeral virtual branch,
----advance the local target ref via git update-ref after a fast-forward
----pre-flight, push the target to origin, then sync the workspace via
----but pull + but clean and delete the remote ephemeral ref.
+---then land that branch directly onto the target with `but land`, which
+---fast-forwards (or merges) the target, pushes to the remote, and reconciles
+---the workspace in a single call.
 function M.direct_to_main(buf)
   local file_ids = {}
   local selected = buf:get_selected_lines({ 'file' })
@@ -495,8 +455,8 @@ function M.direct_to_main(buf)
           return
         end
 
-        local ephemeral_sha = type(commit_result) == 'table' and commit_result.commit_id or nil
-        if not ephemeral_sha or ephemeral_sha == '' then
+        local ephemeral_sha = commit_id_of(commit_result)
+        if not ephemeral_sha then
           sp:stop()
           buf:clear_selection()
           surface_error('commit', 'no commit_id in response from but commit')
@@ -504,115 +464,23 @@ function M.direct_to_main(buf)
           return
         end
 
-        local target = resolve_target_branch()
-        if not target then
+        -- Land the ephemeral branch straight onto the target. `but land` does the
+        -- fast-forward-or-merge, the remote push, and the workspace reconcile in one
+        -- call; on rejection (e.g. a protected branch) it exits non-zero with a message.
+        sp:update('landing onto target')
+        cli.land(ephemeral_name, function(land_err)
           sp:stop()
           buf:clear_selection()
-          surface_error('target-resolve', 'could not resolve target branch (no origin/HEAD, no local main/master)')
-          refresh()
-          return
-        end
-
-        -- Step 3: refresh remote-tracking ref (non-fatal).
-        sp:update('fetching origin/' .. target)
-        local fetch = vim.system({ 'git', 'fetch', 'origin', target }, { text = true }):wait()
-        if fetch.code ~= 0 then
-          surface_warn('fetch', vim.trim(fetch.stderr or ('exit ' .. fetch.code)))
-        end
-
-        -- Step 4: fast-forward pre-flight.
-        sp:update('pre-flight: fast-forward check')
-        local ff = is_fast_forward(target, ephemeral_sha)
-        if ff == false then
-          sp:stop()
-          buf:clear_selection()
-          local local_sha =
-            vim.trim((vim.system({ 'git', 'rev-parse', '--short', target }, { text = true }):wait().stdout or ''))
-          local origin_sha = vim.trim(
-            (vim.system({ 'git', 'rev-parse', '--short', 'origin/' .. target }, { text = true }):wait().stdout or '')
-          )
-          surface_error(
-            'preflight',
-            'local '
-              .. target
-              .. ' not ancestor of new commit — reconcile manually before retrying.\n'
-              .. 'local '
-              .. target
-              .. ' is at '
-              .. local_sha
-              .. ', origin/'
-              .. target
-              .. ' is at '
-              .. origin_sha
-              .. '. Try:\n'
-              .. '  git fetch origin && git reset --hard origin/'
-              .. target
-          )
-          refresh()
-          return
-        elseif ff == nil then
-          sp:stop()
-          buf:clear_selection()
-          surface_error('preflight', 'git merge-base --is-ancestor failed')
-          refresh()
-          return
-        end
-
-        -- Step 5: advance local target ref.
-        sp:update('advancing local ' .. target)
-        local upd = vim.system({ 'git', 'update-ref', 'refs/heads/' .. target, ephemeral_sha }, { text = true }):wait()
-        if upd.code ~= 0 then
-          sp:stop()
-          buf:clear_selection()
-          surface_error('update-ref', vim.trim(upd.stderr or ('exit ' .. upd.code)))
-          refresh()
-          return
-        end
-
-        -- Step 6: push target to origin.
-        sp:update('pushing ' .. target .. ' to origin')
-        git_push_target(target, function(push_err)
-          if push_err then
-            sp:stop()
-            buf:clear_selection()
-            surface_error('push', push_err .. ' (local ' .. target .. ' already advanced; remote is now behind)')
+          if land_err then
+            surface_error('land', land_err)
             refresh()
             return
           end
-
-          -- Step 7: but pull (non-fatal).
-          sp:update('but pull (sync workspace)')
-          cli.pull(function(pull_err, _)
-            if pull_err then
-              surface_warn('pull', pull_err)
-            end
-
-            -- Step 8: but clean (non-fatal).
-            sp:update('but clean (drop empty branches)')
-            cli.clean(function(clean_err, _)
-              if clean_err then
-                surface_warn('clean', clean_err)
-              end
-
-              -- Step 9: delete remote ephemeral ref (non-fatal).
-              sp:update('deleting remote ' .. ephemeral_name)
-              vim.system({ 'git', 'push', 'origin', ':' .. ephemeral_name }, { text = true }, function(del)
-                vim.schedule(function()
-                  sp:stop()
-                  if del.code ~= 0 then
-                    surface_warn('delete-remote-ephemeral', vim.trim(del.stderr or ('exit ' .. del.code)))
-                  end
-
-                  buf:clear_selection()
-                  vim.notify(
-                    'gitbutler: direct-to-main done (' .. target .. ' ← ' .. ephemeral_sha:sub(1, 7) .. ')',
-                    vim.log.levels.INFO
-                  )
-                  refresh()
-                end)
-              end)
-            end)
-          end)
+          vim.notify(
+            'gitbutler: direct-to-main done (landed ' .. ephemeral_sha:sub(1, 7) .. ')',
+            vim.log.levels.INFO
+          )
+          refresh()
         end)
       end, file_ids, true)
     end,
@@ -636,14 +504,14 @@ function M.direct_to_main_test_harness(file_path, message)
   end
 
   local cli_id
-  for _, c in ipairs(decoded.unassignedChanges or {}) do
+  for _, c in ipairs(decoded.uncommittedChanges or {}) do
     if c.filePath == file_path then
       cli_id = c.cliId
       break
     end
   end
   if not cli_id then
-    return 'file not in unassignedChanges: ' .. file_path
+    return 'file not in uncommittedChanges: ' .. file_path
   end
 
   local ts = os.time()
@@ -657,38 +525,16 @@ function M.direct_to_main_test_harness(file_path, message)
     return 'commit: ' .. vim.trim(commit_res.stderr or '')
   end
   local commit_ok, commit_decoded = pcall(vim.json.decode, commit_res.stdout or '')
-  local ephemeral_sha = commit_ok and type(commit_decoded) == 'table' and commit_decoded.commit_id or nil
+  local ephemeral_sha = commit_ok and commit_id_of(commit_decoded) or nil
   if not ephemeral_sha then
     return 'commit: no commit_id in response'
   end
 
-  local target = resolve_target_branch()
-  if not target then
-    return 'target-resolve: could not resolve target branch'
+  -- but land <ephemeral> --yes: fast-forward-or-merge the target, push, reconcile.
+  local land = vim.system({ 'but', 'land', ephemeral_name, '--yes', '--format=json' }, { text = true }):wait()
+  if land.code ~= 0 then
+    return 'land: ' .. vim.trim(land.stderr or '')
   end
-
-  vim.system({ 'git', 'fetch', 'origin', target }, { text = true }):wait()
-
-  local ff = is_fast_forward(target, ephemeral_sha)
-  if ff == false then
-    return 'preflight: local ' .. target .. ' not ancestor of new commit'
-  elseif ff == nil then
-    return 'preflight: git merge-base failed'
-  end
-
-  local upd = vim.system({ 'git', 'update-ref', 'refs/heads/' .. target, ephemeral_sha }, { text = true }):wait()
-  if upd.code ~= 0 then
-    return 'update-ref: ' .. vim.trim(upd.stderr or '')
-  end
-
-  local push = vim.system({ 'git', 'push', 'origin', target .. ':' .. target }, { text = true }):wait()
-  if push.code ~= 0 then
-    return 'push: ' .. vim.trim(push.stderr or '')
-  end
-
-  vim.system({ 'but', 'pull', '--format=json' }, { text = true }):wait()
-  vim.system({ 'but', 'clean', '--format=json' }, { text = true }):wait()
-  vim.system({ 'git', 'push', 'origin', ':' .. ephemeral_name }, { text = true }):wait()
 
   return nil
 end
@@ -1005,7 +851,7 @@ function M.help(_buf)
     'R        Create PR for the branch under cursor',
     'D        Toggle PR draft/ready',
     'C        Open CI view for branch',
-    'M        Commit & push selected (or unassigned) to main',
+    'M        Land selected (or unassigned) directly onto the target',
     'F        Pull / sync from upstream',
     'B        Branch management',
     'b        New branch',

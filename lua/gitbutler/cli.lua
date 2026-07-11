@@ -276,6 +276,16 @@ function M.pr_auto_merge(branch, callback)
   M.run({ 'pr', 'auto-merge', branch, '--json' }, callback)
 end
 
+---Convenience: but land (land a branch directly onto the target branch).
+---Fast-forwards the target to the branch tip when possible (else a merge
+---commit), pushes to the remote, and reconciles remaining applied branches —
+---the whole "just push to the target" workflow in one call. Silent on success.
+---@param branch string Branch name or CLI ID to land
+---@param callback fun(err?: string, result?: any)
+function M.land(branch, callback)
+  M.run({ 'land', branch, '--yes', '--json' }, callback)
+end
+
 ---Convenience: but clean (remove empty branches from workspace)
 function M.clean(callback)
   M.run({ 'clean', '--json' }, callback)

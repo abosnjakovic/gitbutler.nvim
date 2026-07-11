@@ -158,7 +158,7 @@ end
 ---Real JSON shape:
 ---  stacks[].branches[].name, .commits[].commitId, .commits[].message, .commits[].changes[].filePath
 ---  stacks[].assignedChanges[].filePath, .changeType
----  unassignedChanges[].filePath, .changeType
+---  uncommittedChanges[].filePath, .changeType  (older CLIs: unassignedChanges)
 ---  mergeBase.commitId, .message
 ---  upstreamState.behind
 ---@param buf table GitButlerBuffer
@@ -279,8 +279,9 @@ local function build_lines(buf, data)
     end
   end
 
-  -- Unassigned changes
-  local unassigned = data.unassignedChanges or {}
+  -- Unassigned changes. Newer CLIs name this `uncommittedChanges`; older ones
+  -- used `unassignedChanges`. Read either so the section survives the rename.
+  local unassigned = data.uncommittedChanges or data.unassignedChanges or {}
   if #unassigned > 0 then
     local fold_id = 'unassigned'
     local is_folded = buf:is_folded(fold_id)

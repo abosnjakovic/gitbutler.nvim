@@ -113,7 +113,7 @@ P        Push all branches
 R        Create PR for the branch under cursor
 D        Toggle PR draft / ready
 C        Open CI view for the branch under cursor
-M        Commit selected (or unassigned) files straight to main, then push
+M        Land selected (or unassigned) files directly onto the target
 F        Pull / sync from upstream
 b        Create a new branch
 B        Branch management popup
@@ -197,9 +197,9 @@ The CI view shells out to `gh run list` / `gh run view` / `gh run rerun` via a p
 
 ### Commit straight to main (M)
 
-Solo flow: `M` in `:Butler` commits selected (or unassigned) files directly to the local target branch and pushes to origin. The action commits to an ephemeral branch, fast-forwards the target via `git update-ref` (refuses if local target has diverged from origin), pushes, then `but pull`s and cleans up both the local and remote ephemeral refs.
+Solo flow: `M` in `:Butler` commits selected (or unassigned) files directly onto the target branch, no PR. The action commits to an ephemeral branch, then runs `but land`, which fast-forwards (or merges) the target, pushes to the remote, and reconciles the workspace in one step.
 
-Pre-flight failures surface to `:messages` with concrete recovery advice (typically `git fetch origin && git reset --hard origin/<target>`).
+Land failures — for example a branch protected against direct pushes — surface to `:messages` with the CLI's message.
 
 ## Configuration
 
