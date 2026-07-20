@@ -38,12 +38,6 @@ M.defaults = {
   watch = true,
   watch_interval = 1000,
 
-  -- Status buffer sections (can be hidden or start folded)
-  sections = {
-    branches = { folded = false, hidden = false },
-    unassigned = { folded = false, hidden = false },
-  },
-
   -- Timeline view settings
   timeline = {
     days = 7,
@@ -53,35 +47,7 @@ M.defaults = {
   -- Keymaps for status buffer (set to false to disable)
   keymaps = {
     status = {
-      ['<CR>'] = 'open_file',
-      ['s'] = 'assign_to_branch',
-      ['a'] = 'absorb',
-      ['c'] = 'commit',
-      ['A'] = 'amend',
-      ['S'] = 'squash',
-      ['m'] = 'move',
-      ['d'] = 'describe',
-      ['u'] = 'undo',
-      ['p'] = 'push',
-      ['B'] = 'branches',
-      ['P'] = 'push_all',
-      ['R'] = 'pr_create',
-      ['D'] = 'pr_toggle_draft',
-      ['C'] = 'ci_open',
-      ['F'] = 'pull',
-      ['q'] = 'close',
-      ['<C-r>'] = 'refresh',
-      ['r'] = 'refresh', -- undocumented alias; advertised binding is <C-r>
-      ['b'] = 'branch_new',
-      ['x'] = 'discard',
-      ['<Tab>'] = 'toggle_fold',
-      ['<Space>'] = 'toggle_select',
-      ['l'] = 'log',
-      ['O'] = 'oplog',
-      ['t'] = 'timeline',
-      ['U'] = 'uncommit',
-      ['M'] = 'direct_to_main',
-      ['?'] = 'help',
+      -- navigation (official but-tui keys)
       ['j'] = 'cursor_down',
       ['k'] = 'cursor_up',
       ['<Down>'] = 'cursor_down',
@@ -92,6 +58,38 @@ M.defaults = {
       ['<C-u>'] = 'jump_up',
       ['g'] = 'goto_top',
       ['G'] = 'goto_bottom',
+      -- marks
+      ['<Space>'] = 'toggle_select',
+      -- operations (official keys)
+      ['c'] = 'commit',
+      ['b'] = 'branch_new',
+      ['x'] = 'discard',
+      ['u'] = 'undo',
+      ['<C-r>'] = 'refresh',
+      ['q'] = 'close',
+      ['?'] = 'help',
+      -- direct actions retained until phase 2 replaces them with modes
+      ['s'] = 'assign_to_branch',
+      ['S'] = 'squash',
+      ['m'] = 'move',
+      ['U'] = 'uncommit',
+      ['d'] = 'describe',
+      ['<Tab>'] = 'toggle_fold',
+      -- plugin extras on free keys (see spec keymap table)
+      ['o'] = 'open_file',
+      ['<CR>'] = 'open_file', -- becomes inline reword in phase 2
+      ['A'] = 'absorb',
+      ['p'] = 'push',
+      ['P'] = 'push_all',
+      ['v'] = 'pr_create',
+      ['V'] = 'pr_toggle_draft',
+      ['C'] = 'ci_open',
+      ['L'] = 'direct_to_main',
+      ['i'] = 'pull',
+      ['T'] = 'timeline',
+      ['H'] = 'log',
+      ['O'] = 'oplog',
+      ['B'] = 'branches',
     },
     ci = {
       ['<CR>'] = 'open_log',

@@ -6,7 +6,7 @@ Requires neovim 0.10+ and the [`but` CLI](https://docs.gitbutler.com/cli-overvie
 
 <img width="6016" height="3384" alt="image" src="https://github.com/user-attachments/assets/22bf9735-0d5a-4118-8562-31febf1bb875" />
 
-Timlineview (t)
+Timeline view (T)
 Greate for a birds eye view on work being done around you
 <img width="6016" height="3384" alt="image" src="https://github.com/user-attachments/assets/e23f355e-c21c-43c7-885e-4cadbefa9c82" />
 
@@ -40,7 +40,7 @@ brew install gh
 gh auth login
 ```
 
-Without `gh`, the CI features are no-ops (`R`/PR creation still works through `but pr`).
+Without `gh`, the CI features are no-ops (`v`/PR creation still works through `but pr`).
 
 ### lazy.nvim
 
@@ -85,47 +85,75 @@ Open the status buffer with `:Butler` or bind it to a key:
 vim.keymap.set('n', '<leader>bb', ':Butler<CR>', { desc = 'gitbutler' })
 ```
 
+The status view mirrors the graph layout of the official `but tui`; modal interaction (rub/commit modes) arrives in a later release. If you used the previous layout, note `t/l/R/D/M/F` moved to `T/H/v/V/L/i`, `a` (absorb) moved to `A`, the old `A` (amend) key was removed (returns as a rub verb in phase 2), and the `r` refresh alias was removed (`<C-r>` remains). `g`/`G` are now bound in the view, so `gg`/`gt` don't work inside it; all keys are remappable via `setup` keymaps.
+
 ### Commands
 
 `:Butler` toggles the status view. `:ButlerBranches` opens the branch management popup. `:ButlerLog [branch]` shows the commit log for a branch (defaults to the first applied branch). `:ButlerTimeline` shows a chronological view of recent commits across all branches and contributors. `:ButlerOplog` opens the operations history. `:ButlerAbsorb`, `:ButlerPush`, `:ButlerPull`, and `:ButlerUndo` run the corresponding operations directly. `:ButlerCI [branch]` opens the CI view for a branch. `:ButlerAutoMerge <branch>` toggles auto-merge on the PR for that branch.
 
 ### Multi-select
 
-Press `<Space>` on any file or commit line to toggle its selection. Selected items are highlighted and marked with `●`. Once you have a selection, the next action you trigger applies to all selected items rather than just the cursor line. Selection clears automatically after an action completes but persists across refreshes.
+Press `<Space>` on any file or commit line to toggle its selection. Selected items are highlighted and marked with `✔︎`. Once you have a selection, the next action you trigger applies to all selected items rather than just the cursor line. Selection is homogeneous — files and commits can't be mixed in the same selection; selecting a line of the other category is rejected. Selection clears automatically after an action completes but persists across refreshes.
 
-Actions that support multi-select: assign (`s`), discard (`x`), uncommit (`U`), squash (`S`), move (`m`), and open file (`<CR>`). For squash, all selected commits are passed in a single CLI call. For the others, operations run sequentially. Selecting items across different branches is allowed — the CLI determines validity per item.
+Actions that support multi-select: assign (`s`), discard (`x`), uncommit (`U`), squash (`S`), move (`m`), and open file (`o`/`<CR>`). For squash, all selected commits are passed in a single CLI call. For the others, operations run sequentially. Selecting items across different branches is allowed — the CLI determines validity per item.
 
 ### Status buffer keybindings
 
+Navigation:
+
 ```
-<CR>     Open file under cursor
+j/k      Next / previous row
+<Down>/<Up>  Next / previous row
+J/K      Next / previous section
+<C-d>/<C-u>  Jump 10 rows
+g/G      Uncommitted area / merge base
+```
+
+Marks:
+
+```
 <Space>  Select / deselect (multi-select)
-s        Assign file to a branch (inline picker)
+```
+
+Operations (official but-tui keys):
+
+```
 c        Commit to the branch under cursor
-a        Absorb uncommitted changes into logical commits
-A        Amend into HEAD commit of branch
-S        Squash commit into its parent
-m        Move commit to a different branch (picker)
-d        Describe/reword a commit or rename a branch
-u        Undo last operation
-p        Push the branch under cursor
-P        Push all branches
-R        Create PR for the branch under cursor
-D        Toggle PR draft / ready
-C        Open CI view for the branch under cursor
-M        Land selected (or unassigned) files directly onto the target
-F        Pull / sync from upstream
 b        Create a new branch
-B        Branch management popup
-l        Commit log for the branch under cursor
-t        Commit timeline (all branches)
-O        Operations log
-U        Uncommit file from commit back to unstaged
 x        Discard file changes (with confirmation)
-<Tab>    Inline diff on files, fold toggle on branch headers
+u        Undo last operation
 <C-r>    Refresh
 q        Close
 ?        Help
+```
+
+Direct actions (retained until phase 2 replaces them with modes):
+
+```
+s        Assign file to a branch (inline picker)
+S        Squash commit into its parent
+m        Move commit to a different branch (picker)
+U        Uncommit file from commit back to unstaged
+d        Describe/reword a commit or rename a branch
+<Tab>    Inline diff on files, fold toggle on branch headers
+```
+
+Extras (plugin actions on free keys):
+
+```
+o/<CR>   Open file under cursor
+A        Absorb uncommitted changes into logical commits
+p        Push the branch under cursor
+P        Push all branches
+v        Create PR for the branch under cursor
+V        Toggle PR draft / ready
+C        Open CI view for the branch under cursor
+L        Land selected (or unassigned) files directly onto the target
+i        Pull / sync from upstream
+T        Commit timeline (all branches)
+H        Commit log for the branch under cursor
+O        Operations log
+B        Branch management popup
 ```
 
 ### Branch management (B)
@@ -141,7 +169,7 @@ r        Rename a branch
 q/Esc    Close
 ```
 
-### Commit log (l)
+### Commit log (H)
 
 Shows commit history with per-file stats. Commits are foldable to reveal the full message body and the changed files.
 
@@ -153,7 +181,7 @@ S        Squash commit into parent
 q        Close
 ```
 
-### Timeline (t)
+### Timeline (T)
 
 Shows a chronological view of recent commits across all branches and contributors, grouped by date. Useful as a quick pulse check on repo activity. Data comes from `git log --all`, so it sees every ref regardless of GitButler's virtual branch state.
 
@@ -191,13 +219,13 @@ q        Close
 
 The CI view shells out to `gh run list` / `gh run view` / `gh run rerun` via a pluggable forge adapter (`lua/gitbutler/forge/`). Without `gh` on PATH, the view shows an install hint and degrades to a no-op.
 
-### Pull request creation (R, D)
+### Pull request creation (v, V)
 
-`R` on a branch line opens a multiline float pre-filled with the latest commit's subject and body. Submit sends `but pr new <branch> -m "<title>\n\n<body>"` and prints the resulting PR URL. `D` toggles the PR between draft and ready states. `:ButlerAutoMerge <branch>` toggles auto-merge.
+`v` on a branch line opens a multiline float pre-filled with the latest commit's subject and body. Submit sends `but pr new <branch> -m "<title>\n\n<body>"` and prints the resulting PR URL. `V` toggles the PR between draft and ready states. `:ButlerAutoMerge <branch>` toggles auto-merge.
 
-### Commit straight to main (M)
+### Commit straight to main (L)
 
-Solo flow: `M` in `:Butler` commits selected (or unassigned) files directly onto the target branch, no PR. The action commits to an ephemeral branch, then runs `but land`, which fast-forwards (or merges) the target, pushes to the remote, and reconciles the workspace in one step.
+Solo flow: `L` in `:Butler` commits selected (or unassigned) files directly onto the target branch, no PR. The action commits to an ephemeral branch, then runs `but land`, which fast-forwards (or merges) the target, pushes to the remote, and reconciles the workspace in one step.
 
 Land failures — for example a branch protected against direct pushes — surface to `:messages` with the CLI's message.
 
