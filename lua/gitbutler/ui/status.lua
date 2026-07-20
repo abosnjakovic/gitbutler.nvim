@@ -161,6 +161,13 @@ function M.rerender()
   if not M.instance or not M.data then
     return
   end
+  -- A rerender while an operation mode is active (async CI callback, late
+  -- action callback) would wipe the rows the mode's overlays and source rows
+  -- point at. The workspace changed under the mode — bail out of it first.
+  local modes = require('gitbutler.ui.modes')
+  if modes.current() ~= 'normal' then
+    modes.exit(M.instance)
+  end
   local buf = M.instance
   buf:render(graph.build(M.data, {
     selected = buf.selected,
@@ -219,6 +226,8 @@ function M.open()
   buf:on('section_up', actions.section_up)
   buf:on('goto_top', actions.goto_top)
   buf:on('goto_bottom', actions.goto_bottom)
+  buf:on('rub_start', actions.rub_start)
+  buf:on('rub_reverse', actions.rub_reverse)
 
   buf:open()
   M.refresh()
@@ -253,6 +262,12 @@ end
 
 ---Close the status buffer.
 function M.close()
+  local modes = require('gitbutler.ui.modes')
+  if M.instance and modes.current() ~= 'normal' then
+    -- Leave the mode before teardown so module-level mode state (keymap
+    -- ownership, augroup, mode_filter) doesn't leak past the buffer.
+    modes.exit(M.instance)
+  end
   if M.instance then
     M.instance:close()
     M.instance = nil

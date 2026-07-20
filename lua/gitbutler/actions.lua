@@ -990,15 +990,89 @@ function M.timeline(_buf)
   require('gitbutler.ui.timeline').open()
 end
 
+---Row types that can act as a rub source (they have a row in the verb matrix).
+local RUB_SOURCE_TYPES = {
+  file = true,
+  committed_file = true,
+  commit = true,
+  branch = true,
+  uncommitted_header = true,
+}
+
+---Short human label for a rub source row (path / sha7 / branch name).
+local function rub_label(line)
+  local d = line.data or {}
+  if line.type == 'commit' then
+    return (d.sha or d.cli_id or '?'):sub(1, 7)
+  end
+  return d.path or d.name or d.cli_id or '?'
+end
+
+---Enter rub mode with the marked lines (or the cursor line) as source.
+function M.rub_start(buf)
+  local sources = buf:get_selected_lines()
+  if #sources == 0 then
+    local line = buf:get_cursor_line()
+    sources = line and { line } or {}
+  end
+
+  local kind = sources[1] and sources[1].type or nil
+  if not kind or not RUB_SOURCE_TYPES[kind] then
+    vim.notify('gitbutler: nothing to rub here', vim.log.levels.WARN)
+    return
+  end
+
+  local ids, rows = {}, {}
+  for _, src in ipairs(sources) do
+    local id = src.data and src.data.cli_id
+    if not id then
+      vim.notify('gitbutler: row has no CLI id', vim.log.levels.WARN)
+      return
+    end
+    table.insert(ids, id)
+    for row, l in ipairs(buf.lines or {}) do
+      if l == src then
+        table.insert(rows, row)
+        break
+      end
+    end
+  end
+
+  local label = rub_label(sources[1]) .. (#sources > 1 and (' +' .. (#sources - 1)) or '')
+  buf:clear_selection()
+  -- Repaint the cleared ● marks before the mode overlays go on. Marks only
+  -- affect glyphs, so the captured row indexes stay valid.
+  require('gitbutler.ui.status').rerender()
+  require('gitbutler.ui.modes').enter_rub(buf, { kind = kind, ids = ids, rows = rows, label = label })
+end
+
+---Enter rub mode with every unassigned file as source (reverse rub).
+function M.rub_reverse(buf)
+  local ids, rows = {}, {}
+  for row, line in ipairs(buf.lines or {}) do
+    if line.type == 'file' and line.data and line.data.unassigned and line.data.cli_id then
+      table.insert(ids, line.data.cli_id)
+      table.insert(rows, row)
+    end
+  end
+  if #ids == 0 then
+    vim.notify('gitbutler: no unassigned changes', vim.log.levels.WARN)
+    return
+  end
+  local label = #ids .. ' unassigned file' .. (#ids > 1 and 's' or '')
+  require('gitbutler.ui.modes').enter_rub(buf, { kind = 'file', ids = ids, rows = rows, label = label })
+end
+
 ---Pure scanner: from row `from`, move `count` selectable rows in `dir` (1/-1).
 ---Returns the destination row (stays put when no further selectable row exists).
-function M._next_selectable(lines, from, dir, count)
+---@param filter? fun(line: GitButlerLine, row: integer): boolean Extra qualifier (e.g. mode target filter)
+function M._next_selectable(lines, from, dir, count, filter)
   local at = from
   for _ = 1, count do
     local j = at + dir
     local found
     while j >= 1 and j <= #lines do
-      if lines[j] and lines[j].selectable then
+      if lines[j] and lines[j].selectable and (not filter or filter(lines[j], j)) then
         found = j
         break
       end
@@ -1046,25 +1120,25 @@ function M.cursor_down(buf)
   if not has_win(buf) then
     return
   end
-  move_cursor(buf, M._next_selectable(buf.lines, cursor_row(buf), 1, 1))
+  move_cursor(buf, M._next_selectable(buf.lines, cursor_row(buf), 1, 1, buf.mode_filter))
 end
 function M.cursor_up(buf)
   if not has_win(buf) then
     return
   end
-  move_cursor(buf, M._next_selectable(buf.lines, cursor_row(buf), -1, 1))
+  move_cursor(buf, M._next_selectable(buf.lines, cursor_row(buf), -1, 1, buf.mode_filter))
 end
 function M.jump_down(buf)
   if not has_win(buf) then
     return
   end
-  move_cursor(buf, M._next_selectable(buf.lines, cursor_row(buf), 1, 10))
+  move_cursor(buf, M._next_selectable(buf.lines, cursor_row(buf), 1, 10, buf.mode_filter))
 end
 function M.jump_up(buf)
   if not has_win(buf) then
     return
   end
-  move_cursor(buf, M._next_selectable(buf.lines, cursor_row(buf), -1, 10))
+  move_cursor(buf, M._next_selectable(buf.lines, cursor_row(buf), -1, 10, buf.mode_filter))
 end
 function M.section_down(buf)
   if not has_win(buf) then
@@ -1079,11 +1153,18 @@ function M.section_up(buf)
   move_cursor(buf, M._next_section(buf.lines, cursor_row(buf), -1))
 end
 function M.goto_top(buf)
+  if buf.mode_filter then
+    local target = M._next_selectable(buf.lines, 0, 1, 1, buf.mode_filter)
+    if target >= 1 then
+      move_cursor(buf, target)
+    end
+    return
+  end
   move_cursor(buf, 1)
 end
 function M.goto_bottom(buf)
   for i = #buf.lines, 1, -1 do
-    if buf.lines[i].selectable then
+    if buf.lines[i].selectable and (not buf.mode_filter or buf.mode_filter(buf.lines[i], i)) then
       move_cursor(buf, i)
       return
     end

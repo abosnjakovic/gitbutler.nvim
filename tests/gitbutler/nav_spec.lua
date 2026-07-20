@@ -25,6 +25,22 @@ h.test('nav: count moves N selectable rows', function()
   h.assert_eq(7, actions._next_selectable(lines, 1, 1, 10))
 end)
 
+h.test('nav: filter narrows which selectable rows qualify', function()
+  local no_files = function(line, _row)
+    return line.type ~= 'file'
+  end
+  h.assert_eq(4, actions._next_selectable(lines, 1, 1, 1, no_files))
+end)
+
+h.test('nav: filter rejecting everything stays put', function()
+  h.assert_eq(
+    2,
+    actions._next_selectable(lines, 2, 1, 1, function()
+      return false
+    end)
+  )
+end)
+
 h.test('nav: section jump targets branch and uncommitted headers', function()
   h.assert_eq(4, actions._next_section(lines, 1, 1))
   h.assert_eq(1, actions._next_section(lines, 4, -1))

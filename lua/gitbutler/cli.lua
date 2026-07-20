@@ -195,6 +195,12 @@ function M.move(commit, target_branch, callback)
   M.run({ 'move', commit, target_branch, '--json' }, callback)
 end
 
+---Convenience: but rub <source> <target> — the CLI derives the operation
+---(stage/amend/squash/move/…) from the source and target kinds.
+function M.rub(source, target, callback)
+  M.run({ 'rub', source, target, '--json' }, callback)
+end
+
 ---Convenience: but uncommit
 function M.uncommit(commit, callback)
   local args = { 'uncommit', '--json' }

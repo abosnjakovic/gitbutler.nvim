@@ -60,6 +60,9 @@ M.defaults = {
       ['G'] = 'goto_bottom',
       -- marks
       ['<Space>'] = 'toggle_select',
+      -- modes
+      ['r'] = 'rub_start',
+      ['R'] = 'rub_reverse',
       -- operations (official keys)
       ['c'] = 'commit',
       ['b'] = 'branch_new',

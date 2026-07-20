@@ -104,10 +104,155 @@ end
 ---Extmark namespace for mode overlays (source tags, verb pills, dimming).
 M.ns = vim.api.nvim_create_namespace('gitbutler-mode')
 
----CursorMoved hook for the active mode. No-op for now; overlay-bearing modes
----(Task 2+) fill this in to redraw the verb pill under the cursor.
+---A row is a valid rub target iff the verb table has an entry and it is not a source row.
+---@param state ModeState
+---@param line GitButlerLine
+---@param row integer
+---@return boolean
+function M.is_rub_target(state, line, row)
+  if not line.selectable then
+    return false
+  end
+  for _, r in ipairs(state.source.rows) do
+    if r == row then
+      return false
+    end
+  end
+  return M.rub_verb(state.source.kind, line.type) ~= nil
+end
+
+---`but rub` target id for a row: literal 'zz' for the uncommitted header,
+---else the row's cli id.
+---@param line GitButlerLine
+---@return string?
+function M._rub_target_id(line)
+  if line.type == 'uncommitted_header' then
+    return 'zz'
+  end
+  return line.data and line.data.cli_id or nil
+end
+
+---CursorMoved hook for the active mode: redraw the verb pill under the cursor.
 ---@param buf GitButlerBuffer
-function M._on_cursor_moved(buf) end
+function M._on_cursor_moved(buf)
+  local state = M.state
+  if not state or state.mode ~= 'rub' then
+    return
+  end
+  if not (buf.buf and vim.api.nvim_buf_is_valid(buf.buf)) then
+    return
+  end
+  if state.pill_id then
+    vim.api.nvim_buf_del_extmark(buf.buf, M.ns, state.pill_id)
+    state.pill_id = nil
+  end
+  if not (buf.win and vim.api.nvim_win_is_valid(buf.win)) then
+    return
+  end
+  local row = vim.api.nvim_win_get_cursor(buf.win)[1]
+  local line = buf.lines and buf.lines[row]
+  if not line or not M.is_rub_target(state, line, row) then
+    return
+  end
+  local verb = M.rub_verb(state.source.kind, line.type)
+  state.pill_id = vim.api.nvim_buf_set_extmark(buf.buf, M.ns, row - 1, 0, {
+    virt_text = { { '<< ' .. verb .. ' >>', 'GitButlerVerbPill' } },
+    virt_text_pos = 'eol',
+  })
+end
+
+---Rub-mode entry hook: install the target filter, draw source tags and
+---dimming overlays, and park the cursor on the first valid target.
+---@param buf GitButlerBuffer
+local function setup_rub(buf)
+  buf.mode_filter = function(line, row)
+    return M.is_rub_target(M.state, line, row)
+  end
+
+  local state = M.state
+  local source_rows = {}
+  for _, r in ipairs(state.source.rows) do
+    source_rows[r] = true
+  end
+
+  if buf.buf and vim.api.nvim_buf_is_valid(buf.buf) then
+    for row, line in ipairs(buf.lines or {}) do
+      if source_rows[row] then
+        vim.api.nvim_buf_set_extmark(buf.buf, M.ns, row - 1, 0, {
+          virt_text = { { '<< source >>', 'GitButlerModeSource' } },
+          virt_text_pos = 'eol',
+        })
+      elseif not M.is_rub_target(state, line, row) then
+        vim.api.nvim_buf_set_extmark(buf.buf, M.ns, row - 1, 0, {
+          line_hl_group = 'GitButlerDimmed',
+        })
+      end
+    end
+  end
+
+  local target = require('gitbutler.actions')._next_selectable(buf.lines or {}, 0, 1, 1, buf.mode_filter)
+  if target >= 1 and buf.win and vim.api.nvim_win_is_valid(buf.win) then
+    vim.api.nvim_win_set_cursor(buf.win, { target, 0 })
+  end
+  M._on_cursor_moved(buf)
+end
+
+---Enter rub mode with a captured source.
+---@param buf GitButlerBuffer
+---@param source { kind: string, ids: string[], rows: integer[], label: string }
+function M.enter_rub(buf, source)
+  M.enter(buf, 'rub', source)
+end
+
+---Confirm the rub: target = cursor row; rub each source id onto it in
+---sequence. The mode is exited BEFORE the CLI chain runs so the refresh
+---always re-renders normal mode.
+---@param buf GitButlerBuffer
+function M._rub_confirm(buf)
+  local state = M.state
+  if not state or state.busy then
+    return
+  end
+  if not (buf.win and vim.api.nvim_win_is_valid(buf.win)) then
+    return
+  end
+  local row = vim.api.nvim_win_get_cursor(buf.win)[1]
+  local line = buf.lines and buf.lines[row]
+  if not line or not M.is_rub_target(state, line, row) then
+    return
+  end
+  local target_id = M._rub_target_id(line)
+  if not target_id then
+    vim.notify('gitbutler: target row has no CLI id', vim.log.levels.WARN)
+    return
+  end
+
+  state.busy = true
+  local ids = state.source.ids
+  M.exit(buf)
+
+  local cli = require('gitbutler.cli')
+  local status = require('gitbutler.ui.status')
+  local i = 0
+  local function rub_next()
+    i = i + 1
+    if i > #ids then
+      status.refresh()
+      return
+    end
+    cli.rub(ids[i], target_id, function(err)
+      if err then
+        vim.notify('gitbutler rub: ' .. err, vim.log.levels.ERROR)
+        status.refresh()
+        return
+      end
+      rub_next()
+    end)
+  end
+  rub_next()
+end
+
+MODE_KEYS.rub['<CR>'] = M._rub_confirm
 
 ---Enter `mode` with the given source/opts. Exits any active mode first (no
 ---nested modes).
@@ -135,6 +280,10 @@ function M.enter(buf, mode, source, opts)
     })
   end
 
+  if mode == 'rub' then
+    setup_rub(buf)
+  end
+
   buf:update_hint()
 end
 
@@ -143,6 +292,7 @@ end
 ---@param buf GitButlerBuffer
 function M.exit(buf)
   M.state = nil
+  buf.mode_filter = nil
   M.apply_keymap(buf, 'normal')
 
   if buf.buf and vim.api.nvim_buf_is_valid(buf.buf) then
