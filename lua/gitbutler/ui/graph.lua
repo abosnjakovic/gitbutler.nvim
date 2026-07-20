@@ -33,13 +33,7 @@ local function change_prefix(change_type)
   return 'M', 'GitButlerFileMod'
 end
 
----@class GraphRow
----@field text string
----@field spans {[1]:integer,[2]:integer,[3]:string}[] 0-indexed byte-range highlights
----@field type string same vocabulary as the legacy build_lines types
----@field data? table entity payload (same fields as legacy, plus mark_key)
----@field selectable boolean
----@field graph true
+---@class GraphRow: GitButlerLine
 
 local function row(kind, entity, selectable)
   return { text = '', spans = {}, type = kind, data = entity, selectable = selectable == true, graph = true }

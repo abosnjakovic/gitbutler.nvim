@@ -180,3 +180,31 @@ test('selection survives re-render', function()
 
   vim.api.nvim_buf_delete(buf.buf, { force = true })
 end)
+
+test('marks: graph rows use mark_key and reject mixed categories', function()
+  local buf = h.mock_buffer()
+  buf.lines = {
+    { text = 'f', type = 'file', data = { mark_key = 'change:up' }, graph = true },
+    { text = 'c', type = 'commit', data = { mark_key = 'commit:abc' }, graph = true },
+  }
+  buf._cursor_row = 1
+  h.assert_truthy(buf:toggle_select())
+  buf._cursor_row = 2
+  h.assert_falsy(buf:toggle_select(), 'mixing commit mark into change marks must be rejected')
+  buf._cursor_row = 1
+  h.assert_truthy(buf:toggle_select(), 'unmark must always work')
+  buf._cursor_row = 2
+  h.assert_truthy(buf:toggle_select(), 'after clearing, other category is allowed')
+end)
+
+test('marks: legacy committed_file cli_ids across commits are not treated as mark categories', function()
+  local buf = h.mock_buffer()
+  buf.lines = {
+    { type = 'committed_file', data = { cli_id = 'c4:xw' }, text = 'M  a.lua' },
+    { type = 'committed_file', data = { cli_id = 'a1:zz' }, text = 'M  b.lua' },
+  }
+  buf._cursor_row = 1
+  h.assert_truthy(buf:toggle_select())
+  buf._cursor_row = 2
+  h.assert_truthy(buf:toggle_select(), 'legacy cross-commit committed_file multi-select must stay allowed')
+end)

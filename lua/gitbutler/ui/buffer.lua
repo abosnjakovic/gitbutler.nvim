@@ -1,5 +1,9 @@
 local config = require('gitbutler.config')
 
+-- Mark-key category prefixes used by graph rows; legacy cli_ids (e.g. 'c4:xw')
+-- also match the `word:` shape but aren't real categories, so only these count.
+local MARK_CATS = { change = true, commit = true, cfile = true }
+
 ---@class GitButlerLine
 ---@field text string Display text for the line
 ---@field hl? string Highlight group name
@@ -8,6 +12,9 @@ local config = require('gitbutler.config')
 ---@field foldable? boolean Whether this line is a fold header
 ---@field folded? boolean Current fold state
 ---@field indent? number Indentation level
+---@field graph? boolean Graph row: text rendered verbatim, spans applied
+---@field spans? {[1]:integer,[2]:integer,[3]:string}[] 0-indexed byte-range highlights
+---@field selectable? boolean Cursor may rest on this row
 
 ---@class GitButlerBuffer
 ---@field buf number Buffer handle
@@ -225,23 +232,31 @@ function Buffer:render(lines)
 
   local text_lines = {}
   for _, line in ipairs(lines) do
-    local indent = string.rep('  ', line.indent or 0)
-    local prefix = ''
-    if line.foldable then
-      prefix = line.folded and '▸ ' or '▾ '
+    if line.graph then
+      table.insert(text_lines, line.text)
+    else
+      local indent = string.rep('  ', line.indent or 0)
+      local prefix = ''
+      if line.foldable then
+        prefix = line.folded and '▸ ' or '▾ '
+      end
+      local select_marker = ''
+      if self:is_selected(line) then
+        select_marker = '● '
+      end
+      table.insert(text_lines, indent .. select_marker .. prefix .. line.text)
     end
-    local select_marker = ''
-    if self:is_selected(line) then
-      select_marker = '● '
-    end
-    table.insert(text_lines, indent .. select_marker .. prefix .. line.text)
   end
 
   vim.api.nvim_buf_set_lines(self.buf, 0, -1, false, text_lines)
 
   -- Apply highlights
   for i, line in ipairs(lines) do
-    if self:is_selected(line) then
+    if line.graph then
+      for _, s in ipairs(line.spans or {}) do
+        vim.api.nvim_buf_add_highlight(self.buf, self.ns, s[3], i - 1, s[1], s[2])
+      end
+    elseif self:is_selected(line) then
       vim.api.nvim_buf_add_highlight(self.buf, self.ns, 'GitButlerSelected', i - 1, 0, -1)
     elseif line.hl then
       vim.api.nvim_buf_add_highlight(self.buf, self.ns, line.hl, i - 1, 0, -1)
@@ -344,6 +359,9 @@ function Buffer:select_key(line)
   if not line or not line.data then
     return nil
   end
+  if line.data.mark_key then
+    return line.data.mark_key
+  end
   if line.type == 'file' or line.type == 'committed_file' then
     return line.data.cli_id
   elseif line.type == 'commit' then
@@ -365,6 +383,19 @@ function Buffer:toggle_select()
   local key = self:select_key(line)
   if not key then
     return false
+  end
+  if not self.selected[key] then
+    local cat = key:match('^(%w+):')
+    cat = MARK_CATS[cat] and cat or nil
+    if cat then
+      for existing in pairs(self.selected) do
+        local ecat = existing:match('^(%w+):')
+        ecat = MARK_CATS[ecat] and ecat or nil
+        if ecat and ecat ~= cat then
+          return false
+        end
+      end
+    end
   end
   if self.selected[key] then
     self.selected[key] = nil
