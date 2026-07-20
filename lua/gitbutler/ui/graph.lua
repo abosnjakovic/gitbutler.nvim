@@ -161,20 +161,22 @@ function M.build(data, state)
   if not folds['unassigned'] then
     for _, ch in ipairs(unassigned) do
       local prefix, hl = change_prefix(ch.changeType)
-      local key = 'change:' .. (ch.cliId or ch.filePath)
+      local cli_id = scalar(ch.cliId, nil)
+      local path = scalar(ch.filePath, '(unknown)')
+      local key = 'change:' .. (cli_id or path)
       local r = row('file', {
-        path = ch.filePath,
+        path = path,
         change_type = ch.changeType,
-        cli_id = ch.cliId,
+        cli_id = cli_id,
         branch_name = nil,
         unassigned = true,
         mark_key = key,
       }, true)
       lead(r, selected[key], '┊')
       add(r, '  ')
-      add(r, ch.cliId or '??', HL.cli_id)
+      add(r, cli_id or '??', HL.cli_id)
       add(r, ' ' .. prefix, hl)
-      add(r, ' ' .. ch.filePath, hl)
+      add(r, ' ' .. path, hl)
       push(r)
     end
   end
@@ -185,19 +187,20 @@ function M.build(data, state)
   -- Stacks
   for _, stack in ipairs(list(data.stacks)) do
     for bi, branch in ipairs(list(stack.branches)) do
-      local name = branch.name or '(unnamed)'
+      local name = scalar(branch.name, '(unnamed)')
       local fold_id = 'branch:' .. name
+      local branch_cli_id = scalar(branch.cliId, nil)
       local br = row('branch', {
         branch = branch,
         stack = stack,
         name = name,
-        cli_id = branch.cliId,
-        stack_cli_id = stack.cliId,
+        cli_id = branch_cli_id,
+        stack_cli_id = scalar(stack.cliId, nil),
         fold_id = fold_id,
       }, true)
       br.foldable = true
       add(br, (bi == 1 and '┊╭┄' or '┊├┄') .. fold_marker(folds[fold_id]), HL.connector)
-      add(br, branch.cliId or '??', HL.cli_id)
+      add(br, branch_cli_id or '??', HL.cli_id)
       add(br, ' [' .. name .. ']', HL.branch)
       if state.branch_suffix then
         for _, piece in ipairs(state.branch_suffix(stack, branch)) do
@@ -211,20 +214,22 @@ function M.build(data, state)
         if bi == 1 then
           for _, ch in ipairs(list(stack.assignedChanges)) do
             local prefix, hl = change_prefix(ch.changeType)
-            local key = 'change:' .. (ch.cliId or ch.filePath)
+            local cli_id = scalar(ch.cliId, nil)
+            local path = scalar(ch.filePath, '(unknown)')
+            local key = 'change:' .. (cli_id or path)
             local r = row('file', {
-              path = ch.filePath,
+              path = path,
               change_type = ch.changeType,
-              cli_id = ch.cliId,
+              cli_id = cli_id,
               branch_name = name,
               stack_cli_id = stack.cliId,
               mark_key = key,
             }, true)
             lead(r, selected[key], '┊┊')
             add(r, '  ')
-            add(r, ch.cliId or '??', HL.cli_id)
+            add(r, cli_id or '??', HL.cli_id)
             add(r, ' ' .. prefix, hl)
-            add(r, ' ' .. ch.filePath, hl)
+            add(r, ' ' .. path, hl)
             push(r)
           end
         end
@@ -255,11 +260,13 @@ function M.build(data, state)
           local show_files = state.show_all_files or file_lists[commit.commitId]
           for _, ch in ipairs(show_files and list(commit.changes) or {}) do
             local prefix, hl = change_prefix(ch.changeType)
-            local ckey = 'cfile:' .. (ch.cliId or ch.filePath)
+            local cli_id = scalar(ch.cliId, nil)
+            local path = scalar(ch.filePath, '(unknown)')
+            local ckey = 'cfile:' .. (cli_id or path)
             local fr = row('committed_file', {
-              path = ch.filePath,
+              path = path,
               change_type = ch.changeType,
-              cli_id = ch.cliId,
+              cli_id = cli_id,
               commit_id = commit.commitId,
               branch_name = name,
               mark_key = ckey,
@@ -267,7 +274,7 @@ function M.build(data, state)
             lead(fr, selected[ckey], '┊│')
             add(fr, '    ')
             add(fr, prefix, hl)
-            add(fr, ' ' .. ch.filePath, hl)
+            add(fr, ' ' .. path, hl)
             push(fr)
           end
         end
@@ -293,11 +300,12 @@ function M.build(data, state)
 
   -- Merge base
   local mb = data.mergeBase
-  if type(mb) == 'table' and mb.commitId then
-    local r = row('merge_base', { sha = mb.commitId }, true)
+  local mb_sha = type(mb) == 'table' and scalar(mb.commitId, '') or ''
+  if mb_sha ~= '' then
+    local r = row('merge_base', { sha = mb_sha }, true)
     -- No stacks above means no lane to join back into: cap the trunk instead.
     add(r, #list(data.stacks) > 0 and '├╯ ' or '┴ ', HL.connector)
-    add(r, (mb.commitId):sub(1, 7), HL.sha)
+    add(r, mb_sha:sub(1, 7), HL.sha)
     add(r, ' (common base)', HL.dim)
     local date = scalar(mb.createdAt, ''):sub(1, 10)
     if date ~= '' then

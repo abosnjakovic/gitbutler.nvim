@@ -273,3 +273,44 @@ h.test('graph: absent ids and empty subjects do not collide into a state', funct
     end
   end
 end)
+
+-- The CLI emits JSON null (vim.NIL) for absent fields, and vim.NIL is TRUTHY,
+-- so `x or default` guards walk straight through it. Two separate reviews found
+-- crash sites this fuzz would have caught; it asserts the whole payload surface
+-- rather than the three fields a plan happened to name.
+h.test('graph: vim.NIL in any payload field does not crash the render', function()
+  local paths = {
+    { 'uncommittedChanges', 1, 'cliId' },
+    { 'uncommittedChanges', 1, 'filePath' },
+    { 'uncommittedChanges', 1, 'changeType' },
+    { 'stacks', 1, 'cliId' },
+    { 'stacks', 1, 'assignedChanges', 1, 'cliId' },
+    { 'stacks', 1, 'assignedChanges', 1, 'filePath' },
+    { 'stacks', 1, 'branches', 1, 'cliId' },
+    { 'stacks', 1, 'branches', 1, 'name' },
+    { 'stacks', 1, 'branches', 1, 'branchStatus' },
+    { 'stacks', 1, 'branches', 1, 'commits', 1, 'cliId' },
+    { 'stacks', 1, 'branches', 1, 'commits', 1, 'commitId' },
+    { 'stacks', 1, 'branches', 1, 'commits', 1, 'message' },
+    { 'stacks', 1, 'branches', 1, 'commits', 1, 'changes', 1, 'cliId' },
+    { 'stacks', 1, 'branches', 1, 'commits', 1, 'changes', 1, 'filePath' },
+    { 'mergeBase', 'commitId' },
+    { 'mergeBase', 'createdAt' },
+    { 'mergeBase', 'message' },
+    { 'upstreamState', 'behind' },
+    { 'upstreamState', 'latestCommit' },
+  }
+
+  for _, path in ipairs(paths) do
+    local data = vim.deepcopy(fixtures.status_full)
+    local node = data
+    for i = 1, #path - 1 do
+      node = node and node[path[i]]
+    end
+    if node then
+      node[path[#path]] = vim.NIL
+      local ok, err = pcall(graph.build, data, { show_all_files = true })
+      h.assert_truthy(ok, 'vim.NIL at ' .. table.concat(vim.tbl_map(tostring, path), '.') .. ' → ' .. tostring(err))
+    end
+  end
+end)

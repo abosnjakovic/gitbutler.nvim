@@ -13,7 +13,6 @@ function M.setup()
     GitButlerFileAdd = { link = 'diffAdded' },
     GitButlerFileDel = { link = 'diffRemoved' },
     GitButlerFileRenamed = { link = 'diffChanged' },
-    GitButlerUnassigned = { link = 'WarningMsg' },
     GitButlerHelp = { link = 'Comment' },
     GitButlerHelpKey = { link = 'Identifier' },
     GitButlerSelected = { link = 'Visual' },
