@@ -1,0 +1,25 @@
+local h = require('tests.gitbutler.helpers')
+local modes = require('gitbutler.ui.modes')
+
+h.test('modes: rub verb matrix matches but rub', function()
+  h.assert_eq('assign', modes.rub_verb('file', 'branch'))
+  h.assert_eq('amend', modes.rub_verb('file', 'commit'))
+  h.assert_eq('unassign', modes.rub_verb('file', 'uncommitted_header'))
+  h.assert_eq('squash', modes.rub_verb('commit', 'commit'))
+  h.assert_eq('undo commit', modes.rub_verb('commit', 'uncommitted_header'))
+  h.assert_eq('move commit', modes.rub_verb('commit', 'branch'))
+  h.assert_eq('uncommit', modes.rub_verb('committed_file', 'uncommitted_header'))
+  h.assert_eq('move file', modes.rub_verb('committed_file', 'commit'))
+  h.assert_eq('reassign', modes.rub_verb('branch', 'branch'))
+  h.assert_eq('amend all', modes.rub_verb('uncommitted_header', 'commit'))
+  h.assert_falsy(modes.rub_verb('file', 'file'))
+  h.assert_falsy(modes.rub_verb('merge_base', 'commit'))
+  h.assert_falsy(modes.rub_verb('commit', 'merge_base'))
+end)
+
+h.test('modes: current() reflects state', function()
+  h.assert_eq('normal', modes.current())
+  modes.state = { mode = 'rub' }
+  h.assert_eq('rub', modes.current())
+  modes.state = nil
+end)

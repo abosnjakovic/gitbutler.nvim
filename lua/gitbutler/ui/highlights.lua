@@ -33,6 +33,13 @@ function M.setup()
     GitButlerUpstream = { link = 'WarningMsg' },
     GitButlerCommitDotPushed = { link = 'DiagnosticOk' },
     GitButlerModeNormal = { link = 'StatusLine' },
+    GitButlerModeRub = { link = 'DiffAdd' },
+    GitButlerModeCommit = { link = 'DiffAdd' },
+    GitButlerModeMove = { link = 'DiffChange' },
+    GitButlerModeStack = { link = 'DiffChange' },
+    GitButlerModeSource = { link = 'Visual' },
+    GitButlerVerbPill = { link = 'IncSearch' },
+    GitButlerDimmed = { link = 'Comment' },
   }
 
   for name, def in pairs(groups) do

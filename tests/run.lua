@@ -18,6 +18,7 @@ require('tests.gitbutler.direct_to_main_spec')
 require('tests.gitbutler.graph_spec')
 require('tests.gitbutler.nav_spec')
 require('tests.gitbutler.hotbar_spec')
+require('tests.gitbutler.modes_spec')
 
 -- Summary
 local h = require('tests.gitbutler.helpers')
