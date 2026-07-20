@@ -41,6 +41,19 @@ h.test('nav: filter rejecting everything stays put', function()
   )
 end)
 
+h.test('nav: _branch_row finds a branch row by name, nil when absent', function()
+  local rows = {
+    { selectable = true, type = 'uncommitted_header' },
+    { selectable = true, type = 'branch', data = { name = 'feature-auth' } },
+    { selectable = true, type = 'commit', data = { branch_name = 'feature-auth' } },
+    { selectable = true, type = 'branch', data = { name = 'bugfix' } },
+  }
+  h.assert_eq(2, actions._branch_row(rows, 'feature-auth'))
+  h.assert_eq(4, actions._branch_row(rows, 'bugfix'))
+  h.assert_falsy(actions._branch_row(rows, 'missing'))
+  h.assert_falsy(actions._branch_row(nil, 'feature-auth'))
+end)
+
 h.test('nav: section jump targets branch and uncommitted headers', function()
   h.assert_eq(4, actions._next_section(lines, 1, 1))
   h.assert_eq(1, actions._next_section(lines, 4, -1))

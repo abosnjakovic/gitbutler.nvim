@@ -58,6 +58,7 @@ M.defaults = {
       ['<C-u>'] = 'jump_up',
       ['g'] = 'goto_top',
       ['G'] = 'goto_bottom',
+      ['t'] = 'goto_branch',
       -- marks
       ['<Space>'] = 'toggle_select',
       -- modes
@@ -65,6 +66,7 @@ M.defaults = {
       ['R'] = 'rub_reverse',
       ['c'] = 'commit_mode_start',
       ['m'] = 'move_start',
+      ['s'] = 'stack_start',
       -- operations (official keys)
       ['n'] = 'insert_empty_commit',
       ['b'] = 'branch_new',
@@ -74,7 +76,6 @@ M.defaults = {
       ['q'] = 'close',
       ['?'] = 'help',
       -- direct actions retained until phase 2 replaces them with modes
-      ['s'] = 'assign_to_branch',
       ['S'] = 'squash',
       ['U'] = 'uncommit',
       ['d'] = 'describe',

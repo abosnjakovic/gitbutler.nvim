@@ -95,7 +95,7 @@ The status view mirrors the graph layout of the official `but tui`; modal intera
 
 Press `<Space>` on any file or commit line to toggle its selection. Selected items are highlighted and marked with `✔︎`. Once you have a selection, the next action you trigger applies to all selected items rather than just the cursor line. Selection is homogeneous — files and commits can't be mixed in the same selection; selecting a line of the other category is rejected. Selection clears automatically after an action completes but persists across refreshes.
 
-Actions that support multi-select: assign (`s`), discard (`x`), uncommit (`U`), squash (`S`), move (`m`), and open file (`o`/`<CR>`). For squash, all selected commits are passed in a single CLI call. For the others, operations run sequentially. Selecting items across different branches is allowed — the CLI determines validity per item.
+Actions that support multi-select: rub/assign (`r`), discard (`x`), uncommit (`U`), squash (`S`), move (`m`), and open file (`o`/`<CR>`). For squash, all selected commits are passed in a single CLI call. For the others, operations run sequentially. Selecting items across different branches is allowed — the CLI determines validity per item.
 
 ### Status buffer keybindings
 
@@ -250,7 +250,7 @@ require('gitbutler').setup({
       -- Set any key to false to disable it.
       -- Override values to remap actions.
       ['<CR>'] = 'open_file',
-      ['s'] = 'assign_to_branch',
+      ['s'] = 'stack_start',
       ['c'] = 'commit',
       -- ... see lua/gitbutler/config.lua for the full list
     },

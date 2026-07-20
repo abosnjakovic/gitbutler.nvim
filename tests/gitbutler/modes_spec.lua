@@ -429,3 +429,169 @@ h.test('modes: rub confirm stops the chain on first error but still refreshes', 
   vim.api.nvim_win_close(buf.win, true)
   vim.api.nvim_buf_delete(buf.buf, { force = true })
 end)
+
+h.test('modes: stack apply lists unapplied branches, exits, applies pick', function()
+  local cli = require('gitbutler.cli')
+  local status = require('gitbutler.ui.status')
+  local float = require('gitbutler.ui.float')
+  local fixtures = require('tests.gitbutler.fixtures')
+  local applied, refreshed, picker_items
+  local orig_bl, orig_apply, orig_refresh, orig_picker, orig_notify =
+    cli.branch_list, cli.apply, status.refresh, float.fuzzy_picker, vim.notify
+  cli.branch_list = function(cb)
+    cb(nil, fixtures.branch_list)
+  end
+  cli.apply = function(name, cb)
+    applied = name
+    cb(nil, {})
+  end
+  status.refresh = function()
+    refreshed = true
+  end
+  float.fuzzy_picker = function(opts)
+    picker_items = opts.items
+    opts.on_select(opts.items[1])
+  end
+  vim.notify = function() end
+
+  local buf = mode_buffer({
+    { selectable = true, type = 'branch', data = { cli_id = 'bb', name = 'feature-auth' } },
+  })
+  modes.enter(buf, 'stack')
+  modes._mode_keys.stack['a'](buf)
+
+  h.assert_eq('normal', modes.current(), 'stack mode exited before the picker selection runs')
+  h.assert_eq(1, #picker_items, 'only unapplied branches offered')
+  h.assert_eq('old-experiment', picker_items[1])
+  h.assert_eq('old-experiment', applied)
+  h.assert_truthy(refreshed)
+
+  cli.branch_list, cli.apply, status.refresh, float.fuzzy_picker, vim.notify =
+    orig_bl, orig_apply, orig_refresh, orig_picker, orig_notify
+  close_buffer(buf)
+end)
+
+h.test('modes: stack apply with no unapplied branches notifies and stays put', function()
+  local cli = require('gitbutler.cli')
+  local fixtures = require('tests.gitbutler.fixtures')
+  local warned
+  local orig_bl, orig_notify = cli.branch_list, vim.notify
+  cli.branch_list = function(cb)
+    cb(nil, fixtures.branch_list_empty)
+  end
+  vim.notify = function(msg, level)
+    if level == vim.log.levels.WARN then
+      warned = msg
+    end
+  end
+
+  local buf = mode_buffer({
+    { selectable = true, type = 'branch', data = { cli_id = 'bb', name = 'feature-auth' } },
+  })
+  modes.enter(buf, 'stack')
+  modes._mode_keys.stack['a'](buf)
+
+  h.assert_truthy(warned and warned:match('no unapplied branches'))
+  h.assert_eq('stack', modes.current(), 'mode kept when there is nothing to apply')
+  modes.exit(buf)
+
+  cli.branch_list, vim.notify = orig_bl, orig_notify
+  close_buffer(buf)
+end)
+
+h.test('modes: stack unapply confirms when the stack has assigned changes', function()
+  local cli = require('gitbutler.cli')
+  local status = require('gitbutler.ui.status')
+  local unapplied, refreshed, prompted
+  local orig_unapply, orig_refresh, orig_select, orig_notify = cli.unapply, status.refresh, vim.ui.select, vim.notify
+  cli.unapply = function(name, cb)
+    h.assert_eq('normal', modes.current(), 'mode must exit before the CLI call')
+    unapplied = name
+    cb(nil, {})
+  end
+  status.refresh = function()
+    refreshed = true
+  end
+  vim.ui.select = function(_, opts, cb)
+    prompted = opts.prompt
+    cb('Yes')
+  end
+  vim.notify = function() end
+
+  local buf = mode_buffer({
+    {
+      selectable = true,
+      type = 'branch',
+      data = { cli_id = 'bb', name = 'feature-auth', stack = { assignedChanges = { { cliId = 'ac' } } } },
+    },
+  })
+  modes.enter(buf, 'stack')
+  vim.api.nvim_win_set_cursor(buf.win, { 1, 0 })
+  modes._mode_keys.stack['u'](buf)
+
+  h.assert_truthy(prompted, 'confirm prompt shown for assigned changes')
+  h.assert_eq('feature-auth', unapplied)
+  h.assert_truthy(refreshed)
+
+  cli.unapply, status.refresh, vim.ui.select, vim.notify = orig_unapply, orig_refresh, orig_select, orig_notify
+  close_buffer(buf)
+end)
+
+h.test('modes: stack unapply warns off non-branch rows, skips confirm when clean', function()
+  local cli = require('gitbutler.cli')
+  local status = require('gitbutler.ui.status')
+  local unapplied, warned, selected
+  local orig_unapply, orig_refresh, orig_select, orig_notify = cli.unapply, status.refresh, vim.ui.select, vim.notify
+  cli.unapply = function(name, cb)
+    unapplied = name
+    cb(nil, {})
+  end
+  status.refresh = function() end
+  vim.ui.select = function()
+    selected = true
+  end
+  vim.notify = function(msg, level)
+    if level == vim.log.levels.WARN then
+      warned = msg
+    end
+  end
+
+  local buf = mode_buffer({
+    { selectable = true, type = 'file', data = { cli_id = 'aa' } },
+    { selectable = true, type = 'branch', data = { cli_id = 'bb', name = 'feat', stack = { assignedChanges = {} } } },
+  })
+  modes.enter(buf, 'stack')
+  vim.api.nvim_win_set_cursor(buf.win, { 1, 0 })
+  modes._mode_keys.stack['u'](buf)
+  h.assert_truthy(warned, 'non-branch row warns')
+  h.assert_falsy(unapplied)
+
+  vim.api.nvim_win_set_cursor(buf.win, { 2, 0 })
+  modes._mode_keys.stack['u'](buf)
+  h.assert_falsy(selected, 'no confirm prompt for a clean stack')
+  h.assert_eq('feat', unapplied)
+
+  cli.unapply, status.refresh, vim.ui.select, vim.notify = orig_unapply, orig_refresh, orig_select, orig_notify
+  close_buffer(buf)
+end)
+
+h.test('modes: stack m switches to move mode with the cursor branch as source', function()
+  local orig_notify = vim.notify
+  vim.notify = function() end
+  local buf = mode_buffer({
+    { selectable = true, type = 'branch', data = { cli_id = 'bb', name = 'feature-auth' } },
+    { selectable = true, type = 'branch', data = { cli_id = 'cc', name = 'other' } },
+  })
+  modes.enter(buf, 'stack')
+  vim.api.nvim_win_set_cursor(buf.win, { 1, 0 })
+  modes._mode_keys.stack['m'](buf)
+
+  h.assert_eq('move', modes.current())
+  h.assert_eq('branch', modes.state.source.kind)
+  h.assert_eq('bb', modes.state.source.ids[1])
+  h.assert_eq(1, modes.state.source.rows[1])
+
+  modes.exit(buf)
+  vim.notify = orig_notify
+  close_buffer(buf)
+end)

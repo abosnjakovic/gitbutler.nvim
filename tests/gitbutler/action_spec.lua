@@ -149,22 +149,19 @@ test('insert_empty_commit anchors after the cursor commit or branch', function()
   vim.notify = original_notify
 end)
 
-test('assign_to_branch stages only selected files', function()
-  local staged_files = {}
-
-  local original_stage = cli.stage
-  local original_branch_list = cli.branch_list
+test('rub_start captures only the marked files as source (assignment via rub)', function()
+  -- Assignment is now done by rubbing files onto a branch; the invariant the
+  -- old assign_to_branch test protected — only the marked files get operated
+  -- on — must hold for the rub source capture.
+  local modes = require('gitbutler.ui.modes')
+  local captured
+  local original_enter_rub = modes.enter_rub
   local original_notify = vim.notify
+  modes.enter_rub = function(_, source)
+    captured = source
+  end
   vim.notify = function() end
 
-  -- Mock stage
-  cli.stage = function(file_id, branch, cb)
-    table.insert(staged_files, { file_id = file_id, branch = branch })
-    cb(nil, 'ok')
-  end
-
-  -- We can't easily test assign_to_branch end-to-end because it opens a picker,
-  -- but we can verify the selection logic that feeds into it.
   local buf = h.mock_buffer()
   buf.lines = {
     { type = 'file', data = { cli_id = 'f1', path = 'a.lua', unassigned = true }, text = 'M  a.lua' },
@@ -173,22 +170,15 @@ test('assign_to_branch stages only selected files', function()
   }
   buf.selected = { f1 = true, f3 = true }
 
-  local selected = buf:get_selected_lines({ 'file' })
-  assert_eq(2, #selected, 'only 2 of 3 files selected')
-  assert_eq('f1', selected[1].data.cli_id)
-  assert_eq('f3', selected[2].data.cli_id)
+  actions.rub_start(buf)
 
-  -- Simulate what assign_to_branch does after picker selection
-  for _, target in ipairs(selected) do
-    local id = target.data.cli_id or target.data.path
-    cli.stage(id, 'target-branch', function() end)
-  end
+  assert_eq('file', captured.kind)
+  assert_eq(2, #captured.ids, 'only the 2 marked files become sources')
+  assert_eq('f1', captured.ids[1])
+  assert_eq('f3', captured.ids[2])
+  assert_eq(1, captured.rows[1])
+  assert_eq(3, captured.rows[2])
 
-  assert_eq(2, #staged_files, 'only selected files are staged')
-  assert_eq('f1', staged_files[1].file_id)
-  assert_eq('f3', staged_files[2].file_id)
-
-  cli.stage = original_stage
-  cli.branch_list = original_branch_list
+  modes.enter_rub = original_enter_rub
   vim.notify = original_notify
 end)

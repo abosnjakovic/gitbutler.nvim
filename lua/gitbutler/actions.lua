@@ -22,26 +22,6 @@ local function notify_result(action, err, _result)
   end
 end
 
----Extract branch names from `but branch --json` output.
----Shape: { appliedStacks: [{ heads: [{ name }] }], branches: [{ name }] }
-local function extract_branch_names(data)
-  local names = {}
-  for _, stack in ipairs(data.appliedStacks or {}) do
-    for _, head in ipairs(stack.heads or {}) do
-      if head.name then
-        table.insert(names, head.name)
-      end
-    end
-  end
-  -- Also include unapplied branches
-  for _, b in ipairs(data.branches or {}) do
-    if b.name then
-      table.insert(names, b.name)
-    end
-  end
-  return names
-end
-
 ---Open the file(s) under cursor or selected, or show commit details for recent commits.
 function M.open_file(buf)
   -- Multi-select: open each selected file without closing status buffer
@@ -104,60 +84,72 @@ function M.open_file(buf)
   vim.cmd('edit ' .. vim.fn.fnameescape(path))
 end
 
----Assign file(s) to a branch via inline picker.
-function M.assign_to_branch(buf)
-  local selected = buf:get_selected_lines({ 'file', 'committed_file' })
-  local targets
-  if #selected > 0 then
-    targets = selected
-  else
-    local line = buf:get_cursor_line()
-    if not line or (line.type ~= 'file' and line.type ~= 'committed_file') or not line.data then
+---Enter stack mode: apply/unapply/move stacks.
+function M.stack_start(buf)
+  require('gitbutler.ui.modes').enter(buf, 'stack')
+end
+
+---Pure scan: row index of the branch row named `name`, or nil.
+---@param lines? GitButlerLine[]
+---@param name string
+---@return integer?
+function M._branch_row(lines, name)
+  for row, line in ipairs(lines or {}) do
+    if line.type == 'branch' and line.data and line.data.name == name then
+      return row
+    end
+  end
+  return nil
+end
+
+---Fuzzy-pick an applied branch and move the cursor to its row.
+function M.goto_branch(buf)
+  local function pick(names)
+    if #names == 0 then
+      vim.notify('gitbutler: no applied branches', vim.log.levels.WARN)
       return
     end
-    targets = { line }
+    float.fuzzy_picker({
+      title = 'Go to branch',
+      items = names,
+      on_select = function(name)
+        local row = M._branch_row(buf.lines, name)
+        if row and buf.win and vim.api.nvim_win_is_valid(buf.win) then
+          vim.api.nvim_win_set_cursor(buf.win, { row, 0 })
+        end
+      end,
+    })
   end
 
-  cli.branch_list(function(err, data)
+  local data = require('gitbutler.ui.status').data
+  if data then
+    local names = {}
+    for _, stack in ipairs(data.stacks or {}) do
+      for _, branch in ipairs(stack.branches or {}) do
+        if branch.name then
+          table.insert(names, branch.name)
+        end
+      end
+    end
+    pick(names)
+    return
+  end
+
+  -- No cached status (shouldn't happen in a live view) — fall back to the CLI.
+  cli.branch_list(function(err, bdata)
     if err then
       vim.notify('gitbutler: ' .. err, vim.log.levels.ERROR)
       return
     end
-
-    local names = extract_branch_names(data)
-    if #names == 0 then
-      vim.notify('gitbutler: no branches available', vim.log.levels.WARN)
-      return
-    end
-
-    float.picker({
-      title = 'Assign to branch',
-      items = names,
-      on_select = function(branch_name)
-        notify_start('staging')
-        local i = 0
-        local function stage_next()
-          i = i + 1
-          if i > #targets then
-            buf:clear_selection()
-            vim.notify('gitbutler: staged ' .. #targets .. ' file(s) → ' .. branch_name, vim.log.levels.INFO)
-            refresh()
-            return
-          end
-          local id = targets[i].data.cli_id or targets[i].data.path
-          cli.stage(id, branch_name, function(stage_err, _)
-            if stage_err then
-              buf:clear_selection()
-              vim.notify('gitbutler stage: ' .. stage_err, vim.log.levels.ERROR)
-              refresh()
-              return
-            end
-            stage_next()
-          end)
+    local names = {}
+    for _, stack in ipairs(bdata.appliedStacks or {}) do
+      for _, head in ipairs(stack.heads or {}) do
+        if head.name then
+          table.insert(names, head.name)
         end
-        stage_next()
-      end,
-    })
+      end
+    end
+    pick(names)
   end)
 end
 

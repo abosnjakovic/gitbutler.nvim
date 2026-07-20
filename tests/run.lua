@@ -19,6 +19,7 @@ require('tests.gitbutler.graph_spec')
 require('tests.gitbutler.nav_spec')
 require('tests.gitbutler.hotbar_spec')
 require('tests.gitbutler.modes_spec')
+require('tests.gitbutler.fuzzy_spec')
 
 -- Summary
 local h = require('tests.gitbutler.helpers')

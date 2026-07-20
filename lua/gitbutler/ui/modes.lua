@@ -483,6 +483,104 @@ function M._move_confirm(buf)
   end, move_opts)
 end
 
+---Stack mode `a` — apply: fuzzy-pick an unapplied branch, apply it, refresh.
+---The mode is exited before the picker opens (it has an insert-mode prompt).
+MODE_KEYS.stack['a'] = function(buf)
+  require('gitbutler.cli').branch_list(function(err, data)
+    if M.current() ~= 'stack' then
+      -- The user left stack mode while branch_list was in flight.
+      return
+    end
+    if err then
+      vim.notify('gitbutler: ' .. err, vim.log.levels.ERROR)
+      return
+    end
+    local names = {}
+    for _, b in ipairs(data.branches or {}) do
+      if b.name then
+        table.insert(names, b.name)
+      end
+    end
+    if #names == 0 then
+      vim.notify('gitbutler: no unapplied branches', vim.log.levels.WARN)
+      return
+    end
+    M.exit(buf)
+    require('gitbutler.ui.float').fuzzy_picker({
+      title = 'Apply branch',
+      items = names,
+      on_select = function(name)
+        require('gitbutler.cli').apply(name, function(apply_err)
+          if apply_err then
+            vim.notify('gitbutler apply: ' .. apply_err, vim.log.levels.ERROR)
+          else
+            vim.notify('gitbutler: applied ' .. name, vim.log.levels.INFO)
+          end
+          require('gitbutler.ui.status').refresh()
+        end)
+      end,
+    })
+  end)
+end
+
+---Stack mode `u` — unapply the branch under the cursor; confirm first when
+---the stack still carries assigned (uncommitted) changes.
+MODE_KEYS.stack['u'] = function(buf)
+  local line = target_under_cursor(buf, function(l)
+    return l.type == 'branch'
+  end)
+  local name = line and line.data and line.data.name or nil
+  if not name then
+    vim.notify('gitbutler: place the cursor on a branch', vim.log.levels.WARN)
+    return
+  end
+
+  local function do_unapply()
+    M.exit(buf)
+    require('gitbutler.cli').unapply(name, function(err)
+      if err then
+        vim.notify('gitbutler unapply: ' .. err, vim.log.levels.ERROR)
+      else
+        vim.notify('gitbutler: unapplied ' .. name, vim.log.levels.INFO)
+      end
+      require('gitbutler.ui.status').refresh()
+    end)
+  end
+
+  local assigned = line.data.stack and line.data.stack.assignedChanges or nil
+  if assigned and #assigned > 0 then
+    vim.ui.select(
+      { 'Yes', 'No' },
+      { prompt = 'Stack has assigned changes — unapply ' .. name .. '?' },
+      function(choice)
+        if choice == 'Yes' then
+          do_unapply()
+        end
+      end
+    )
+  else
+    do_unapply()
+  end
+end
+
+---Stack mode `m` — switch to move mode with the cursor branch as source.
+MODE_KEYS.stack['m'] = function(buf)
+  local line, row = target_under_cursor(buf, function(l)
+    return l.type == 'branch'
+  end)
+  if not line or not (line.data and line.data.cli_id) then
+    vim.notify('gitbutler: place the cursor on a branch', vim.log.levels.WARN)
+    return
+  end
+  -- M.enter exits stack mode itself before entering move mode.
+  M.enter(buf, 'move', {
+    kind = 'branch',
+    ids = { line.data.cli_id },
+    rows = { row },
+    label = line.data.name or line.data.cli_id,
+  }, { above = false })
+end
+
 MODE_KEYS.move['<CR>'] = M._move_confirm
 MODE_KEYS.move['a'] = function(buf)
   if M.state then
