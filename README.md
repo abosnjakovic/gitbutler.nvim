@@ -85,7 +85,7 @@ Open the status buffer with `:Butler` or bind it to a key:
 vim.keymap.set('n', '<leader>bb', ':Butler<CR>', { desc = 'gitbutler' })
 ```
 
-The status view mirrors the graph layout and modal interaction of the official `but tui`: rub, commit, move, and stack modes replace the old direct-action keys. If you used the previous keymap, note: `s` (assign) and `S` (squash) are now rub-mode operations (`r`, then pick a target — squash is rub commit onto commit), `m` enters move mode, `U` is redo (uncommit is a rub verb), `d` moved to `<CR>` (describe/reword), and committed-file lists are hidden by default — press `f` (one commit) or `F` (all). New keys: `t` go to branch, `/` jump to id, `:`/`!` command modes, `y` copy, `n` empty commit, `M` editor reword, `<Esc>` back. `g`/`G` are bound in the view, so `gg`/`gt` don't work inside it; all keys are remappable via `setup` keymaps.
+The status view mirrors the graph layout and modal interaction of the official `but tui`: rub, commit, move, and stack modes replace the old direct-action keys. If you used the previous keymap, note: `s` (assign) and `S` (squash) are now rub-mode operations (`r`, then pick a target — squash is rub commit onto commit), `m` enters move mode, `U` is redo (uncommit is a rub verb), `d` moved to `<CR>` (describe/reword), and committed-file lists are hidden by default — press `f` (one commit) or `F` (all). New keys: `t` go to branch, `/` jump to id, `:`/`!` command modes, `y` copy, `n` empty commit, `M` editor reword, `<Esc>` back, and `d`/`D`/`+`/`-`/`l` for the details pane (see below) — note `d` is the pane toggle now, not describe. `g`/`G` are bound in the view, so `gg`/`gt` don't work inside it; all keys are remappable via `setup` keymaps.
 
 ### Commands
 
@@ -147,6 +147,16 @@ q        Close
 ?        Help
 ```
 
+Details pane:
+
+```
+d        Toggle the details split
+D        Toggle the details pane fullscreen
++/-      Grow / shrink the pane (5% steps, 30–90%)
+l        Focus the details pane
+<Right>  Focus the details pane
+```
+
 Extras (plugin actions on free keys):
 
 ```
@@ -177,7 +187,7 @@ Rub (`r`) is the universal "pick this up and drop it there" operation, mirroring
 | branch               | unassign all     | amend all | reassign    |
 | uncommitted area (zz)| —                | amend all | assign all  |
 
-`R` (reverse rub) enters the same mode with every unassigned file as the source.
+`R` (reverse rub) enters the same mode with every unassigned file as the source. `r` inside the details pane starts a rub with the marked (or selected) hunks as the source — hunks behave as the "uncommitted file" row of the table above, so they can be assigned to a branch, amended into a commit, or unassigned onto `zz`.
 
 Commit mode (`c`) picks where a new commit lands: move to a branch or commit row, `a` toggles inserting above/below the marker, `e` toggles an empty-message commit, `<CR>` confirms and prompts for the message.
 
@@ -186,6 +196,35 @@ Move mode (`m`) reorders commits (`a` toggles above/below), moves them onto anot
 Stack mode (`s`): `a` applies an unapplied branch (fuzzy picker), `u` unapplies the cursor branch (confirms when it has assigned changes), `m` switches to move mode with the cursor branch as source.
 
 Jump (`/`) prompts for a CLI id — exact match or unique prefix — and moves the cursor to that row. Command modes: `:` prompts for a `but` subcommand, `!` for a shell command; output is surfaced via notifications and the view refreshes.
+
+### Details pane (d)
+
+`d` toggles a details split beside the status view; `D` toggles it fullscreen (the status window is hidden and restored, never `:only`). `+` and `-` resize it in 5% steps between 30% and 90% of the screen. `l` or `<Right>` focuses the pane; `h`, `<Left>`, or `<Esc>` focuses back to the status window.
+
+The pane follows the status cursor: whatever the cursor sits on — an uncommitted file, a commit, a file inside a commit, a branch, or the uncommitted area (`zz`) — is the diff that gets loaded. The lookup is debounced, so holding `j` doesn't spawn a CLI call per row.
+
+Inside the pane:
+
+```
+j/k      Next / previous hunk (the ▌ bar marks the selected hunk)
+<Down>/<Up>  Next / previous hunk
+J/K      Scroll one line
+<C-d>/<C-u>  Scroll 10 lines
+g/G      First / last hunk
+<Space>  Mark / unmark the hunk (✔︎)
+x        Discard marked hunks, else the selected one (with confirmation)
+y        Copy the selected hunk's body to the clipboard
+r        Rub the marked (or selected) hunks onto a target
+h/<Left>/<Esc>  Focus the status window
+D        Toggle fullscreen
++/-      Grow / shrink the pane
+?        Help
+q/d      Close the pane
+```
+
+Note that `q` here closes the *pane*, not the whole view — deliberately different from the status window's `q`. This matches `but tui`.
+
+**Committed diffs are read-only in the pane.** `but diff` returns no hunk ids for committed entities (a commit, a file inside a commit, or a branch), so navigation, scrolling, and `y` work there, but `<Space>`, `x`, and `r` have nothing to address and warn instead. Hunk operations are available on uncommitted changes only.
 
 ### Branch management (B)
 

@@ -968,6 +968,14 @@ function M.help(_buf)
     '  <Tab>    Inline diff / fold',
     '  <C-r>    Refresh',
     '',
+    'Details pane',
+    '  d/D      Toggle the details split / fullscreen',
+    '  +/-      Grow / shrink the pane',
+    '  l        Focus the pane (h/<Esc> focuses back)',
+    '  In the pane: j/k hunk, J/K scroll, <C-d>/<C-u> scroll 10, g/G first/last',
+    '  <Space> mark, x discard, y copy hunk, r rub hunk, q/d close pane',
+    '  Committed diffs have no hunk ids: mark/discard/rub warn there',
+    '',
     'Extras',
     '  o        Open file',
     '  A        Absorb changes',
@@ -989,10 +997,13 @@ function M.help(_buf)
   for _, l in ipairs(help_lines) do
     width = math.max(width, vim.fn.strdisplaywidth(l) + 4)
   end
+  local ui = vim.api.nvim_list_uis()[1]
   local help_buf, help_win = float.open({
     title = 'Help',
     width = width,
-    height = #help_lines,
+    -- The list is taller than a short terminal: clamp so the float still opens
+    -- (scrollable) instead of failing to fit.
+    height = math.min(#help_lines, ui and math.max(1, ui.height - 4) or #help_lines),
   })
 
   vim.api.nvim_buf_set_lines(help_buf, 0, -1, false, help_lines)
