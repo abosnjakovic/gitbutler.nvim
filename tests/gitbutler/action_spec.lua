@@ -149,6 +149,125 @@ test('insert_empty_commit anchors after the cursor commit or branch', function()
   vim.notify = original_notify
 end)
 
+-- ── Undo / redo confirm gating ───────────────
+
+test('actions.undo does not call cli.undo when the user declines the confirm', function()
+  local called = false
+  local original_undo, original_select, original_notify = cli.undo, vim.ui.select, vim.notify
+  cli.undo = function()
+    called = true
+  end
+  vim.ui.select = function(_, opts, cb)
+    assert_eq('Undo last operation?', opts.prompt)
+    cb('No')
+  end
+  vim.notify = function() end
+
+  actions.undo(h.mock_buffer())
+  assert_eq(false, called, 'declining the confirm must not run cli.undo')
+
+  cli.undo, vim.ui.select, vim.notify = original_undo, original_select, original_notify
+end)
+
+test('actions.undo calls cli.undo when the user confirms', function()
+  local called = false
+  local original_undo, original_select, original_notify = cli.undo, vim.ui.select, vim.notify
+  cli.undo = function(cb)
+    called = true
+    cb(nil, {})
+  end
+  vim.ui.select = function(_, _, cb)
+    cb('Yes')
+  end
+  vim.notify = function() end
+
+  actions.undo(h.mock_buffer())
+  assert_truthy(called, 'confirming must run cli.undo')
+
+  cli.undo, vim.ui.select, vim.notify = original_undo, original_select, original_notify
+end)
+
+test('actions.redo does not call cli.redo when the user declines the confirm', function()
+  local called = false
+  local original_redo, original_select, original_notify = cli.redo, vim.ui.select, vim.notify
+  cli.redo = function()
+    called = true
+  end
+  vim.ui.select = function(_, opts, cb)
+    assert_eq('Redo?', opts.prompt)
+    cb('No')
+  end
+  vim.notify = function() end
+
+  actions.redo(h.mock_buffer())
+  assert_eq(false, called, 'declining the confirm must not run cli.redo')
+
+  cli.redo, vim.ui.select, vim.notify = original_redo, original_select, original_notify
+end)
+
+test('actions.redo calls cli.redo when the user confirms', function()
+  local called = false
+  local original_redo, original_select, original_notify = cli.redo, vim.ui.select, vim.notify
+  cli.redo = function(cb)
+    called = true
+    cb(nil, {})
+  end
+  vim.ui.select = function(_, _, cb)
+    cb('Yes')
+  end
+  vim.notify = function() end
+
+  actions.redo(h.mock_buffer())
+  assert_truthy(called, 'confirming must run cli.redo')
+
+  cli.redo, vim.ui.select, vim.notify = original_redo, original_select, original_notify
+end)
+
+-- ── Command modes (`:`, `!`) ───────────────
+
+test('actions.but_command splits input on whitespace and runs it raw', function()
+  local captured_args, captured_opts
+  local original_run, original_input, original_notify = cli.run, vim.fn.input, vim.notify
+  cli.run = function(args, opts, cb)
+    captured_args, captured_opts = args, opts
+    cb(nil, 'output text')
+  end
+  vim.fn.input = function()
+    return 'status --json'
+  end
+  local notified
+  vim.notify = function(msg, level)
+    notified = { msg = msg, level = level }
+  end
+
+  actions.but_command(h.mock_buffer())
+
+  assert_eq(2, #captured_args)
+  assert_eq('status', captured_args[1])
+  assert_eq('--json', captured_args[2])
+  assert_truthy(captured_opts.raw, 'raw mode requested')
+  assert_eq('output text', notified.msg)
+  assert_eq(vim.log.levels.INFO, notified.level)
+
+  cli.run, vim.fn.input, vim.notify = original_run, original_input, original_notify
+end)
+
+test('actions.but_command aborts on empty input without calling cli.run', function()
+  local called = false
+  local original_run, original_input = cli.run, vim.fn.input
+  cli.run = function()
+    called = true
+  end
+  vim.fn.input = function()
+    return ''
+  end
+
+  actions.but_command(h.mock_buffer())
+  assert_eq(false, called)
+
+  cli.run, vim.fn.input = original_run, original_input
+end)
+
 test('rub_start captures only the marked files as source (assignment via rub)', function()
   -- Assignment is now done by rubbing files onto a branch; the invariant the
   -- old assign_to_branch test protected — only the marked files get operated

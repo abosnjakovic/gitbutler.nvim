@@ -59,6 +59,7 @@ M.defaults = {
       ['g'] = 'goto_top',
       ['G'] = 'goto_bottom',
       ['t'] = 'goto_branch',
+      ['/'] = 'jump_to_id',
       -- marks
       ['<Space>'] = 'toggle_select',
       -- modes
@@ -72,12 +73,15 @@ M.defaults = {
       ['b'] = 'branch_new',
       ['x'] = 'discard',
       ['u'] = 'undo',
+      ['U'] = 'redo',
+      ['y'] = 'copy_selection',
+      [':'] = 'but_command',
+      ['!'] = 'shell_command',
       ['<C-r>'] = 'refresh',
       ['q'] = 'close',
       ['?'] = 'help',
       -- direct actions retained until phase 2 replaces them with modes
       ['S'] = 'squash',
-      ['U'] = 'uncommit',
       ['d'] = 'describe',
       ['<Tab>'] = 'toggle_fold',
       -- plugin extras on free keys (see spec keymap table)

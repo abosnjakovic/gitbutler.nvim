@@ -157,6 +157,11 @@ function M.undo(callback)
   M.run({ 'undo', '--json' }, callback)
 end
 
+---Convenience: but redo
+function M.redo(callback)
+  M.run({ 'redo', '--json' }, callback)
+end
+
 ---Convenience: but reword
 function M.reword(target, message, callback)
   M.run({ 'reword', target, '-m', message, '--json' }, callback)

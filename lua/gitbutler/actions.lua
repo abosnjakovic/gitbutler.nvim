@@ -269,12 +269,138 @@ function M.describe(buf)
   end
 end
 
----Undo last operation.
+---Undo last operation (confirms first).
 function M.undo(_buf)
-  notify_start('undo')
-  cli.undo(function(err, result)
-    notify_result('undo', err, result)
+  vim.ui.select({ 'Yes', 'No' }, { prompt = 'Undo last operation?' }, function(choice)
+    if choice ~= 'Yes' then
+      return
+    end
+    notify_start('undo')
+    cli.undo(function(err, result)
+      notify_result('undo', err, result)
+    end)
   end)
+end
+
+---Redo last undone operation (confirms first).
+function M.redo(_buf)
+  vim.ui.select({ 'Yes', 'No' }, { prompt = 'Redo?' }, function(choice)
+    if choice ~= 'Yes' then
+      return
+    end
+    notify_start('redo')
+    cli.redo(function(err, result)
+      notify_result('redo', err, result)
+    end)
+  end)
+end
+
+---Exact cli_id match wins; else unique prefix match; else nil.
+function M._jump_target(lines, query)
+  if query == '' then
+    return nil
+  end
+  local prefix_hit
+  for i, l in ipairs(lines) do
+    local id = l.data and l.data.cli_id
+    if id == query then
+      return i
+    end
+    if id and vim.startswith(id, query) then
+      if prefix_hit then
+        return nil
+      end -- ambiguous
+      prefix_hit = i
+    end
+  end
+  return prefix_hit
+end
+
+-- ponytail: input()-based jump v1; incremental per-key highlighting arrives
+-- when phase 3 brings a real input loop.
+---Prompt for a cli_id (or unique prefix) and move the cursor to its row.
+function M.jump_to_id(buf)
+  local ok, query = pcall(vim.fn.input, 'jump to id: ')
+  if not ok or query == '' then
+    return
+  end
+  local row = M._jump_target(buf.lines, query)
+  if not row then
+    vim.notify('gitbutler: no unique match', vim.log.levels.WARN)
+    return
+  end
+  if buf.win and vim.api.nvim_win_is_valid(buf.win) then
+    vim.api.nvim_win_set_cursor(buf.win, { row, 0 })
+  end
+end
+
+---Run an arbitrary `but` subcommand and surface its output.
+function M.but_command(_buf)
+  local ok, args = pcall(vim.fn.input, 'but ')
+  if not ok or args == '' then
+    return
+  end
+  local parts = vim.split(args, '%s+', { trimempty = true })
+  cli.run(parts, { raw = true }, function(err, out)
+    if err then
+      vim.notify('gitbutler but: ' .. err, vim.log.levels.ERROR)
+      return
+    end
+    vim.notify(out ~= '' and out or ('but ' .. args .. ': done'), vim.log.levels.INFO)
+    refresh()
+  end)
+end
+
+---Run an arbitrary shell command and surface its output.
+function M.shell_command(_buf)
+  local ok, cmd = pcall(vim.fn.input, '$ ')
+  if not ok or cmd == '' then
+    return
+  end
+  vim.system(
+    { 'sh', '-c', cmd },
+    { text = true },
+    vim.schedule_wrap(function(result)
+      if result.code ~= 0 then
+        local msg = (result.stderr and result.stderr ~= '') and result.stderr or ('exited ' .. result.code)
+        vim.notify('gitbutler $: ' .. vim.trim(msg), vim.log.levels.ERROR)
+        return
+      end
+      local out = result.stdout or ''
+      vim.notify(out ~= '' and out or ('$ ' .. cmd .. ': done'), vim.log.levels.INFO)
+      refresh()
+    end)
+  )
+end
+
+---Clipboard text for a status row: commit sha / file path / branch name /
+---'zz' for the uncommitted header; nil for rows with nothing copyable.
+function M._copy_text(line)
+  if not line or not line.data then
+    return nil
+  end
+  if line.type == 'commit' then
+    return line.data.sha
+  elseif line.type == 'file' or line.type == 'committed_file' then
+    return line.data.path
+  elseif line.type == 'branch' then
+    return line.data.name
+  elseif line.type == 'uncommitted_header' then
+    return 'zz'
+  end
+  return nil
+end
+
+---Copy the row under cursor's id/path/name to the `+` and unnamed registers.
+function M.copy_selection(buf)
+  local text = M._copy_text(buf:get_cursor_line())
+  if not text then
+    return
+  end
+  vim.fn.setreg('+', text)
+  vim.fn.setreg('"', text)
+  local display = #text > 40 and (text:sub(1, 40) .. '…') or text
+  vim.notify('gitbutler: copied ' .. display, vim.log.levels.INFO)
 end
 
 ---Push the branch under cursor (syncs with upstream first).
@@ -778,11 +904,11 @@ function M.help(_buf)
     '  c        Commit to branch under cursor',
     '  b        New branch',
     '  x        Discard (confirm)',
-    '  u        Undo last operation',
+    '  u        Undo last operation (confirm)',
+    '  U        Redo (confirm)',
     '  s        Assign file to branch        (mode-based in phase 2)',
     '  S        Squash commit into parent    (mode-based in phase 2)',
     '  m        Move commit to branch        (mode-based in phase 2)',
-    '  U        Uncommit file                (mode-based in phase 2)',
     '  d        Describe / reword',
     '  A        Absorb changes',
     '  <Tab>    Inline diff / fold',
@@ -872,42 +998,6 @@ end
 ---Open operations log.
 function M.oplog(_buf)
   require('gitbutler.ui.oplog').open()
-end
-
----Uncommit file(s) from a commit back to unstaged.
-function M.uncommit(buf)
-  local selected = buf:get_selected_lines({ 'committed_file' })
-  local targets
-  if #selected > 0 then
-    targets = selected
-  else
-    local line = buf:get_cursor_line()
-    if not line or line.type ~= 'committed_file' or not line.data then
-      return
-    end
-    targets = { line }
-  end
-
-  local i = 0
-  local function uncommit_next()
-    i = i + 1
-    if i > #targets then
-      buf:clear_selection()
-      vim.notify('gitbutler: uncommitted ' .. #targets .. ' file(s)', vim.log.levels.INFO)
-      refresh()
-      return
-    end
-    cli.uncommit(targets[i].data.cli_id, function(err, _)
-      if err then
-        buf:clear_selection()
-        vim.notify('gitbutler uncommit: ' .. err, vim.log.levels.ERROR)
-        refresh()
-        return
-      end
-      uncommit_next()
-    end)
-  end
-  uncommit_next()
 end
 
 ---Open commit timeline.

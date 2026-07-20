@@ -61,6 +61,19 @@ h.test('cli.rub builds but rub <source> <target> --json', function()
   h.assert_eq('--json', captured[4])
 end)
 
+h.test('cli.redo builds but redo --json', function()
+  local cli = require('gitbutler.cli')
+  local captured
+  local orig_run = cli.run
+  cli.run = function(args, cb)
+    captured = args
+    cb(nil, {})
+  end
+  cli.redo(function() end)
+  cli.run = orig_run
+  h.assert_eq('redo --json', table.concat(captured, ' '))
+end)
+
 h.test('modes: rub confirm exits mode, rubs each source id, then refreshes', function()
   local cli = require('gitbutler.cli')
   local status = require('gitbutler.ui.status')
@@ -242,6 +255,76 @@ h.test('modes: above/below direction agrees between commit and move modes', func
   cli.move(src, target, function() end, opts)
   h.assert_eq('move aa cd --json', table.concat(captured, ' '), 'move below -> no flag (but defaults to before)')
   cli.run = orig_run
+end)
+
+h.test('actions._jump_target: exact cli_id match wins over any prefix match', function()
+  local actions = require('gitbutler.actions')
+  local lines = {
+    { data = { cli_id = 'ab' } },
+    { data = { cli_id = 'abc' } },
+  }
+  h.assert_eq(1, actions._jump_target(lines, 'ab'))
+end)
+
+h.test('actions._jump_target: unique prefix match resolves to that row', function()
+  local actions = require('gitbutler.actions')
+  local lines = {
+    { data = { cli_id = 'aa' } },
+    { data = { cli_id = 'bc' } },
+  }
+  h.assert_eq(2, actions._jump_target(lines, 'b'))
+end)
+
+h.test('actions._jump_target: ambiguous prefix returns nil', function()
+  local actions = require('gitbutler.actions')
+  local lines = {
+    { data = { cli_id = 'ab' } },
+    { data = { cli_id = 'ac' } },
+  }
+  h.assert_falsy(actions._jump_target(lines, 'a'))
+end)
+
+h.test('actions._jump_target: no match returns nil', function()
+  local actions = require('gitbutler.actions')
+  local lines = { { data = { cli_id = 'ab' } } }
+  h.assert_falsy(actions._jump_target(lines, 'zz'))
+end)
+
+h.test('actions._jump_target: empty query returns nil', function()
+  local actions = require('gitbutler.actions')
+  local lines = { { data = { cli_id = 'ab' } } }
+  h.assert_falsy(actions._jump_target(lines, ''))
+end)
+
+h.test('actions._copy_text: commit row copies the full sha', function()
+  local actions = require('gitbutler.actions')
+  h.assert_eq('deadbeefcafe', actions._copy_text({ type = 'commit', data = { sha = 'deadbeefcafe', cli_id = 'cd' } }))
+end)
+
+h.test('actions._copy_text: file row copies its path', function()
+  local actions = require('gitbutler.actions')
+  h.assert_eq('a.lua', actions._copy_text({ type = 'file', data = { path = 'a.lua' } }))
+end)
+
+h.test('actions._copy_text: committed_file row copies its path', function()
+  local actions = require('gitbutler.actions')
+  h.assert_eq('b.lua', actions._copy_text({ type = 'committed_file', data = { path = 'b.lua' } }))
+end)
+
+h.test('actions._copy_text: branch row copies its name', function()
+  local actions = require('gitbutler.actions')
+  h.assert_eq('feat', actions._copy_text({ type = 'branch', data = { name = 'feat' } }))
+end)
+
+h.test('actions._copy_text: uncommitted header always copies zz', function()
+  local actions = require('gitbutler.actions')
+  h.assert_eq('zz', actions._copy_text({ type = 'uncommitted_header', data = { cli_id = 'zz' } }))
+end)
+
+h.test('actions._copy_text: rows with nothing copyable return nil', function()
+  local actions = require('gitbutler.actions')
+  h.assert_falsy(actions._copy_text({ type = 'merge_base', data = {} }))
+  h.assert_falsy(actions._copy_text(nil))
 end)
 
 local function mode_buffer(lines)
