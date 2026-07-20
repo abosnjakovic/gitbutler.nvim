@@ -267,6 +267,77 @@ M.timeline_diff_tree = {
   { path = 'src/token.lua', status = 'A' },
 }
 
+-- `but diff <id> --format=json`. Each `changes[]` entry is ONE hunk, with a
+-- hunk-level cli id; a two-hunk file appears as two entries sharing a path.
+M.diff_json = {
+  changes = {
+    {
+      id = 'xw:1',
+      path = 'src/auth.lua',
+      status = 'modified',
+      diff = {
+        type = 'patch',
+        hunks = {
+          {
+            oldStart = 1,
+            oldLines = 2,
+            newStart = 1,
+            newLines = 4,
+            diff = "@@ -1,2 +1,4 @@\n local M = {}\n+local jwt = require('jwt')\n+local secret = 'shh'\n return M\n",
+          },
+        },
+      },
+    },
+    {
+      id = 'xw:2',
+      path = 'src/auth.lua',
+      status = 'modified',
+      diff = {
+        type = 'patch',
+        hunks = {
+          {
+            oldStart = 20,
+            oldLines = 3,
+            newStart = 22,
+            newLines = 3,
+            diff = '@@ -20,3 +22,3 @@\n function M.login()\n-  return false\n+  return true\n end\n',
+          },
+        },
+      },
+    },
+    {
+      id = 'yz:1',
+      path = 'src/config.lua',
+      status = 'modified',
+      diff = {
+        type = 'patch',
+        hunks = {
+          {
+            oldStart = 5,
+            oldLines = 2,
+            newStart = 5,
+            newLines = 3,
+            diff = '@@ -5,2 +5,3 @@\n local defaults = {}\n+defaults.timeout = 30\n return defaults\n',
+          },
+        },
+      },
+    },
+  },
+}
+
+M.diff_json_binary = {
+  changes = {
+    {
+      id = 'bn:1',
+      path = 'assets/logo.png',
+      status = 'modified',
+      diff = { type = 'binary' },
+    },
+  },
+}
+
+M.diff_json_empty = { changes = {} }
+
 M.gh_pr_checks_json = [[
 [
   {

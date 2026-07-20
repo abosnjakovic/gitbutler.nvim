@@ -40,6 +40,10 @@ function M.setup()
     GitButlerModeSource = { link = 'Visual' },
     GitButlerVerbPill = { link = 'IncSearch' },
     GitButlerDimmed = { link = 'Comment' },
+    GitButlerDetailFile = { link = 'Title' },
+    GitButlerDetailHunk = { link = 'Comment' },
+    GitButlerDetailGutter = { link = 'LineNr' },
+    GitButlerDetailSelected = { link = 'WarningMsg' },
   }
 
   for name, def in pairs(groups) do
