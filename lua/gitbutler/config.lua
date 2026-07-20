@@ -86,6 +86,11 @@ M.defaults = {
       ['q'] = 'close',
       ['?'] = 'help',
       ['<Tab>'] = 'toggle_fold',
+      -- details pane
+      ['d'] = 'details_toggle',
+      ['D'] = 'details_toggle_full',
+      ['+'] = 'details_grow',
+      ['-'] = 'details_shrink',
       -- plugin extras on free keys (see spec keymap table)
       ['o'] = 'open_file',
       ['A'] = 'absorb',

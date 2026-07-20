@@ -1246,6 +1246,18 @@ function M.section_up(buf)
   end
   move_cursor(buf, M._next_section(buf.lines, cursor_row(buf), -1))
 end
+function M.details_toggle(buf)
+  require('gitbutler.ui.details').toggle(buf)
+end
+function M.details_toggle_full(buf)
+  require('gitbutler.ui.details').toggle_full(buf)
+end
+function M.details_grow(_buf)
+  require('gitbutler.ui.details').resize(5)
+end
+function M.details_shrink(_buf)
+  require('gitbutler.ui.details').resize(-5)
+end
 function M.goto_top(buf)
   if buf.mode_filter then
     local target = M._next_selectable(buf.lines, 0, 1, 1, buf.mode_filter)

@@ -21,10 +21,17 @@ local MARK_CATS = { change = true, commit = true, cfile = true }
 ---@field win? number Window handle
 ---@field lines GitButlerLine[] Structured line data
 ---@field ns number Namespace for extmarks
----@field keymaps table<string, fun()> Action keymaps
+---@field keymaps table<string, fun(buf: GitButlerBuffer)> Action keymaps
+---@field mode_filter? fun(line: GitButlerLine, row: integer): boolean Active mode's target filter
+---@field _cursor_row? integer Test seam: overrides the window cursor row
 ---@field fold_state table<string, boolean> Persisted fold states keyed by section id
 ---@field selected table<string, boolean> Selected items keyed by stable identifier
-
+---@field view? string View name driving the keymap and hint content ('status', 'log', …)
+---@field file_lists table<string, boolean> Per-commit file list expansion state
+---@field show_all_files boolean Expand every commit's file list
+---@field hint_buf? number Pinned hint/hotbar buffer
+---@field hint_win? number Pinned hint/hotbar float
+---@field hint_augroup? number Augroup owning the hint autocmds
 local Buffer = {}
 Buffer.__index = Buffer
 
@@ -182,6 +189,9 @@ function Buffer:open()
     buffer = self.buf,
     callback = function()
       self:update_hint()
+      if self.view == 'status' then
+        require('gitbutler.ui.details').follow_cursor(self)
+      end
     end,
   })
   vim.api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {

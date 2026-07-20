@@ -243,6 +243,18 @@ function M.rub(source, target, callback)
   M.run({ 'rub', source, target, '--json' }, callback)
 end
 
+---Convenience: but diff [<cli_id>] --json. Omit the id for the whole worktree.
+---@param cli_id? string
+---@param callback fun(err?: string, result?: any)
+function M.diff_json(cli_id, callback)
+  local args = { 'diff' }
+  if cli_id then
+    table.insert(args, cli_id)
+  end
+  table.insert(args, '--json')
+  M.run(args, callback)
+end
+
 ---Convenience: but discard
 function M.discard(id, callback)
   M.run({ 'discard', id, '--json' }, callback)

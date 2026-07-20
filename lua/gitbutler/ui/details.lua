@@ -176,4 +176,332 @@ function M.build(data, state)
   return rows, hunks
 end
 
+--- Window controller -------------------------------------------------------
+
+local NS = vim.api.nvim_create_namespace('gitbutler')
+
+---@class DetailsWin
+---@field buf? integer scratch buffer
+---@field win? integer split window
+---@field status_buf? GitButlerBuffer the status view this pane hangs off
+---@field full boolean fullscreen (status window hidden)
+---@field width_pct integer 30..90
+---@field entity? { cli_id: string, kind?: string }
+---@field rows? DetailsRow[] last rendered rows
+---@field hunks { id: string, path: string, row: integer, end_row: integer }[]
+---@field selected integer 1-based hunk index
+---@field marked table<string, boolean>
+---@field gen integer diff-request generation; stale responses are dropped
+---@field follow? integer follow-the-cursor debounce generation
+---@field closing? boolean guards close() against re-entry from its own WinClosed
+M.win_state = { full = false, width_pct = 50, selected = 1, marked = {}, hunks = {}, gen = 0 }
+
+---Reset the controller to its just-closed state. `width_pct` is the user's
+---setting and survives; `gen` and `follow` must survive too, or a close/reopen
+---would rewind them and let a still-in-flight callback pass the staleness
+---guard and render its diff under whatever entity is showing by then.
+function M._reset_state()
+  local prev = M.win_state
+  M.win_state = {
+    full = false,
+    width_pct = prev.width_pct or 50,
+    selected = 1,
+    marked = {},
+    hunks = {},
+    gen = prev.gen or 0,
+    follow = prev.follow,
+  }
+end
+
+---@return boolean
+function M.is_open()
+  local st = M.win_state
+  return st.win ~= nil
+    and vim.api.nvim_win_is_valid(st.win)
+    -- The window may have been reused for some other buffer, in which case it
+    -- is the user's window now and not ours to render into or close.
+    and st.buf ~= nil
+    and vim.api.nvim_win_get_buf(st.win) == st.buf
+end
+
+---Write rows (text + spans) into the details buffer. Same contract as
+---`Buffer:render` for graph rows, minus the fold/selection decoration the
+---details pane has no use for.
+---@param rows DetailsRow[]
+function M._render(rows)
+  local st = M.win_state
+  st.rows = rows
+  local buf = st.buf
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then
+    return
+  end
+
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
+
+  local text = {}
+  for _, r in ipairs(rows) do
+    table.insert(text, r.text)
+  end
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, text)
+
+  for i, r in ipairs(rows) do
+    for _, s in ipairs(r.spans or {}) do
+      vim.api.nvim_buf_add_highlight(buf, NS, s[3], i - 1, s[1], s[2])
+    end
+  end
+
+  vim.bo[buf].modifiable = false
+end
+
+local function info_rows(text, hl)
+  return { { text = text, spans = { { 0, #text, hl } }, type = 'detail_info', graph = true, selectable = false } }
+end
+
+---ponytail: width is a share of the whole editor rather than of the status
+---window's column group — correct for the common one-window-plus-pane layout,
+---and the user has `+`/`-` when it isn't.
+function M._apply_width()
+  local st = M.win_state
+  if not M.is_open() or st.full then
+    return
+  end
+  pcall(vim.api.nvim_win_set_width, st.win, math.max(10, math.floor(vim.o.columns * st.width_pct / 100)))
+end
+
+---@param status_buf GitButlerBuffer
+function M.open(status_buf)
+  local st = M.win_state
+  st.status_buf = status_buf or st.status_buf
+  if M.is_open() then
+    return
+  end
+
+  local src = status_buf and status_buf.win
+  if not src or not vim.api.nvim_win_is_valid(src) then
+    return
+  end
+
+  vim.api.nvim_set_current_win(src)
+  vim.cmd('rightbelow vsplit')
+  local win = vim.api.nvim_get_current_win()
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].buftype = 'nofile'
+  vim.bo[buf].bufhidden = 'wipe'
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].filetype = 'gitbutler-details'
+  vim.api.nvim_win_set_buf(win, buf)
+
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = 'no'
+  vim.wo[win].foldcolumn = '0'
+  vim.wo[win].wrap = false
+  vim.wo[win].cursorline = true
+
+  st.buf, st.win = buf, win
+  M._render(info_rows('  (no selection)', HL.dim))
+  M._apply_width()
+
+  -- The window going away by any route (`:q`, `<C-w>c`, a layout change) runs
+  -- the full teardown, so a hidden status window always comes back and no
+  -- stale `full`/`win` survives into the next open. Deferred: creating the
+  -- restore split from inside WinClosed is not allowed.
+  vim.api.nvim_create_autocmd('WinClosed', {
+    pattern = tostring(win),
+    once = true,
+    callback = function()
+      vim.schedule(function()
+        -- Only if this is still the live pane: a programmatic close (or a
+        -- close-then-reopen) has already moved on, and tearing down the
+        -- current pane on a dead window's event would be wrong.
+        if M.win_state.win == win then
+          M.close()
+        end
+      end)
+    end,
+  })
+
+  vim.api.nvim_set_current_win(src)
+  M.show_for_line(status_buf:get_cursor_line())
+end
+
+---Close the status window without wiping its buffer, so fullscreen can put it
+---back. `:only` would take unrelated user windows with it — never use it.
+---@return boolean hidden
+function M._hide_status()
+  local sb = M.win_state.status_buf
+  if not sb or not sb.win or not vim.api.nvim_win_is_valid(sb.win) then
+    return false
+  end
+  local hidden = sb.buf and vim.api.nvim_buf_is_valid(sb.buf)
+  if hidden then
+    vim.bo[sb.buf].bufhidden = 'hide'
+  end
+  local ok = pcall(vim.api.nvim_win_close, sb.win, false)
+  if ok then
+    sb.win = nil
+  elseif hidden then
+    -- The close failed, so nothing is hiding: put the buffer's own teardown
+    -- back rather than stranding it at 'hide' forever.
+    vim.bo[sb.buf].bufhidden = 'wipe'
+  end
+  return ok
+end
+
+---Put the hidden status window back to the left of the details pane.
+function M._restore_status()
+  local sb = M.win_state.status_buf
+  if not sb or not sb.buf or not vim.api.nvim_buf_is_valid(sb.buf) then
+    return
+  end
+  -- Anchor the restored split on the details window when it is still there; if
+  -- it was closed out from under us, split whatever window is current instead.
+  -- Bailing out here would strand the status buffer at bufhidden = 'hide'.
+  if M.is_open() then
+    vim.api.nvim_set_current_win(M.win_state.win)
+  end
+  vim.cmd('leftabove vsplit')
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, sb.buf)
+  vim.bo[sb.buf].bufhidden = 'wipe'
+  sb.win = win
+  M._apply_width()
+end
+
+function M.close()
+  local st = M.win_state
+  -- The window close below fires our own WinClosed handler; `closing` keeps
+  -- that from re-running the teardown mid-flight.
+  if st.closing then
+    return
+  end
+  st.closing = true
+  if st.full then
+    st.full = false
+    M._restore_status()
+  end
+  local focus = st.status_buf and st.status_buf.win
+  if st.win and vim.api.nvim_win_is_valid(st.win) then
+    pcall(vim.api.nvim_win_close, st.win, true)
+  end
+  if st.buf and vim.api.nvim_buf_is_valid(st.buf) then
+    pcall(vim.api.nvim_buf_delete, st.buf, { force = true })
+  end
+  M._reset_state()
+  if focus and vim.api.nvim_win_is_valid(focus) then
+    pcall(vim.api.nvim_set_current_win, focus)
+  end
+end
+
+---@param status_buf GitButlerBuffer
+function M.toggle(status_buf)
+  if M.is_open() then
+    M.close()
+  else
+    M.open(status_buf)
+  end
+end
+
+---@param status_buf GitButlerBuffer
+function M.toggle_full(status_buf)
+  if not M.is_open() then
+    M.open(status_buf)
+    if not M.is_open() then
+      return
+    end
+  end
+  local st = M.win_state
+  if st.full then
+    st.full = false
+    M._restore_status()
+    if st.status_buf and st.status_buf.win and vim.api.nvim_win_is_valid(st.status_buf.win) then
+      pcall(vim.api.nvim_set_current_win, st.status_buf.win)
+    end
+  elseif M._hide_status() then
+    st.full = true
+  end
+end
+
+---@param delta integer percentage points
+function M.resize(delta)
+  local st = M.win_state
+  st.width_pct = math.min(90, math.max(30, st.width_pct + delta))
+  M._apply_width()
+end
+
+---Load and display the diff for `entity`. No-op when it is already showing.
+---@param entity { cli_id: string, kind?: string }
+function M.show(entity)
+  local st = M.win_state
+  if not entity or not entity.cli_id then
+    return
+  end
+  if st.entity and st.entity.cli_id == entity.cli_id then
+    return
+  end
+
+  st.entity = entity
+  st.hunks = {}
+  st.selected = 1
+  st.gen = st.gen + 1
+  local gen = st.gen
+  M._render(info_rows('  loading diff…', HL.dim))
+
+  require('gitbutler.cli').diff_json(entity.cli_id, function(err, data)
+    -- A newer show() has since fired; this payload is for the wrong entity.
+    if gen ~= M.win_state.gen then
+      return
+    end
+    if err then
+      M._render(info_rows('  ' .. tostring(err), HL.dim))
+      return
+    end
+    local rows, hunks = M.build(data, { selected_hunk = M.win_state.selected, marked = M.win_state.marked })
+    M.win_state.hunks = hunks
+    M._render(rows)
+  end)
+end
+
+---Row types that name something `but diff` can be asked about.
+local ENTITY_TYPES = {
+  file = true,
+  committed_file = true,
+  commit = true,
+  branch = true,
+  uncommitted_header = true,
+}
+
+---Show the diff for a status row; rows that name no entity leave the pane alone.
+---@param line? GitButlerLine
+function M.show_for_line(line)
+  if not line or not ENTITY_TYPES[line.type] then
+    return
+  end
+  local id = line.data and line.data.cli_id
+  if not id then
+    return
+  end
+  M.show({ cli_id = id, kind = line.type })
+end
+
+---Debounced follow-the-cursor entry point, called from the status buffer's
+---CursorMoved autocmd. Fast j/k must not spawn a CLI call per row.
+---@param status_buf GitButlerBuffer
+function M.follow_cursor(status_buf)
+  if not M.is_open() then
+    return
+  end
+  local st = M.win_state
+  st.follow = (st.follow or 0) + 1
+  local seq = st.follow
+  vim.defer_fn(function()
+    if seq ~= M.win_state.follow or not M.is_open() then
+      return
+    end
+    M.show_for_line(status_buf:get_cursor_line())
+  end, 60)
+end
+
 return M

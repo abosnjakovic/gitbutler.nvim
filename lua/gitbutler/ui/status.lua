@@ -238,6 +238,10 @@ function M.open()
   buf:on('goto_bottom', actions.goto_bottom)
   buf:on('rub_start', actions.rub_start)
   buf:on('rub_reverse', actions.rub_reverse)
+  buf:on('details_toggle', actions.details_toggle)
+  buf:on('details_toggle_full', actions.details_toggle_full)
+  buf:on('details_grow', actions.details_grow)
+  buf:on('details_shrink', actions.details_shrink)
 
   buf:open()
   M.refresh()
@@ -278,6 +282,8 @@ function M.close()
     -- ownership, augroup, mode_filter) doesn't leak past the buffer.
     modes.exit(M.instance)
   end
+  -- The details pane hangs off this window; it must not outlive the view.
+  require('gitbutler.ui.details').close()
   if M.instance then
     M.instance:close()
     M.instance = nil
