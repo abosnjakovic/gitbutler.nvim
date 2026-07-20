@@ -91,6 +91,8 @@ M.defaults = {
       ['D'] = 'details_toggle_full',
       ['+'] = 'details_grow',
       ['-'] = 'details_shrink',
+      ['l'] = 'details_focus',
+      ['<Right>'] = 'details_focus',
       -- plugin extras on free keys (see spec keymap table)
       ['o'] = 'open_file',
       ['A'] = 'absorb',

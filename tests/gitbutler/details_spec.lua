@@ -316,3 +316,107 @@ h.test('details: toggle_full hides the status window and restores it', function(
   details.close()
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
 end)
+
+h.test('details: _next_hunk steps and clamps at both ends', function()
+  local hunks = { { row = 2 }, { row = 6 }, { row = 9 } }
+  h.assert_eq(2, details._next_hunk(hunks, 1, 1))
+  h.assert_eq(1, details._next_hunk(hunks, 2, -1))
+  h.assert_eq(1, details._next_hunk(hunks, 1, -1), 'clamped at the first hunk')
+  h.assert_eq(3, details._next_hunk(hunks, 3, 1), 'clamped at the last hunk')
+  h.assert_eq(1, details._next_hunk({}, 1, 1), 'empty list stays at 1')
+end)
+
+h.test('details: _hunk_row maps an index to its header row', function()
+  local hunks = { { row = 2, end_row = 5 }, { row = 6, end_row = 8 } }
+  h.assert_eq(2, details._hunk_row(hunks, 1))
+  h.assert_eq(6, details._hunk_row(hunks, 2))
+  h.assert_falsy(details._hunk_row(hunks, 3))
+  h.assert_falsy(details._hunk_row({}, 1))
+end)
+
+h.test('details: _hunk_at resolves a row to its owning hunk', function()
+  local hunks = { { row = 2, end_row = 5 }, { row = 7, end_row = 9 } }
+  h.assert_eq(1, details._hunk_at(hunks, 2), 'header row')
+  h.assert_eq(1, details._hunk_at(hunks, 4), 'mid-body row')
+  h.assert_eq(1, details._hunk_at(hunks, 5), 'last body row is still inside')
+  h.assert_eq(2, details._hunk_at(hunks, 7), 'next hunk header')
+  h.assert_falsy(details._hunk_at(hunks, 1), 'file header row owns no hunk')
+  h.assert_falsy(details._hunk_at(hunks, 6), 'gap between hunks owns no hunk')
+  h.assert_falsy(details._hunk_at(hunks, 99), 'past the end owns no hunk')
+end)
+
+h.test('details: j/k move the selection bar and the details cursor', function()
+  reset()
+  local sb = mock_status_buf()
+  details.open(sb)
+  local st = details.win_state
+  st.data = fixtures.diff_json
+  st.marked = { keep = true }
+  details._rebuild()
+  h.assert_eq(3, #st.hunks)
+
+  details._select_hunk(details._next_hunk(st.hunks, st.selected, 1))
+  h.assert_eq(2, st.selected)
+  h.assert_eq(st.hunks[2].row, vim.api.nvim_win_get_cursor(st.win)[1])
+  h.assert_truthy(st.rows[st.hunks[2].row].text:match('^▌'), st.rows[st.hunks[2].row].text)
+  h.assert_truthy(st.marked.keep, 'marked set was dropped by the re-render')
+
+  details._select_hunk(details._next_hunk(st.hunks, st.selected, -1))
+  h.assert_eq(1, st.selected)
+  h.assert_eq(st.hunks[1].row, vim.api.nvim_win_get_cursor(st.win)[1])
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+h.test('details: moving the cursor onto a body line snaps to its hunk', function()
+  reset()
+  local sb = mock_status_buf()
+  details.open(sb)
+  local st = details.win_state
+  st.data = fixtures.diff_json
+  details._rebuild()
+
+  -- A body line of the second hunk, not its header.
+  vim.api.nvim_win_set_cursor(st.win, { st.hunks[2].row + 1, 0 })
+  details._sync_cursor()
+  h.assert_eq(2, st.selected)
+
+  -- Re-running the sync is a no-op: the cursor still sits inside hunk 2, so
+  -- the render it would trigger (and the CursorMoved that render fires) stops.
+  local rows = st.rows
+  details._sync_cursor()
+  h.assert_eq(rows, st.rows, 're-render loop: sync rendered again with no change')
+
+  -- A row owned by no hunk leaves the selection alone.
+  vim.api.nvim_win_set_cursor(st.win, { 1, 0 })
+  details._sync_cursor()
+  h.assert_eq(2, st.selected)
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+h.test('details: details_focus focuses the pane, warns when closed', function()
+  reset()
+  local sb = mock_status_buf()
+  local actions = require('gitbutler.actions')
+  local warned
+  local orig = vim.notify
+  vim.notify = function(msg, level)
+    warned = { msg = msg, level = level }
+  end
+
+  actions.details_focus(sb)
+  h.assert_truthy(warned, 'closed pane did not notify')
+  h.assert_eq(vim.log.levels.WARN, warned.level)
+
+  details.open(sb)
+  h.assert_eq(sb.win, vim.api.nvim_get_current_win())
+  actions.details_focus(sb)
+  h.assert_eq(details.win_state.win, vim.api.nvim_get_current_win())
+
+  vim.notify = orig
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)

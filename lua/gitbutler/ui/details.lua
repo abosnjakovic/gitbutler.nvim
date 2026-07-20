@@ -269,6 +269,157 @@ function M._apply_width()
   pcall(vim.api.nvim_win_set_width, st.win, math.max(10, math.floor(vim.o.columns * st.width_pct / 100)))
 end
 
+--- Hunk cursor ---------------------------------------------------------------
+
+---Neighbouring hunk index in direction `dir`, clamped at both ends.
+---@param hunks table[]
+---@param current integer
+---@param dir integer
+---@return integer
+function M._next_hunk(hunks, current, dir)
+  return math.max(1, math.min(#hunks, (current or 1) + dir))
+end
+
+---Buffer row of hunk `index`'s header, or nil when there is no such hunk.
+---@return integer?
+function M._hunk_row(hunks, index)
+  local hunk = hunks[index]
+  return hunk and hunk.row or nil
+end
+
+---Index of the hunk owning buffer row `row`; nil for file headers, closers and
+---any other row outside every hunk's range.
+---@return integer?
+function M._hunk_at(hunks, at)
+  for i, hunk in ipairs(hunks) do
+    if at >= hunk.row and at <= hunk.end_row then
+      return i
+    end
+  end
+  return nil
+end
+
+---Re-render from the diff payload already in hand — selection and marks are
+---render-time state, so changing them never needs another CLI call.
+function M._rebuild()
+  local st = M.win_state
+  if not st.data then
+    return
+  end
+  local rows, hunks = M.build(st.data, { selected_hunk = st.selected, marked = st.marked })
+  st.hunks = hunks
+  M._render(rows)
+end
+
+---Select hunk `index` (clamped), redraw the `▌` bar and park the cursor on the
+---hunk header, which scrolls it into view.
+---@param index integer
+function M._select_hunk(index)
+  local st = M.win_state
+  if #st.hunks == 0 then
+    return
+  end
+  st.selected = math.max(1, math.min(#st.hunks, index))
+  M._rebuild()
+  local head = M._hunk_row(st.hunks, st.selected)
+  if head and M.is_open() then
+    pcall(vim.api.nvim_win_set_cursor, st.win, { head, 0 })
+  end
+end
+
+---CursorMoved hook: snap the selection to the hunk under the cursor.
+---
+---Loop-safe without a guard flag: it compares the owning hunk against the
+---current selection and returns when they match. Our own `_rebuild` +
+---`nvim_win_set_cursor` leave the cursor inside the hunk that is already
+---selected, so the CursorMoved they fire finds nothing to change.
+function M._sync_cursor()
+  local st = M.win_state
+  if not M.is_open() then
+    return
+  end
+  local index = M._hunk_at(st.hunks, vim.api.nvim_win_get_cursor(st.win)[1])
+  if not index or index == st.selected then
+    return
+  end
+  st.selected = index
+  M._rebuild()
+end
+
+---Focus the status window, if it is still there.
+function M._focus_status()
+  local sb = M.win_state.status_buf
+  if sb and sb.win and vim.api.nvim_win_is_valid(sb.win) then
+    pcall(vim.api.nvim_set_current_win, sb.win)
+  end
+end
+
+---Scroll the pane by `count` lines without moving the cursor relative to the
+---text: <C-e> (0x05) down, <C-y> (0x19) up.
+local function scroll(count, key)
+  local st = M.win_state
+  if M.is_open() then
+    vim.api.nvim_win_call(st.win, function()
+      vim.cmd('normal! ' .. count .. key)
+    end)
+  end
+end
+
+---Buffer-local keymap for the details pane. `q` closes the pane only — unlike
+---the status window's `q`, which closes the whole view. Matches upstream.
+---@param buf integer
+local function set_keymap(buf)
+  local function step(dir)
+    return function()
+      M._select_hunk(M._next_hunk(M.win_state.hunks, M.win_state.selected, dir))
+    end
+  end
+  local keys = {
+    ['j'] = step(1),
+    ['k'] = step(-1),
+    ['<Down>'] = step(1),
+    ['<Up>'] = step(-1),
+    ['g'] = function()
+      M._select_hunk(1)
+    end,
+    ['G'] = function()
+      M._select_hunk(#M.win_state.hunks)
+    end,
+    ['J'] = function()
+      scroll(1, '\5')
+    end,
+    ['K'] = function()
+      scroll(1, '\25')
+    end,
+    ['<C-d>'] = function()
+      scroll(10, '\5')
+    end,
+    ['<C-u>'] = function()
+      scroll(10, '\25')
+    end,
+    ['h'] = M._focus_status,
+    ['<Left>'] = M._focus_status,
+    ['<Esc>'] = M._focus_status,
+    ['d'] = M.close,
+    ['q'] = M.close,
+    ['D'] = function()
+      M.toggle_full(M.win_state.status_buf)
+    end,
+    ['+'] = function()
+      M.resize(5)
+    end,
+    ['-'] = function()
+      M.resize(-5)
+    end,
+    ['?'] = function()
+      require('gitbutler.actions').help(M.win_state.status_buf)
+    end,
+  }
+  for key, fn in pairs(keys) do
+    vim.keymap.set('n', key, fn, { buffer = buf, nowait = true, silent = true })
+  end
+end
+
 ---@param status_buf GitButlerBuffer
 function M.open(status_buf)
   local st = M.win_state
@@ -303,6 +454,14 @@ function M.open(status_buf)
   st.buf, st.win = buf, win
   M._render(info_rows('  (no selection)', HL.dim))
   M._apply_width()
+  set_keymap(buf)
+
+  vim.api.nvim_create_autocmd('CursorMoved', {
+    buffer = buf,
+    callback = function()
+      M._sync_cursor()
+    end,
+  })
 
   -- The window going away by any route (`:q`, `<C-w>c`, a layout change) runs
   -- the full teardown, so a hidden status window always comes back and no
@@ -444,6 +603,7 @@ function M.show(entity)
 
   st.entity = entity
   st.hunks = {}
+  st.data = nil
   st.selected = 1
   st.gen = st.gen + 1
   local gen = st.gen
@@ -458,9 +618,9 @@ function M.show(entity)
       M._render(info_rows('  ' .. tostring(err), HL.dim))
       return
     end
-    local rows, hunks = M.build(data, { selected_hunk = M.win_state.selected, marked = M.win_state.marked })
-    M.win_state.hunks = hunks
-    M._render(rows)
+    -- Kept so selection/mark changes can re-render without another CLI call.
+    M.win_state.data = data
+    M._rebuild()
   end)
 end
 

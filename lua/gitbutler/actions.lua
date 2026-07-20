@@ -1252,6 +1252,14 @@ end
 function M.details_toggle_full(buf)
   require('gitbutler.ui.details').toggle_full(buf)
 end
+function M.details_focus(_buf)
+  local details = require('gitbutler.ui.details')
+  if not details.is_open() then
+    vim.notify('gitbutler: details pane is closed (d opens it)', vim.log.levels.WARN)
+    return
+  end
+  pcall(vim.api.nvim_set_current_win, details.win_state.win)
+end
 function M.details_grow(_buf)
   require('gitbutler.ui.details').resize(5)
 end

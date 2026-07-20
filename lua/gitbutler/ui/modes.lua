@@ -55,6 +55,15 @@ local NAV_ACTIONS = {
   ['G'] = 'goto_bottom',
 }
 
+---Details-pane keys, bound in every mode alongside the always-on Esc/?/q.
+local PANE_ACTIONS = {
+  ['l'] = 'details_focus',
+  ['d'] = 'details_toggle',
+  ['D'] = 'details_toggle_full',
+  ['+'] = 'details_grow',
+  ['-'] = 'details_shrink',
+}
+
 ---Full rebind of the buffer's normal-mode keymap for `mode`. Deterministic:
 ---wipes every config-driven status key plus every key any mode binds, then
 ---(for `normal`) restores the config map, or (for an operation mode) binds
@@ -99,6 +108,17 @@ function M.apply_keymap(buf, mode)
   vim.keymap.set('n', 'q', function()
     actions.close(buf)
   end, { buffer = buf.buf, nowait = true })
+  -- The details pane stays open across mode entry, so its keys must stay
+  -- reachable. Unbound, `+`/`-` also fall through to Vim's line motions and
+  -- move the cursor outside the mode's target bookkeeping.
+  for key, action in pairs(PANE_ACTIONS) do
+    -- A mode's own binding wins if it ever claims one of these keys.
+    if not (MODE_KEYS[mode] or {})[key] then
+      vim.keymap.set('n', key, function()
+        actions[action](buf)
+      end, { buffer = buf.buf, nowait = true })
+    end
+  end
 end
 
 ---Extmark namespace for mode overlays (source tags, verb pills, dimming).

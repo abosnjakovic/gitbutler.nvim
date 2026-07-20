@@ -678,3 +678,23 @@ h.test('modes: stack m switches to move mode with the cursor branch as source', 
   vim.notify = orig_notify
   close_buffer(buf)
 end)
+
+h.test('modes: details pane keys stay bound while a mode is active', function()
+  local buf = require('gitbutler.ui.buffer').Buffer.new()
+  buf.buf = vim.api.nvim_create_buf(false, true)
+  buf.lines = {}
+
+  modes.apply_keymap(buf, 'rub')
+  local bound = {}
+  for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf.buf, 'n')) do
+    bound[m.lhs] = true
+  end
+  -- Without these, `+`/`-` fall through to Vim's line motions and move the
+  -- cursor outside the mode's selection bookkeeping.
+  for _, key in ipairs({ 'l', '+', '-', 'd', 'D' }) do
+    h.assert_truthy(bound[key], key .. ' is not bound inside rub mode')
+  end
+
+  modes.apply_keymap(buf, 'normal')
+  pcall(vim.api.nvim_buf_delete, buf.buf, { force = true })
+end)
