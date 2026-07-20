@@ -242,6 +242,7 @@ function M.open()
   buf:on('details_toggle_full', actions.details_toggle_full)
   buf:on('details_grow', actions.details_grow)
   buf:on('details_shrink', actions.details_shrink)
+  buf:on('details_focus', actions.details_focus)
 
   buf:open()
   M.refresh()

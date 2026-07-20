@@ -321,3 +321,40 @@ h.test('toggle_fold parks the cursor back on the fold header after rerender', fu
   vim.api.nvim_win_close(buf.win, true)
   vim.api.nvim_buf_delete(buf.buf, { force = true })
 end)
+
+-- Every action named in the status keymap must be registered as a handler in
+-- status.M.open, or the key silently does nothing at runtime. Unit tests that
+-- call actions.<name> directly bypass this dispatch layer and cannot catch it
+-- (a missing `details_focus` registration shipped exactly that way).
+test('every status keymap action has a registered handler', function()
+  local config = require('gitbutler.config')
+  local status = require('gitbutler.ui.status')
+
+  local registered = {}
+  local buffer_mod = require('gitbutler.ui.buffer')
+  local probe = buffer_mod.Buffer.new()
+  probe.on = function(_, name)
+    registered[name] = true
+  end
+  probe.open = function() end
+
+  local orig_new, orig_refresh = buffer_mod.Buffer.new, status.refresh
+  buffer_mod.Buffer.new = function()
+    return probe
+  end
+  status.refresh = function() end
+  local prev_instance = status.instance
+  status.instance = nil
+  status.open()
+  buffer_mod.Buffer.new, status.refresh = orig_new, orig_refresh
+  status.instance = prev_instance
+
+  local missing = {}
+  for key, action in pairs(config.values.keymaps.status or {}) do
+    if action and not registered[action] then
+      table.insert(missing, key .. ' -> ' .. action)
+    end
+  end
+  table.sort(missing)
+  h.assert_eq('', table.concat(missing, ', '), 'keymap actions without handlers')
+end)
