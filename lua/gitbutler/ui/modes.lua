@@ -58,6 +58,7 @@ local NAV_ACTIONS = {
 ---Details-pane keys, bound in every mode alongside the always-on Esc/?/q.
 local PANE_ACTIONS = {
   ['l'] = 'details_focus',
+  ['<Right>'] = 'details_focus',
   ['d'] = 'details_toggle',
   ['D'] = 'details_toggle_full',
   ['+'] = 'details_grow',

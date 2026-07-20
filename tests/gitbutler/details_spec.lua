@@ -377,21 +377,378 @@ h.test('details: moving the cursor onto a body line snaps to its hunk', function
   st.data = fixtures.diff_json
   details._rebuild()
 
-  -- A body line of the second hunk, not its header.
-  vim.api.nvim_win_set_cursor(st.win, { st.hunks[2].row + 1, 0 })
-  details._sync_cursor()
-  h.assert_eq(2, st.selected)
+  -- Drive the real CursorMoved autocmd rather than _sync_cursor directly, so
+  -- the test also covers the registration in `open`, and count renders: one
+  -- per genuine selection change and none for the events our own render fires.
+  local renders = 0
+  local orig_render = details._render
+  details._render = function(rows)
+    renders = renders + 1
+    orig_render(rows)
+  end
+  local function cursor_moved(row)
+    vim.api.nvim_win_set_cursor(st.win, { row, 0 })
+    vim.api.nvim_exec_autocmds('CursorMoved', { buffer = st.buf })
+  end
 
-  -- Re-running the sync is a no-op: the cursor still sits inside hunk 2, so
-  -- the render it would trigger (and the CursorMoved that render fires) stops.
-  local rows = st.rows
-  details._sync_cursor()
-  h.assert_eq(rows, st.rows, 're-render loop: sync rendered again with no change')
+  -- A body line of the second hunk, not its header.
+  cursor_moved(st.hunks[2].row + 1)
+  h.assert_eq(2, st.selected)
+  h.assert_eq(1, renders, 're-render loop: the sync rendered more than once')
+
+  -- Re-firing on the same hunk is a no-op: the cursor still sits inside hunk 2.
+  cursor_moved(st.hunks[2].row + 1)
+  h.assert_eq(1, renders, 'sync rendered again with no change')
 
   -- A row owned by no hunk leaves the selection alone.
-  vim.api.nvim_win_set_cursor(st.win, { 1, 0 })
-  details._sync_cursor()
+  cursor_moved(1)
   h.assert_eq(2, st.selected)
+  h.assert_eq(1, renders, 'a hunkless row triggered a render')
+  details._render = orig_render
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+---Invoke the pane's buffer-local mapping for `lhs`.
+local function press(buf, lhs)
+  for _, map in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
+    if map.lhs == lhs and map.callback then
+      map.callback()
+      return true
+    end
+  end
+  return false
+end
+
+h.test('details: q and d in the pane close only the pane', function()
+  for _, key in ipairs({ 'q', 'd' }) do
+    reset()
+    local sb = mock_status_buf()
+    details.open(sb)
+    h.assert_truthy(press(details.win_state.buf, key), 'no mapping for ' .. key)
+
+    h.assert_falsy(details.is_open(), key .. ' left the pane open')
+    h.assert_truthy(vim.api.nvim_buf_is_valid(sb.buf), key .. ' wiped the status buffer')
+    h.assert_truthy(vim.api.nvim_win_is_valid(sb.win), key .. ' closed the status window')
+    h.assert_eq(sb.win, vim.api.nvim_get_current_win(), key .. ' did not return focus to status')
+    pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+  end
+end)
+
+h.test('details: h, <Left> and <Esc> focus the status window', function()
+  for _, key in ipairs({ 'h', '<Left>', '<Esc>' }) do
+    reset()
+    local sb = mock_status_buf()
+    details.open(sb)
+    vim.api.nvim_set_current_win(details.win_state.win)
+    h.assert_truthy(press(details.win_state.buf, key), 'no mapping for ' .. key)
+
+    h.assert_eq(sb.win, vim.api.nvim_get_current_win(), key .. ' did not focus status')
+    h.assert_truthy(details.is_open(), key .. ' closed the pane')
+    details.close()
+    pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+  end
+end)
+
+--- Hunk operations ----------------------------------------------------------
+
+---Open the pane with the fixture diff already loaded and hunk 1 selected.
+local function open_with_diff()
+  reset()
+  local sb = mock_status_buf()
+  details.open(sb)
+  local st = details.win_state
+  st.entity = { cli_id = 'aa', kind = 'file' }
+  st.data = fixtures.diff_json
+  details._rebuild()
+  details._select_hunk(1)
+  return sb, st
+end
+
+h.test('details: <Space> toggles the mark and the header shows an aligned ✔︎', function()
+  local sb, st = open_with_diff()
+  details._toggle_mark()
+  h.assert_truthy(st.marked[st.hunks[1].id], 'hunk was not marked')
+
+  local header = st.rows[st.hunks[1].row].text
+  h.assert_truthy(header:match('^✔︎ @@'), header)
+  -- Two display columns, exactly like the '  ' and '▌ ' leads.
+  h.assert_eq(2, vim.fn.strdisplaywidth(header:sub(1, #'✔︎ ')))
+
+  details._toggle_mark()
+  h.assert_falsy(st.marked[st.hunks[1].id], 'mark did not toggle off')
+  h.assert_truthy(st.rows[st.hunks[1].row].text:match('^▌'), 'selection bar did not come back')
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+h.test('details: _targets prefers marked hunks over the selection', function()
+  local sb, st = open_with_diff()
+  local ids = details._targets()
+  h.assert_eq(1, #ids)
+  h.assert_eq(st.hunks[1].id, ids[1], 'selected hunk is the fallback target')
+
+  st.marked = { [st.hunks[2].id] = true, [st.hunks[3].id] = true }
+  ids = details._targets()
+  h.assert_eq(2, #ids)
+  h.assert_eq(st.hunks[2].id, ids[1])
+
+  -- Ids left over from another entity must not leak into a command.
+  st.marked = { ['gone:9'] = true }
+  ids = details._targets()
+  h.assert_eq(1, #ids)
+  h.assert_eq(st.hunks[1].id, ids[1])
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+h.test('details: x discards every marked hunk, then clears marks and refreshes', function()
+  local sb, st = open_with_diff()
+  st.marked = { [st.hunks[1].id] = true, [st.hunks[2].id] = true }
+
+  local discarded, refreshed, reloaded = {}, 0, 0
+  local orig_discard, orig_select = cli.discard, vim.ui.select
+  local orig_refresh = require('gitbutler.ui.status').refresh
+  local orig_diff, orig_notify = cli.diff_json, vim.notify
+  cli.discard = function(id, cb)
+    table.insert(discarded, id)
+    cb(nil, {})
+  end
+  vim.ui.select = function(_, _, cb)
+    cb('Yes')
+  end
+  require('gitbutler.ui.status').refresh = function()
+    refreshed = refreshed + 1
+  end
+  cli.diff_json = function(_, _)
+    reloaded = reloaded + 1
+  end
+  vim.notify = function() end
+
+  details._hunk_discard()
+
+  cli.discard, vim.ui.select, cli.diff_json, vim.notify = orig_discard, orig_select, orig_diff, orig_notify
+  require('gitbutler.ui.status').refresh = orig_refresh
+
+  h.assert_eq(2, #discarded)
+  h.assert_eq(1, refreshed)
+  h.assert_eq(1, reloaded, 'the changed diff was not re-requested')
+  h.assert_falsy(next(details.win_state.marked), 'marks survived the discard')
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+h.test('details: x stops at the first discard error and still refreshes', function()
+  local sb, st = open_with_diff()
+  st.marked = { [st.hunks[1].id] = true, [st.hunks[2].id] = true, [st.hunks[3].id] = true }
+
+  local calls, refreshed, err_msg = 0, 0, nil
+  local orig_discard, orig_select = cli.discard, vim.ui.select
+  local orig_refresh = require('gitbutler.ui.status').refresh
+  local orig_diff, orig_notify = cli.diff_json, vim.notify
+  cli.discard = function(_, cb)
+    calls = calls + 1
+    cb(calls == 2 and 'boom' or nil, {})
+  end
+  vim.ui.select = function(_, _, cb)
+    cb('Yes')
+  end
+  require('gitbutler.ui.status').refresh = function()
+    refreshed = refreshed + 1
+  end
+  cli.diff_json = function(_, _) end
+  vim.notify = function(msg, level)
+    if level == vim.log.levels.ERROR then
+      err_msg = msg
+    end
+  end
+
+  details._hunk_discard()
+
+  cli.discard, vim.ui.select, cli.diff_json, vim.notify = orig_discard, orig_select, orig_diff, orig_notify
+  require('gitbutler.ui.status').refresh = orig_refresh
+
+  h.assert_eq(2, calls, 'the chain did not stop at the failing hunk')
+  h.assert_eq(1, refreshed, 'a failed chain skipped the refresh')
+  h.assert_truthy(err_msg and err_msg:match('boom'), tostring(err_msg))
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+h.test('details: a committed diff (no hunk ids) navigates but cannot be operated on', function()
+  reset()
+  local sb = mock_status_buf()
+  details.open(sb)
+  local st = details.win_state
+  st.entity = { cli_id = 'cc', kind = 'commit' }
+  st.data = fixtures.diff_json_committed
+  details._rebuild()
+
+  -- Hunks are still registered, so j/k navigation works on committed diffs.
+  h.assert_eq(3, #st.hunks)
+  h.assert_falsy(st.hunks[1].id, 'committed hunks must carry no id')
+  details._select_hunk(2)
+  h.assert_eq(2, st.selected)
+
+  -- <Space> must not throw ("table index is nil") and must not mark.
+  local ok, err = pcall(details._toggle_mark)
+  h.assert_truthy(ok, tostring(err))
+  h.assert_falsy(next(st.marked), 'an id-less hunk was marked')
+
+  -- x and r warn instead of silently doing nothing, and touch no CLI.
+  local warns, discards, rubs = 0, 0, 0
+  local orig_notify, orig_discard, orig_select = vim.notify, cli.discard, vim.ui.select
+  local modes = require('gitbutler.ui.modes')
+  local orig_rub = modes.enter_rub
+  vim.notify = function(_, level)
+    if level == vim.log.levels.WARN then
+      warns = warns + 1
+    end
+  end
+  cli.discard = function(_, cb)
+    discards = discards + 1
+    cb(nil, {})
+  end
+  vim.ui.select = function(_, _, cb)
+    cb('Yes')
+  end
+  modes.enter_rub = function()
+    rubs = rubs + 1
+  end
+
+  details._hunk_discard()
+  details._hunk_rub()
+
+  vim.notify, cli.discard, vim.ui.select = orig_notify, orig_discard, orig_select
+  modes.enter_rub = orig_rub
+
+  h.assert_eq(2, warns, 'x and r did not both warn')
+  h.assert_eq(0, discards)
+  h.assert_eq(0, rubs)
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+h.test('details: a failed discard keeps the marks so the rest can be retried', function()
+  local sb, st = open_with_diff()
+  st.marked = { [st.hunks[1].id] = true, [st.hunks[2].id] = true }
+
+  local orig_discard, orig_select = cli.discard, vim.ui.select
+  local orig_refresh = require('gitbutler.ui.status').refresh
+  local orig_diff, orig_notify = cli.diff_json, vim.notify
+  cli.discard = function(_, cb)
+    cb('boom', {})
+  end
+  vim.ui.select = function(_, _, cb)
+    cb('Yes')
+  end
+  require('gitbutler.ui.status').refresh = function() end
+  cli.diff_json = function(_, _) end
+  vim.notify = function() end
+
+  details._hunk_discard()
+
+  cli.discard, vim.ui.select, cli.diff_json, vim.notify = orig_discard, orig_select, orig_diff, orig_notify
+  require('gitbutler.ui.status').refresh = orig_refresh
+
+  -- The re-show clears marks as a per-diff reset; a failed chain restores them.
+  h.assert_truthy(next(details.win_state.marked), 'marks were wiped by a failed discard')
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+h.test('details: showing a different entity clears the marks', function()
+  reset()
+  local orig = cli.diff_json
+  cli.diff_json = function(_, _) end
+  details.show({ cli_id = 'aa', kind = 'file' })
+  details.win_state.marked = { ['xw:1'] = true }
+  details.show({ cli_id = 'bb', kind = 'file' })
+  cli.diff_json = orig
+  h.assert_falsy(next(details.win_state.marked), 'marks survived an entity change')
+end)
+
+h.test('details: x does nothing when the confirmation is declined', function()
+  local sb = open_with_diff()
+  local calls = 0
+  local orig_discard, orig_select = cli.discard, vim.ui.select
+  cli.discard = function(_, cb)
+    calls = calls + 1
+    cb(nil, {})
+  end
+  vim.ui.select = function(_, _, cb)
+    cb('No')
+  end
+  details._hunk_discard()
+  cli.discard, vim.ui.select = orig_discard, orig_select
+  h.assert_eq(0, calls)
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+h.test('details: _hunk_copy_text strips the gutter and keeps diff markers', function()
+  local rows, hunks = details.build(fixtures.diff_json, { selected_hunk = 1 })
+  local text = details._hunk_copy_text(rows, hunks[1])
+  local lines = vim.split(text, '\n')
+
+  h.assert_eq(hunks[1].end_row - hunks[1].row, #lines, 'body line count')
+  for _, line in ipairs(lines) do
+    h.assert_falsy(line:match('│'), 'gutter survived: ' .. line)
+    h.assert_truthy(line:match('^[%+%- ]'), 'diff marker was stripped: ' .. line)
+  end
+  -- The header itself is not part of the copied body.
+  h.assert_falsy(text:match('@@'), text)
+  h.assert_falsy(details._hunk_copy_text(rows, nil), 'no hunk yields no text')
+end)
+
+h.test('details: y sets both registers from the selected hunk', function()
+  local sb = open_with_diff()
+  local orig_notify = vim.notify
+  vim.notify = function() end
+  details._hunk_copy()
+  vim.notify = orig_notify
+
+  local copied = vim.fn.getreg('"')
+  h.assert_truthy(#copied > 0, 'unnamed register is empty')
+  h.assert_falsy(copied:match('│'), copied)
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+h.test('details: r enters rub mode with a kind=file source carrying the hunk ids', function()
+  local sb, st = open_with_diff()
+  st.marked = { [st.hunks[2].id] = true, [st.hunks[3].id] = true }
+
+  local captured_buf, captured
+  local modes = require('gitbutler.ui.modes')
+  local orig = modes.enter_rub
+  modes.enter_rub = function(buf, source)
+    captured_buf, captured = buf, source
+  end
+  vim.api.nvim_set_current_win(details.win_state.win)
+  details._hunk_rub()
+  modes.enter_rub = orig
+
+  h.assert_eq(sb, captured_buf, 'rub was entered on the wrong buffer')
+  h.assert_eq(sb.win, vim.api.nvim_get_current_win(), 'focus stayed in the details pane')
+  h.assert_eq('file', captured.kind)
+  h.assert_eq(2, #captured.ids)
+  h.assert_eq(st.hunks[2].id, captured.ids[1])
+  h.assert_eq(0, #captured.rows, 'source rows must be empty: the source is in the other window')
+  -- is_rub_target iterates source.rows, so an empty list is simply no exclusion.
+  h.assert_truthy(
+    modes.is_rub_target({ source = captured }, { selectable = true, type = 'branch' }, 1),
+    'empty source rows broke the target guard'
+  )
 
   details.close()
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })

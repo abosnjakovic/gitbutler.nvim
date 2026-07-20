@@ -325,6 +325,14 @@ M.diff_json = {
   },
 }
 
+---`but diff` for a commit or committed file: same shape, but the changes carry
+---no `id` — only worktree diffs have hunk ids. Derived from the fixture above
+---so the two can never drift apart.
+M.diff_json_committed = vim.deepcopy(M.diff_json)
+for _, change in ipairs(M.diff_json_committed.changes) do
+  change.id = nil
+end
+
 M.diff_json_binary = {
   changes = {
     {

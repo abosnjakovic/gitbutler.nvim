@@ -46,7 +46,10 @@ end
 ---two spaces otherwise.
 local function lead(r, marked, selected)
   if marked then
+    -- Two columns like every other lead, or a marked header sits one column
+    -- left of its neighbours.
     add(r, '✔︎', HL.mark)
+    add(r, ' ')
   elseif selected then
     -- Bar + space: `▌` is one display column, so the trailing space keeps the
     -- selected hunk aligned with the two-space lead of every other row.
@@ -86,7 +89,7 @@ end
 ---Build detail rows from decoded `but diff <id> --format=json`.
 ---@param data table
 ---@param state? { selected_hunk?: integer, marked?: table<string,boolean> }
----@return DetailsRow[] rows, { id: string, path: string, row: integer, end_row: integer }[] hunks
+---@return DetailsRow[] rows, { id?: string, path: string, row: integer, end_row: integer }[] hunks
 function M.build(data, state)
   state = state or {}
   local marked = state.marked or {}
@@ -131,13 +134,16 @@ function M.build(data, state)
         push(r)
       else
         for _, hunk in ipairs(diff_hunks) do
-          local entity = { cli_id = change.id, path = path }
+          -- Committed diffs carry no `id` — the hunk is still registered so
+          -- navigation works; the ops key off `id` and stay unavailable.
+          local id = scalar(change.id, nil)
+          local entity = { cli_id = id, path = path }
           local index = #hunks + 1
           local is_selected = state.selected_hunk == index
           local body = split_lines(hunk.diff)
 
           local head = row('detail_hunk', entity, true)
-          lead(head, marked[change.id], is_selected)
+          lead(head, id ~= nil and marked[id], is_selected)
           add(head, table.remove(body, 1) or '@@', HL.hunk)
           local head_row = push(head)
 
@@ -163,7 +169,7 @@ function M.build(data, state)
             end_row = push(r)
           end
 
-          table.insert(hunks, { id = change.id, path = path, row = head_row, end_row = end_row })
+          table.insert(hunks, { id = id, path = path, row = head_row, end_row = end_row })
         end
       end
     end
@@ -187,8 +193,9 @@ local NS = vim.api.nvim_create_namespace('gitbutler')
 ---@field full boolean fullscreen (status window hidden)
 ---@field width_pct integer 30..90
 ---@field entity? { cli_id: string, kind?: string }
+---@field data? table last decoded diff payload
 ---@field rows? DetailsRow[] last rendered rows
----@field hunks { id: string, path: string, row: integer, end_row: integer }[]
+---@field hunks { id?: string, path: string, row: integer, end_row: integer }[]
 ---@field selected integer 1-based hunk index
 ---@field marked table<string, boolean>
 ---@field gen integer diff-request generation; stale responses are dropped
@@ -354,6 +361,171 @@ function M._focus_status()
   end
 end
 
+--- Hunk operations ----------------------------------------------------------
+
+---Hunks the next operation applies to: every marked hunk, else the selected
+---one. Driven off `st.hunks` rather than the `marked` table so ids left over
+---from a previous entity can never leak into a command.
+---@return string[] ids, string[] paths
+function M._targets()
+  local st = M.win_state
+  local ids, paths = {}, {}
+  for _, hunk in ipairs(st.hunks) do
+    if hunk.id and st.marked[hunk.id] then
+      table.insert(ids, hunk.id)
+      table.insert(paths, hunk.path)
+    end
+  end
+  if #ids == 0 then
+    local hunk = st.hunks[st.selected]
+    if hunk and hunk.id then
+      ids, paths = { hunk.id }, { hunk.path }
+    end
+  end
+  return ids, paths
+end
+
+---Committed diffs have no hunk ids, so no hunk op can address them.
+local function warn_no_ids()
+  vim.notify('gitbutler: this diff has no hunk ids (committed diffs are read-only here)', vim.log.levels.WARN)
+end
+
+---Toggle the mark on the selected hunk. A hunk with no id (committed diff)
+---cannot be marked — and must not be used as a table key.
+function M._toggle_mark()
+  local st = M.win_state
+  local hunk = st.hunks[st.selected]
+  if not hunk or not hunk.id then
+    return
+  end
+  st.marked[hunk.id] = (not st.marked[hunk.id]) and true or nil
+  M._rebuild()
+end
+
+---Distinct paths, first-seen order.
+local function uniq(paths)
+  local seen, out = {}, {}
+  for _, p in ipairs(paths) do
+    if not seen[p] then
+      seen[p], out[#out + 1] = true, p
+    end
+  end
+  return out
+end
+
+---`x` — discard the marked hunks (or the selected one) after a confirmation.
+function M._hunk_discard()
+  local st = M.win_state
+  local ids, paths = M._targets()
+  if #ids == 0 then
+    warn_no_ids()
+    return
+  end
+  local prompt = string.format('Discard %d hunk(s) in %s?', #ids, table.concat(uniq(paths), ', '))
+
+  vim.ui.select({ 'Yes', 'No' }, { prompt = prompt }, function(choice)
+    if choice ~= 'Yes' then
+      return
+    end
+    local entity = st.entity
+    ---@param ok boolean whole chain succeeded
+    local function finish(ok)
+      require('gitbutler.ui.status').refresh()
+      -- A partial failure keeps the marks so the user can retry the rest; the
+      -- undiscarded hunks keep their ids in the reloaded diff.
+      local keep = ok and {} or M.win_state.marked
+      -- The diff we are showing just changed, so `show`'s same-entity no-op
+      -- has to be defeated before asking for it again.
+      M.win_state.entity = nil
+      if entity then
+        M.show(entity) -- clears marks itself: they are per-diff
+      end
+      M.win_state.marked = keep
+    end
+
+    local cli = require('gitbutler.cli')
+    local i = 0
+    local function discard_next()
+      i = i + 1
+      if i > #ids then
+        vim.notify('gitbutler: discarded ' .. #ids .. ' hunk(s)', vim.log.levels.INFO)
+        finish(true)
+        return
+      end
+      cli.discard(ids[i], function(err)
+        if err then
+          vim.notify('gitbutler discard: ' .. err, vim.log.levels.ERROR)
+          finish(false)
+          return
+        end
+        discard_next()
+      end)
+    end
+    discard_next()
+  end)
+end
+
+---Hunk body text with the lead and gutter stripped, keeping the `+`/`-`/space
+---diff marker so the result pastes as a patch body.
+---@param rows DetailsRow[]
+---@param hunk? { row: integer, end_row: integer }
+---@return string?
+function M._hunk_copy_text(rows, hunk)
+  if not hunk then
+    return nil
+  end
+  local out = {}
+  for i = hunk.row + 1, hunk.end_row do
+    local text = rows[i] and rows[i].text
+    if text then
+      -- Non-greedy: the gutter's `│ ` is the first one on the row, any later
+      -- one belongs to the file's own content.
+      table.insert(out, text:match('^.-│ (.*)$') or text)
+    end
+  end
+  if #out == 0 then
+    return nil
+  end
+  return table.concat(out, '\n')
+end
+
+---`y` — copy the selected hunk's body to the `+` and unnamed registers.
+function M._hunk_copy()
+  local st = M.win_state
+  local text = M._hunk_copy_text(st.rows or {}, st.hunks[st.selected])
+  if not text then
+    vim.notify('gitbutler: nothing to copy on this hunk', vim.log.levels.WARN)
+    return
+  end
+  vim.fn.setreg('+', text)
+  vim.fn.setreg('"', text)
+  vim.notify('gitbutler: copied ' .. #text .. ' bytes of hunk', vim.log.levels.INFO)
+end
+
+---`r` — enter rub mode on the status buffer with the hunks as source. `kind`
+---is 'file': the rub verb matrix treats a hunk exactly like an uncommitted
+---file, and the source rows live in the other window so `rows` stays empty.
+function M._hunk_rub()
+  local st = M.win_state
+  local ids, paths = M._targets()
+  if #ids == 0 then
+    warn_no_ids()
+    return
+  end
+  local sb = st.status_buf
+  if not sb or not (sb.win and vim.api.nvim_win_is_valid(sb.win)) then
+    vim.notify('gitbutler: no status window to rub onto', vim.log.levels.WARN)
+    return
+  end
+  M._focus_status()
+  require('gitbutler.ui.modes').enter_rub(sb, {
+    kind = 'file',
+    ids = ids,
+    rows = {},
+    label = paths[1] .. (#ids > 1 and (' +' .. (#ids - 1)) or ''),
+  })
+end
+
 ---Scroll the pane by `count` lines without moving the cursor relative to the
 ---text: <C-e> (0x05) down, <C-y> (0x19) up.
 local function scroll(count, key)
@@ -397,6 +569,10 @@ local function set_keymap(buf)
     ['<C-u>'] = function()
       scroll(10, '\25')
     end,
+    ['<Space>'] = M._toggle_mark,
+    ['x'] = M._hunk_discard,
+    ['y'] = M._hunk_copy,
+    ['r'] = M._hunk_rub,
     ['h'] = M._focus_status,
     ['<Left>'] = M._focus_status,
     ['<Esc>'] = M._focus_status,
@@ -603,6 +779,9 @@ function M.show(entity)
 
   st.entity = entity
   st.hunks = {}
+  -- Marks are per-diff: carrying them across entities would let a stale id
+  -- match a reassigned hunk in the new one.
+  st.marked = {}
   st.data = nil
   st.selected = 1
   st.gen = st.gen + 1
@@ -621,6 +800,9 @@ function M.show(entity)
     -- Kept so selection/mark changes can re-render without another CLI call.
     M.win_state.data = data
     M._rebuild()
+    -- Park the cursor on hunk 1 too, or cursorline and the `▌` bar disagree and
+    -- the first `j` skips to hunk 2. No-ops when the diff has no hunks.
+    M._select_hunk(1)
   end)
 end
 
