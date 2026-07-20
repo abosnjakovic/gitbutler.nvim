@@ -27,6 +27,12 @@ function M.setup()
     GitButlerCIPass = { link = 'DiagnosticOk' },
     GitButlerCIFail = { link = 'DiagnosticError' },
     GitButlerCIUnknown = { link = 'Comment' },
+    GitButlerGraphConnector = { link = 'Comment' },
+    GitButlerCliId = { link = 'Function' },
+    GitButlerMark = { link = 'IncSearch' },
+    GitButlerUpstream = { link = 'WarningMsg' },
+    GitButlerCommitDotPushed = { link = 'DiagnosticOk' },
+    GitButlerModeNormal = { link = 'StatusLine' },
   }
 
   for name, def in pairs(groups) do
