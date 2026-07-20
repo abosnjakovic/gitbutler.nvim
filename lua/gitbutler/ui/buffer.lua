@@ -37,6 +37,8 @@ function Buffer.new()
   self.keymaps = {}
   self.fold_state = {}
   self.selected = {}
+  self.file_lists = {}
+  self.show_all_files = false
   self.view = nil
   self.hint_buf = nil
   self.hint_win = nil
@@ -280,7 +282,8 @@ function Buffer:update_hint()
   if self.view == 'status' then
     local hotbar = require('gitbutler.ui.hotbar')
     local width = (self.win and vim.api.nvim_win_is_valid(self.win)) and vim.api.nvim_win_get_width(self.win) or 80
-    local built = hotbar.build('normal', hotbar.normal_items, width)
+    local mode = require('gitbutler.ui.modes').current()
+    local built = hotbar.build(mode, hotbar.items_for(mode), width, hotbar.pill_hl(mode))
     vim.bo[self.hint_buf].modifiable = true
     vim.api.nvim_buf_clear_namespace(self.hint_buf, self.ns, 0, -1)
     vim.api.nvim_buf_set_lines(self.hint_buf, 0, -1, false, { built.text })

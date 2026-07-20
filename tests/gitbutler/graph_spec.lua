@@ -55,13 +55,35 @@ h.test('graph: commit rows have dot glyph, sha7, subject only', function()
 end)
 
 h.test('graph: committed files and assigned changes render with lane glyphs', function()
-  local rows = graph.build(fixtures.status_full, {})
+  local rows = graph.build(fixtures.status_full, { show_all_files = true })
   local texts = {}
   for _, r in ipairs(rows) do
     table.insert(texts, r.text)
   end
   h.assert_truthy(vim.tbl_contains(texts, '┊│    A src/auth.lua'))
   h.assert_truthy(vim.tbl_contains(texts, '┊┊  ac A src/pending.lua'))
+end)
+
+h.test('graph: committed-file rows hidden by default', function()
+  local rows = graph.build(fixtures.status_full, {})
+  for _, r in ipairs(rows) do
+    h.assert_truthy(r.type ~= 'committed_file', 'committed_file row leaked: ' .. r.text)
+  end
+end)
+
+h.test('graph: file_lists toggles a single commit file list', function()
+  local sha = fixtures.status_full.stacks[1].branches[1].commits[1].commitId
+  local rows = graph.build(fixtures.status_full, { file_lists = { [sha] = true } })
+  local shown = {}
+  for _, r in ipairs(rows) do
+    if r.type == 'committed_file' then
+      table.insert(shown, r)
+    end
+  end
+  h.assert_truthy(#shown > 0, 'toggled commit shows its files')
+  for _, r in ipairs(shown) do
+    h.assert_eq(sha, r.data.commit_id)
+  end
 end)
 
 h.test('graph: stack closes with join, merge base last', function()
@@ -129,6 +151,6 @@ end)
 h.test('graph: commit.changes as vim.NIL does not error', function()
   local data = vim.deepcopy(fixtures.status_full)
   data.stacks[1].branches[1].commits[1].changes = vim.NIL
-  local ok, err = pcall(graph.build, data, {})
+  local ok, err = pcall(graph.build, data, { show_all_files = true })
   h.assert_truthy(ok, 'graph.build errored: ' .. tostring(err))
 end)

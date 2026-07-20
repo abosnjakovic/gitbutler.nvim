@@ -15,7 +15,7 @@ local function has_span_hl(line, hl)
 end
 
 test('added files get A prefix and add highlight', function()
-  local lines = h.capture_lines(fixtures.status_full)
+  local lines = h.capture_lines(fixtures.status_full, true)
   local added
   for _, l in ipairs(lines) do
     if l.type == 'committed_file' and l.data.change_type == 'added' then

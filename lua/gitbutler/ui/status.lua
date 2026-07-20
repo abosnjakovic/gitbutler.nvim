@@ -172,6 +172,8 @@ function M.rerender()
   buf:render(graph.build(M.data, {
     selected = buf.selected,
     fold_state = buf.fold_state,
+    file_lists = buf.file_lists,
+    show_all_files = buf.show_all_files,
     branch_suffix = branch_suffix,
   }))
 end
@@ -194,10 +196,12 @@ function M.open()
   buf:on('absorb', actions.absorb)
   buf:on('commit_mode_start', actions.commit_mode_start)
   buf:on('insert_empty_commit', actions.insert_empty_commit)
-  buf:on('amend', actions.amend)
-  buf:on('squash', actions.squash)
   buf:on('move_start', actions.move_start)
   buf:on('describe', actions.describe)
+  buf:on('reword_editor', actions.reword_editor)
+  buf:on('toggle_file_list', actions.toggle_file_list)
+  buf:on('toggle_all_file_lists', actions.toggle_all_file_lists)
+  buf:on('back', actions.back)
   buf:on('undo', actions.undo)
   buf:on('redo', actions.redo)
   buf:on('jump_to_id', actions.jump_to_id)

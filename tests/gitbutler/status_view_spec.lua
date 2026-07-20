@@ -63,7 +63,7 @@ test('renders commits with sha and message', function()
 end)
 
 test('renders committed files with cli_id', function()
-  local lines = h.capture_lines(fixtures.status_full)
+  local lines = h.capture_lines(fixtures.status_full, true)
 
   local files = {}
   for _, l in ipairs(lines) do

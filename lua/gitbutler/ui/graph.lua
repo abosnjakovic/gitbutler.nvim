@@ -61,12 +61,13 @@ end
 
 ---Build graph rows from decoded `but status --json -f -v` output.
 ---@param data table
----@param state? { selected?: table<string,boolean>, fold_state?: table<string,boolean>, branch_suffix?: fun(stack: table, branch: table): {[1]:string,[2]:string?}[] }
+---@param state? { selected?: table<string,boolean>, fold_state?: table<string,boolean>, file_lists?: table<string,boolean>, show_all_files?: boolean, branch_suffix?: fun(stack: table, branch: table): {[1]:string,[2]:string?}[] }
 ---@return GraphRow[]
 function M.build(data, state)
   state = state or {}
   local selected = state.selected or {}
   local folds = state.fold_state or {}
+  local file_lists = state.file_lists or {}
   local rows = {}
   local function push(r)
     table.insert(rows, r)
@@ -182,7 +183,9 @@ function M.build(data, state)
           add(cr, ' ' .. subject(commit.message), HL.msg)
           push(cr)
 
-          for _, ch in ipairs(list(commit.changes)) do
+          -- Official default: committed-file rows hidden until toggled (f/F).
+          local show_files = state.show_all_files or file_lists[commit.commitId]
+          for _, ch in ipairs(show_files and list(commit.changes) or {}) do
             local prefix, hl = change_prefix(ch.changeType)
             local ckey = 'cfile:' .. (ch.cliId or ch.filePath)
             local fr = row('committed_file', {

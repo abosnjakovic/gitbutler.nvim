@@ -20,6 +20,7 @@ end
 ---@param args string[] Command arguments (e.g. {"status", "--json", "-f", "-v"})
 ---@param opts? {cwd?: string, on_stdout?: fun(data: string), raw?: boolean}
 ---@param callback fun(err?: string, result?: any) Called with decoded JSON or raw stdout
+---@overload fun(args: string[], callback: fun(err?: string, result?: any))
 function M.run(args, opts, callback)
   if type(opts) == 'function' then
     callback = opts
@@ -180,11 +181,6 @@ function M.squash(commits, callback)
   M.run(args, callback)
 end
 
----Convenience: but stage
-function M.stage(file, branch, callback)
-  M.run({ 'stage', file, branch, '--json' }, callback)
-end
-
 ---Convenience: but pull
 function M.pull(callback)
   M.run({ 'pull', '--json' }, callback)
@@ -245,15 +241,6 @@ end
 ---(stage/amend/squash/move/…) from the source and target kinds.
 function M.rub(source, target, callback)
   M.run({ 'rub', source, target, '--json' }, callback)
-end
-
----Convenience: but uncommit
-function M.uncommit(commit, callback)
-  local args = { 'uncommit', '--json' }
-  if commit then
-    table.insert(args, commit)
-  end
-  M.run(args, callback)
 end
 
 ---Convenience: but discard

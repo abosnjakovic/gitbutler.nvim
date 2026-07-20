@@ -85,7 +85,7 @@ Open the status buffer with `:Butler` or bind it to a key:
 vim.keymap.set('n', '<leader>bb', ':Butler<CR>', { desc = 'gitbutler' })
 ```
 
-The status view mirrors the graph layout of the official `but tui`; modal interaction (rub/commit modes) arrives in a later release. If you used the previous layout, note `t/l/R/D/M/F` moved to `T/H/v/V/L/i`, `a` (absorb) moved to `A`, the old `A` (amend) key was removed (returns as a rub verb in phase 2), and the `r` refresh alias was removed (`<C-r>` remains). `g`/`G` are now bound in the view, so `gg`/`gt` don't work inside it; all keys are remappable via `setup` keymaps.
+The status view mirrors the graph layout and modal interaction of the official `but tui`: rub, commit, move, and stack modes replace the old direct-action keys. If you used the previous keymap, note: `s` (assign) and `S` (squash) are now rub-mode operations (`r`, then pick a target — squash is rub commit onto commit), `m` enters move mode, `U` is redo (uncommit is a rub verb), `d` moved to `<CR>` (describe/reword), and committed-file lists are hidden by default — press `f` (one commit) or `F` (all). New keys: `t` go to branch, `/` jump to id, `:`/`!` command modes, `y` copy, `n` empty commit, `M` editor reword, `<Esc>` back. `g`/`G` are bound in the view, so `gg`/`gt` don't work inside it; all keys are remappable via `setup` keymaps.
 
 ### Commands
 
@@ -95,7 +95,7 @@ The status view mirrors the graph layout of the official `but tui`; modal intera
 
 Press `<Space>` on any file or commit line to toggle its selection. Selected items are highlighted and marked with `✔︎`. Once you have a selection, the next action you trigger applies to all selected items rather than just the cursor line. Selection is homogeneous — files and commits can't be mixed in the same selection; selecting a line of the other category is rejected. Selection clears automatically after an action completes but persists across refreshes.
 
-Actions that support multi-select: rub/assign (`r`), discard (`x`), uncommit (`U`), squash (`S`), move (`m`), and open file (`o`/`<CR>`). For squash, all selected commits are passed in a single CLI call. For the others, operations run sequentially. Selecting items across different branches is allowed — the CLI determines validity per item.
+Actions that support multi-select: rub (`r` — the whole selection becomes the mode's source), move (`m`), discard (`x`), and open file (`o`). Rub sources run one CLI call per item against the chosen target; move passes all sources in a single `but move` call. Selecting items across different branches is allowed — the CLI determines validity per item.
 
 ### Status buffer keybindings
 
@@ -107,6 +107,9 @@ j/k      Next / previous row
 J/K      Next / previous section
 <C-d>/<C-u>  Jump 10 rows
 g/G      Uncommitted area / merge base
+t        Go to branch (fuzzy picker)
+/        Jump to a CLI id (exact or unique prefix)
+<Esc>    Back: exit the active mode, else clear marks
 ```
 
 Marks:
@@ -115,33 +118,39 @@ Marks:
 <Space>  Select / deselect (multi-select)
 ```
 
+Modes (official but-tui keys):
+
+```
+r        Rub mode: cursor/marked rows become the source
+R        Reverse rub: all unassigned files become the source
+c        Commit mode: pick where the new commit lands
+m        Move mode: reorder / retarget commits, unstack branches
+s        Stack mode: apply / unapply / move stacks
+```
+
 Operations (official but-tui keys):
 
 ```
-c        Commit to the branch under cursor
+n        Insert an empty commit after the cursor commit/branch
 b        Create a new branch
 x        Discard file changes (with confirmation)
-u        Undo last operation
+u/U      Undo / redo last operation (with confirmation)
+<CR>     Describe: reword a commit or rename a branch (float)
+M        Reword the commit in an editor split (full message)
+f/F      Toggle committed-file list (cursor commit / all commits)
+y        Copy sha / path / branch name to the clipboard
+:        Run an arbitrary but command
+!        Run an arbitrary shell command
+<Tab>    Inline diff on files, fold toggle on branch headers
 <C-r>    Refresh
 q        Close
 ?        Help
 ```
 
-Direct actions (retained until phase 2 replaces them with modes):
-
-```
-s        Assign file to a branch (inline picker)
-S        Squash commit into its parent
-m        Move commit to a different branch (picker)
-U        Uncommit file from commit back to unstaged
-d        Describe/reword a commit or rename a branch
-<Tab>    Inline diff on files, fold toggle on branch headers
-```
-
 Extras (plugin actions on free keys):
 
 ```
-o/<CR>   Open file under cursor
+o        Open file under cursor
 A        Absorb uncommitted changes into logical commits
 p        Push the branch under cursor
 P        Push all branches
@@ -155,6 +164,28 @@ H        Commit log for the branch under cursor
 O        Operations log
 B        Branch management popup
 ```
+
+### Modes
+
+Rub (`r`) is the universal "pick this up and drop it there" operation, mirroring `but rub <source> <target>`: enter the mode on a source row (or a marked selection), move to a valid target — invalid rows are dimmed and skipped — and confirm with `<CR>`. A pill next to the target names the verb that will run:
+
+| source \ target      | uncommitted (zz) | commit    | branch      |
+| -------------------- | ---------------- | --------- | ----------- |
+| uncommitted file     | unassign         | amend     | assign      |
+| file in a commit     | uncommit         | move file | uncommit to |
+| commit               | undo commit      | squash    | move commit |
+| branch               | unassign all     | amend all | reassign    |
+| uncommitted area (zz)| —                | amend all | assign all  |
+
+`R` (reverse rub) enters the same mode with every unassigned file as the source.
+
+Commit mode (`c`) picks where a new commit lands: move to a branch or commit row, `a` toggles inserting above/below the marker, `e` toggles an empty-message commit, `<CR>` confirms and prompts for the message.
+
+Move mode (`m`) reorders commits (`a` toggles above/below), moves them onto another branch, or unstacks a branch at the merge base.
+
+Stack mode (`s`): `a` applies an unapplied branch (fuzzy picker), `u` unapplies the cursor branch (confirms when it has assigned changes), `m` switches to move mode with the cursor branch as source.
+
+Jump (`/`) prompts for a CLI id — exact match or unique prefix — and moves the cursor to that row. Command modes: `:` prompts for a `but` subcommand, `!` for a shell command; output is surfaced via notifications and the view refreshes.
 
 ### Branch management (B)
 
@@ -249,9 +280,9 @@ require('gitbutler').setup({
     status = {
       -- Set any key to false to disable it.
       -- Override values to remap actions.
-      ['<CR>'] = 'open_file',
+      ['<CR>'] = 'describe',
       ['s'] = 'stack_start',
-      ['c'] = 'commit',
+      ['c'] = 'commit_mode_start',
       -- ... see lua/gitbutler/config.lua for the full list
     },
   },

@@ -55,7 +55,7 @@ function M.mock_buffer()
   return buf
 end
 
-function M.capture_lines(fixture_data)
+function M.capture_lines(fixture_data, show_all_files)
   local captured
   local original = cli.status
   cli.status = function(callback)
@@ -63,6 +63,7 @@ function M.capture_lines(fixture_data)
   end
 
   local buf = M.mock_buffer()
+  buf.show_all_files = show_all_files == true
   status.instance = buf
   buf.render = function(_, lines)
     captured = lines

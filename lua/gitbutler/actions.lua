@@ -179,50 +179,68 @@ function M.insert_empty_commit(buf)
   end)
 end
 
----Amend: absorb uncommitted changes into HEAD commit of current branch.
-function M.amend(buf)
-  local branch = buf:get_cursor_branch()
-  local branch_name = branch and branch.name or nil
-  local args = { 'amend', '--json' }
-  if branch_name then
-    table.insert(args, 2, branch_name)
-  end
-
-  notify_start('amend')
-  cli.run(args, function(err, result)
-    notify_result('amend', err, result)
-  end)
+---Esc in normal mode: exit an active mode, else clear marks.
+function M.back(buf)
+  require('gitbutler.ui.modes').back(buf)
 end
 
----Squash: combine selected commits or commit under cursor into parent.
-function M.squash(buf)
-  local selected = buf:get_selected_lines({ 'commit' })
-  if #selected > 0 then
-    local shas = {}
-    for _, line in ipairs(selected) do
-      table.insert(shas, line.data.sha)
-    end
-    notify_start('squash')
-    cli.squash(shas, function(err, result)
-      buf:clear_selection()
-      notify_result('squash ' .. #shas .. ' commits', err, result)
-    end)
+---Toggle the committed-file list for the commit under cursor.
+function M.toggle_file_list(buf)
+  local line = buf:get_cursor_line()
+  local sha = line and line.type == 'commit' and line.data and line.data.sha or nil
+  if not sha then
+    vim.notify('gitbutler: place the cursor on a commit', vim.log.levels.WARN)
     return
   end
+  buf.file_lists[sha] = not buf.file_lists[sha] or nil
+  require('gitbutler.ui.status').rerender()
+end
 
-  -- Single commit fallback
+---Toggle committed-file lists for every commit.
+function M.toggle_all_file_lists(buf)
+  buf.show_all_files = not buf.show_all_files
+  require('gitbutler.ui.status').rerender()
+end
+
+---Reword the commit under cursor in an editor split (full message, gitcommit ft).
+function M.reword_editor(buf)
   local line = buf:get_cursor_line()
-  if not line or line.type ~= 'commit' or not line.data then
+  if not line or line.type ~= 'commit' or not (line.data and line.data.sha) then
+    vim.notify('gitbutler: place the cursor on a commit', vim.log.levels.WARN)
     return
   end
   local sha = line.data.sha
-  if not sha then
-    return
+  local message = line.data.commit and line.data.commit.message or ''
+
+  vim.cmd('belowright split')
+  local ewin = vim.api.nvim_get_current_win()
+  local ebuf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_win_set_buf(ewin, ebuf)
+  vim.api.nvim_buf_set_lines(ebuf, 0, -1, false, vim.split(message, '\n'))
+  vim.bo[ebuf].buftype = 'nofile'
+  vim.bo[ebuf].bufhidden = 'wipe'
+  vim.bo[ebuf].filetype = 'gitcommit'
+
+  local function close_split()
+    if vim.api.nvim_win_is_valid(ewin) then
+      vim.api.nvim_win_close(ewin, true)
+    end
   end
-  notify_start('squash')
-  cli.squash(sha, function(err, result)
-    notify_result('squash', err, result)
-  end)
+  local function submit()
+    local text = vim.trim(table.concat(vim.api.nvim_buf_get_lines(ebuf, 0, -1, false), '\n'))
+    close_split()
+    if text == '' then
+      return
+    end
+    notify_start('reword')
+    cli.reword(sha, text, function(err, result)
+      notify_result('reword', err, result)
+    end)
+  end
+
+  vim.keymap.set({ 'n', 'i' }, '<C-c><C-c>', submit, { buffer = ebuf })
+  vim.keymap.set('n', 'q', close_split, { buffer = ebuf })
+  vim.keymap.set('n', '<Esc>', close_split, { buffer = ebuf })
 end
 
 ---Describe/reword a commit or branch.
@@ -340,10 +358,13 @@ function M.but_command(_buf)
   if not ok or args == '' then
     return
   end
+  -- ponytail: naive split, no shell quoting — use ! for that
   local parts = vim.split(args, '%s+', { trimempty = true })
   cli.run(parts, { raw = true }, function(err, out)
     if err then
       vim.notify('gitbutler but: ' .. err, vim.log.levels.ERROR)
+      -- A failed command may still have mutated the workspace partway.
+      refresh()
       return
     end
     vim.notify(out ~= '' and out or ('but ' .. args .. ': done'), vim.log.levels.INFO)
@@ -364,6 +385,8 @@ function M.shell_command(_buf)
       if result.code ~= 0 then
         local msg = (result.stderr and result.stderr ~= '') and result.stderr or ('exited ' .. result.code)
         vim.notify('gitbutler $: ' .. vim.trim(msg), vim.log.levels.ERROR)
+        -- A failed command may still have mutated the workspace partway.
+        refresh()
         return
       end
       local out = result.stdout or ''
@@ -395,6 +418,7 @@ end
 function M.copy_selection(buf)
   local text = M._copy_text(buf:get_cursor_line())
   if not text then
+    vim.notify('gitbutler: nothing to copy on this row', vim.log.levels.WARN)
     return
   end
   vim.fn.setreg('+', text)
@@ -898,23 +922,36 @@ function M.help(_buf)
     '  J/K      Next / previous section',
     '  <C-d>/<C-u>  Jump 10 rows',
     '  g/G      Uncommitted area / merge base',
+    '  t        Go to branch (fuzzy picker)',
+    '  /        Jump to CLI id',
+    '  <Esc>    Back (exit mode, else clear marks)',
+    '',
+    'Marks',
     '  <Space>  Mark / unmark (homogeneous multi-select)',
     '',
+    'Modes',
+    '  r/R      Rub source onto target (assign/amend/squash/move/…)',
+    '  c        Commit mode (pick where the commit lands)',
+    '  m        Move mode (reorder / retarget commits)',
+    '  s        Stack mode (apply / unapply / move)',
+    '',
     'Operations',
-    '  c        Commit to branch under cursor',
+    '  n        Insert empty commit',
     '  b        New branch',
     '  x        Discard (confirm)',
-    '  u        Undo last operation (confirm)',
-    '  U        Redo (confirm)',
-    '  s        Assign file to branch        (mode-based in phase 2)',
-    '  S        Squash commit into parent    (mode-based in phase 2)',
-    '  m        Move commit to branch        (mode-based in phase 2)',
-    '  d        Describe / reword',
-    '  A        Absorb changes',
+    '  u/U      Undo / redo (confirm)',
+    '  <CR>     Describe / reword (float)',
+    '  M        Reword in an editor split',
+    '  f/F      Toggle file list (commit / all)',
+    '  y        Copy sha / path / name',
+    '  :        Run a but command',
+    '  !        Run a shell command',
     '  <Tab>    Inline diff / fold',
+    '  <C-r>    Refresh',
     '',
     'Extras',
-    '  o/<CR>   Open file',
+    '  o        Open file',
+    '  A        Absorb changes',
     '  p/P      Push branch / all',
     '  v        Create PR',
     '  V        Toggle PR draft',
@@ -926,12 +963,16 @@ function M.help(_buf)
     '  O        Operations log',
     '  B        Branch management',
     '',
-    '  <C-r>    Refresh    q  Close    ?  This help',
+    '  q  Close    ?  This help',
   }
 
+  local width = 66
+  for _, l in ipairs(help_lines) do
+    width = math.max(width, vim.fn.strdisplaywidth(l) + 4)
+  end
   local help_buf, help_win = float.open({
     title = 'Help',
-    width = 66,
+    width = width,
     height = #help_lines,
   })
 

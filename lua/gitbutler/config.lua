@@ -60,6 +60,7 @@ M.defaults = {
       ['G'] = 'goto_bottom',
       ['t'] = 'goto_branch',
       ['/'] = 'jump_to_id',
+      ['<Esc>'] = 'back',
       -- marks
       ['<Space>'] = 'toggle_select',
       -- modes
@@ -74,19 +75,19 @@ M.defaults = {
       ['x'] = 'discard',
       ['u'] = 'undo',
       ['U'] = 'redo',
+      ['<CR>'] = 'describe',
+      ['M'] = 'reword_editor',
+      ['f'] = 'toggle_file_list',
+      ['F'] = 'toggle_all_file_lists',
       ['y'] = 'copy_selection',
       [':'] = 'but_command',
       ['!'] = 'shell_command',
       ['<C-r>'] = 'refresh',
       ['q'] = 'close',
       ['?'] = 'help',
-      -- direct actions retained until phase 2 replaces them with modes
-      ['S'] = 'squash',
-      ['d'] = 'describe',
       ['<Tab>'] = 'toggle_fold',
       -- plugin extras on free keys (see spec keymap table)
       ['o'] = 'open_file',
-      ['<CR>'] = 'open_file', -- becomes inline reword in phase 2
       ['A'] = 'absorb',
       ['p'] = 'push',
       ['P'] = 'push_all',
