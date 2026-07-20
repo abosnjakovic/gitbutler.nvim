@@ -55,8 +55,20 @@ function M.mock_buffer()
   return buf
 end
 
+---Stub `buf:render` and return the capture table; `cap.lines` holds the rows
+---from the most recent render.
+---@param buf table
+---@return { lines: GitButlerLine[]? }
+function M.mock_render(buf)
+  local cap = {}
+  ---@diagnostic disable-next-line: duplicate-set-field
+  buf.render = function(_, lines)
+    cap.lines = lines
+  end
+  return cap
+end
+
 function M.capture_lines(fixture_data, show_all_files)
-  local captured
   local original = cli.status
   cli.status = function(callback)
     callback(nil, fixture_data)
@@ -65,15 +77,13 @@ function M.capture_lines(fixture_data, show_all_files)
   local buf = M.mock_buffer()
   buf.show_all_files = show_all_files == true
   status.instance = buf
-  buf.render = function(_, lines)
-    captured = lines
-  end
+  local cap = M.mock_render(buf)
   status.refresh()
 
   cli.status = original
   status.instance = nil
   status.data = nil
-  return captured
+  return cap.lines
 end
 
 function M.summary()

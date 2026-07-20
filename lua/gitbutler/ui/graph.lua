@@ -10,6 +10,9 @@ local HL = {
   mark = 'GitButlerMark',
   dim = 'GitButlerHelp',
   upstream = 'GitButlerUpstream',
+  dot_pushed = 'GitButlerCommitDotPushed',
+  dot_integrated = 'GitButlerCommitDotIntegrated',
+  dot_modified = 'GitButlerCommitDotModified',
 }
 
 local change_display = {
@@ -23,6 +26,15 @@ local change_display = {
 ---`x or {}` guard doesn't catch it. Use this at every list-iteration site.
 local function list(v)
   return type(v) == 'table' and v or {}
+end
+
+---Same as `list`, for scalar fields: JSON null decodes to `vim.NIL` (userdata),
+---which survives an `x or default` guard and blows up on concat/`:sub`.
+local function scalar(v, default)
+  if v == nil or v == vim.NIL or type(v) == 'userdata' then
+    return default
+  end
+  return v
 end
 
 local function change_prefix(change_type)
@@ -47,7 +59,63 @@ local function add(r, txt, hl)
 end
 
 local function subject(message)
-  return (message or ''):match('^([^\n]*)') or ''
+  return scalar(message, ''):match('^([^\n]*)') or ''
+end
+
+---Fold indicator drawn between the connector glyph and the cli id.
+local function fold_marker(folded)
+  return folded and '▸ ' or '▾ '
+end
+
+---Commit dot glyph + highlight for one commit row.
+---The payload carries no per-commit state field, so classification comes from
+---`branch.branchStatus` plus the branch's `upstreamCommits` list.
+---ponytail: rewritten-detection matches on subject text because the payload
+---exposes no change-id. `◐` asserts divergence, so a false positive lies:
+---it is only emitted when the subject is unambiguous on both sides — exactly
+---one upstream match and unique among the branch's own commits. Any ambiguity
+---falls back to the plain dot. Swap to change-ids if the CLI ever emits them.
+---@param commit table
+---@param branch table
+---@return string glyph, string? hl
+local function commit_dot(commit, branch)
+  local status = branch.branchStatus
+  if status == 'integrated' then
+    return '●', HL.dot_integrated
+  end
+
+  local upstream = list(branch.upstreamCommits)
+  local id = scalar(commit.commitId, '')
+  -- Whole-list id scan first: an exact id match anywhere outranks any
+  -- subject-based guess.
+  for _, uc in ipairs(upstream) do
+    if id ~= '' and scalar(uc.commitId, '') == id then
+      return '●', HL.upstream
+    end
+  end
+
+  local subj = subject(commit.message)
+  if subj ~= '' then
+    local up_matches, local_matches = 0, 0
+    for _, uc in ipairs(upstream) do
+      if subject(uc.message) == subj then
+        up_matches = up_matches + 1
+      end
+    end
+    for _, lc in ipairs(list(branch.commits)) do
+      if subject(lc.message) == subj then
+        local_matches = local_matches + 1
+      end
+    end
+    if up_matches == 1 and local_matches == 1 then
+      return '◐', HL.dot_modified
+    end
+  end
+
+  if status == 'nothingToPush' then
+    return '●', HL.dot_pushed
+  end
+  return '●', HL.connector
 end
 
 ---Glyph for the start of a markable row: ✔︎ replaces the connector when marked.
@@ -82,7 +150,7 @@ function M.build(data, state)
   local hdr = row('uncommitted_header', { cli_id = 'zz', fold_id = 'unassigned' }, true)
   -- Buffer:toggle_fold only walks rows flagged foldable.
   hdr.foldable = true
-  add(hdr, '╭┄', HL.connector)
+  add(hdr, '╭┄' .. fold_marker(folds['unassigned']), HL.connector)
   add(hdr, 'zz', HL.cli_id)
   add(hdr, ' [uncommitted]', HL.section)
   if #unassigned == 0 then
@@ -128,7 +196,7 @@ function M.build(data, state)
         fold_id = fold_id,
       }, true)
       br.foldable = true
-      add(br, bi == 1 and '┊╭┄' or '┊├┄', HL.connector)
+      add(br, (bi == 1 and '┊╭┄' or '┊├┄') .. fold_marker(folds[fold_id]), HL.connector)
       add(br, branch.cliId or '??', HL.cli_id)
       add(br, ' [' .. name .. ']', HL.branch)
       if state.branch_suffix then
@@ -161,9 +229,8 @@ function M.build(data, state)
           end
         end
 
-        local pushed = branch.branchStatus == 'nothingToPush'
         for _, commit in ipairs(list(branch.commits)) do
-          local key = 'commit:' .. (commit.commitId or '')
+          local key = 'commit:' .. scalar(commit.commitId, '')
           local cr = row('commit', {
             commit = commit,
             sha = commit.commitId,
@@ -175,11 +242,12 @@ function M.build(data, state)
           if selected[key] then
             add(cr, '✔︎', HL.mark)
           else
+            local glyph, glyph_hl = commit_dot(commit, branch)
             add(cr, '┊', HL.connector)
-            add(cr, '●', pushed and 'GitButlerCommitDotPushed' or HL.connector)
+            add(cr, glyph, glyph_hl)
           end
           add(cr, ' ')
-          add(cr, (commit.commitId or ''):sub(1, 7), HL.sha)
+          add(cr, scalar(commit.commitId, ''):sub(1, 7), HL.sha)
           add(cr, ' ' .. subject(commit.message), HL.msg)
           push(cr)
 
@@ -212,13 +280,14 @@ function M.build(data, state)
 
   -- Upstream section
   local up = data.upstreamState
-  if type(up) == 'table' and (up.behind or 0) > 0 then
+  local behind = type(up) == 'table' and scalar(up.behind, 0) or 0
+  if behind > 0 then
     local lc = type(up.latestCommit) == 'table' and up.latestCommit or {}
     local r = row('upstream', { sha = lc.commitId }, false)
     add(r, '┊', HL.connector)
     add(r, '● ', HL.upstream)
-    add(r, (lc.commitId or ''):sub(1, 7), HL.sha)
-    add(r, ' (upstream) ⏫ ' .. up.behind .. ' commit' .. (up.behind > 1 and 's' or ''), HL.upstream)
+    add(r, scalar(lc.commitId, ''):sub(1, 7), HL.sha)
+    add(r, ' (upstream) ⏫ ' .. behind .. ' commit' .. (behind > 1 and 's' or ''), HL.upstream)
     push(r)
   end
 
@@ -226,10 +295,11 @@ function M.build(data, state)
   local mb = data.mergeBase
   if type(mb) == 'table' and mb.commitId then
     local r = row('merge_base', { sha = mb.commitId }, true)
-    add(r, '├╯ ', HL.connector)
+    -- No stacks above means no lane to join back into: cap the trunk instead.
+    add(r, #list(data.stacks) > 0 and '├╯ ' or '┴ ', HL.connector)
     add(r, (mb.commitId):sub(1, 7), HL.sha)
     add(r, ' (common base)', HL.dim)
-    local date = (mb.createdAt or ''):sub(1, 10)
+    local date = scalar(mb.createdAt, ''):sub(1, 10)
     if date ~= '' then
       add(r, ' ' .. date, HL.dim)
     end

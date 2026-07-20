@@ -32,6 +32,8 @@ function M.setup()
     GitButlerMark = { link = 'IncSearch' },
     GitButlerUpstream = { link = 'WarningMsg' },
     GitButlerCommitDotPushed = { link = 'DiagnosticOk' },
+    GitButlerCommitDotIntegrated = { link = 'Special' },
+    GitButlerCommitDotModified = { link = 'DiagnosticOk' },
     GitButlerModeNormal = { link = 'StatusLine' },
     GitButlerModeRub = { link = 'DiffAdd' },
     GitButlerModeCommit = { link = 'DiffAdd' },

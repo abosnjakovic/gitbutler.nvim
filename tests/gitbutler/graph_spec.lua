@@ -4,7 +4,7 @@ local h = require('tests.gitbutler.helpers')
 
 h.test('graph: uncommitted header first, with zz cli id', function()
   local rows = graph.build(fixtures.status_full, {})
-  h.assert_eq('╭┄zz [uncommitted]', rows[1].text)
+  h.assert_eq('╭┄▾ zz [uncommitted]', rows[1].text)
   h.assert_eq('uncommitted_header', rows[1].type)
   h.assert_eq('zz', rows[1].data.cli_id)
   h.assert_truthy(rows[1].selectable)
@@ -21,7 +21,7 @@ end)
 
 h.test('graph: empty uncommitted area says (no changes)', function()
   local rows = graph.build(fixtures.status_empty, {})
-  h.assert_eq('╭┄zz [uncommitted] (no changes)', rows[1].text)
+  h.assert_eq('╭┄▾ zz [uncommitted] (no changes)', rows[1].text)
 end)
 
 h.test('graph: branch header row with notch and name', function()
@@ -33,7 +33,7 @@ h.test('graph: branch header row with notch and name', function()
       break
     end
   end
-  h.assert_eq('┊╭┄br [feature-auth]', br.text)
+  h.assert_eq('┊╭┄▾ br [feature-auth]', br.text)
   h.assert_eq('feature-auth', br.data.name)
   h.assert_eq('g0', br.data.stack_cli_id)
   h.assert_truthy(br.selectable)
@@ -144,8 +144,8 @@ h.test('graph: multi-branch stack uses stacked notch for non-head branches', fun
     end
   end
   h.assert_eq(2, #branches)
-  h.assert_eq('┊╭┄b1 [branch-one]', branches[1].text)
-  h.assert_eq('┊├┄b2 [branch-two]', branches[2].text)
+  h.assert_eq('┊╭┄▾ b1 [branch-one]', branches[1].text)
+  h.assert_eq('┊├┄▾ b2 [branch-two]', branches[2].text)
 end)
 
 h.test('graph: commit.changes as vim.NIL does not error', function()
@@ -153,4 +153,123 @@ h.test('graph: commit.changes as vim.NIL does not error', function()
   data.stacks[1].branches[1].commits[1].changes = vim.NIL
   local ok, err = pcall(graph.build, data, { show_all_files = true })
   h.assert_truthy(ok, 'graph.build errored: ' .. tostring(err))
+end)
+
+h.test('graph: folded headers render ▸, expanded render ▾', function()
+  local rows = graph.build(fixtures.status_full, {
+    fold_state = { unassigned = true, ['branch:feature-auth'] = true },
+  })
+  h.assert_eq('╭┄▸ zz [uncommitted]', rows[1].text)
+  for _, r in ipairs(rows) do
+    if r.type == 'branch' then
+      h.assert_eq('┊╭┄▸ br [feature-auth]', r.text)
+    end
+  end
+end)
+
+h.test('graph: vim.NIL scalars (behind, createdAt, message) render sanely', function()
+  local data = vim.deepcopy(fixtures.status_full)
+  data.upstreamState = { behind = vim.NIL, latestCommit = { commitId = vim.NIL } }
+  data.mergeBase.createdAt = vim.NIL
+  data.stacks[1].branches[1].commits[1].message = vim.NIL
+  local ok, rows = pcall(graph.build, data, {})
+  h.assert_truthy(ok, 'graph.build errored: ' .. tostring(rows))
+  for _, r in ipairs(rows) do
+    h.assert_truthy(r.type ~= 'upstream', 'behind=NIL suppresses the upstream row')
+  end
+  h.assert_eq('├╯ a89ff8c (common base) Initial empty commit', rows[#rows].text)
+  for _, r in ipairs(rows) do
+    if r.type == 'commit' then
+      h.assert_eq('┊● c4d75df ', r.text)
+      break
+    end
+  end
+end)
+
+h.test('graph: commit dots classify integrated, upstream and rewritten', function()
+  local function dot_hl(branch_over)
+    local data = vim.deepcopy(fixtures.status_full)
+    local branch = data.stacks[1].branches[1]
+    for k, v in pairs(branch_over) do
+      branch[k] = v
+    end
+    for _, r in ipairs(graph.build(data, {})) do
+      if r.type == 'commit' then
+        -- spans[1] is the ┊ lane, spans[2] is the dot.
+        return r.text, r.spans[2][3]
+      end
+    end
+  end
+
+  local _, integrated = dot_hl({ branchStatus = 'integrated' })
+  h.assert_eq('GitButlerCommitDotIntegrated', integrated)
+
+  local _, pushed = dot_hl({ branchStatus = 'nothingToPush' })
+  h.assert_eq('GitButlerCommitDotPushed', pushed)
+
+  local _, local_only = dot_hl({ branchStatus = 'completelyUnpushed' })
+  h.assert_eq('GitButlerGraphConnector', local_only)
+
+  local sha = fixtures.status_full.stacks[1].branches[1].commits[1].commitId
+  local _, upstream = dot_hl({ upstreamCommits = { { commitId = sha, message = 'x' } } })
+  h.assert_eq('GitButlerUpstream', upstream)
+
+  local text, rewritten = dot_hl({
+    upstreamCommits = { { commitId = 'deadbeef', message = 'add login endpoint' } },
+  })
+  h.assert_eq('GitButlerCommitDotModified', rewritten)
+  h.assert_truthy(text:find('◐', 1, true), 'rewritten commit uses ◐: ' .. text)
+end)
+
+h.test('graph: merge base caps with ┴ when no stacks precede it', function()
+  local rows = graph.build(fixtures.status_empty, {})
+  local last = rows[#rows]
+  h.assert_eq('merge_base', last.type)
+  h.assert_truthy(last.text:sub(1, #'┴') == '┴', 'empty workspace caps the trunk: ' .. last.text)
+end)
+
+h.test('graph: ambiguous subjects never claim a rewrite', function()
+  local data = vim.deepcopy(fixtures.status_full)
+  local branch = data.stacks[1].branches[1]
+  -- Two local commits share one subject; the single upstream entry cannot
+  -- name which of them it rewrote, so neither may claim ◐.
+  branch.commits[1].message = 'updates'
+  branch.commits[2].message = 'updates'
+  branch.upstreamCommits = { { commitId = 'deadbeef', message = 'updates' } }
+  for _, r in ipairs(graph.build(data, {})) do
+    if r.type == 'commit' then
+      h.assert_falsy(r.text:find('◐', 1, true), 'ambiguous subject stays a plain dot: ' .. r.text)
+      h.assert_truthy(r.spans[2][3] ~= 'GitButlerCommitDotModified', 'no rewrite highlight')
+    end
+  end
+end)
+
+h.test('graph: an exact id match anywhere in upstreamCommits beats a subject match', function()
+  local data = vim.deepcopy(fixtures.status_full)
+  local branch = data.stacks[1].branches[1]
+  local sha = branch.commits[1].commitId
+  -- The subject-matching decoy comes FIRST; the real id match is second.
+  branch.upstreamCommits = {
+    { commitId = 'deadbeef', message = branch.commits[1].message },
+    { commitId = sha, message = 'unrelated' },
+  }
+  for _, r in ipairs(graph.build(data, {})) do
+    if r.type == 'commit' and r.data.sha == sha then
+      h.assert_eq('GitButlerUpstream', r.spans[2][3])
+    end
+  end
+end)
+
+h.test('graph: absent ids and empty subjects do not collide into a state', function()
+  local data = vim.deepcopy(fixtures.status_full)
+  local branch = data.stacks[1].branches[1]
+  branch.branchStatus = 'completelyUnpushed'
+  branch.commits[1].commitId = vim.NIL
+  branch.commits[1].message = vim.NIL
+  branch.upstreamCommits = { { commitId = vim.NIL, message = vim.NIL } }
+  for _, r in ipairs(graph.build(data, {})) do
+    if r.type == 'commit' then
+      h.assert_eq('GitButlerGraphConnector', r.spans[2][3], 'empty vs empty is not a match: ' .. r.text)
+    end
+  end
 end)

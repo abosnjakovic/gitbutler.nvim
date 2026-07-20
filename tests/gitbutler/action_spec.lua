@@ -301,3 +301,23 @@ test('rub_start captures only the marked files as source (assignment via rub)', 
   modes.enter_rub = original_enter_rub
   vim.notify = original_notify
 end)
+
+h.test('toggle_fold parks the cursor back on the fold header after rerender', function()
+  local buf = h.mock_buffer()
+  buf.buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf.buf, 0, -1, false, { 'a', 'b', 'c' })
+  buf.win = vim.api.nvim_open_win(buf.buf, true, { relative = 'editor', width = 20, height = 5, row = 0, col = 0 })
+  -- Post-rerender rows: the folded branch header slid from row 3 to row 1.
+  buf.lines = {
+    { selectable = true, type = 'branch', data = { fold_id = 'branch:feat' } },
+    { selectable = true, type = 'commit', data = {} },
+    { selectable = true, type = 'commit', data = {} },
+  }
+  vim.api.nvim_win_set_cursor(buf.win, { 3, 0 })
+
+  actions._restore_fold_cursor(buf, 'branch:feat')
+
+  h.assert_eq(1, vim.api.nvim_win_get_cursor(buf.win)[1], 'cursor follows the header row')
+  vim.api.nvim_win_close(buf.win, true)
+  vim.api.nvim_buf_delete(buf.buf, { force = true })
+end)

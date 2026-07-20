@@ -698,3 +698,33 @@ h.test('modes: details pane keys stay bound while a mode is active', function()
   modes.apply_keymap(buf, 'normal')
   pcall(vim.api.nvim_buf_delete, buf.buf, { force = true })
 end)
+
+h.test('modes: entering with zero valid targets warns and does not enter', function()
+  local warned
+  local orig_notify = vim.notify
+  ---@diagnostic disable-next-line: duplicate-set-field
+  vim.notify = function(msg, level)
+    if level == vim.log.levels.WARN then
+      warned = msg
+    end
+  end
+
+  local buf = h.mock_buffer()
+  buf.buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf.buf, 0, -1, false, { 'a' })
+  buf.win = vim.api.nvim_open_win(buf.buf, true, { relative = 'editor', width = 20, height = 5, row = 0, col = 0 })
+  -- Only the source row exists, so nothing can be rubbed onto.
+  buf.lines = { { selectable = true, type = 'file', data = { cli_id = 'aa' } } }
+
+  local entered = modes.enter_rub(buf, { kind = 'file', ids = { 'aa' }, rows = { 1 }, label = 'x' })
+
+  vim.notify = orig_notify
+  h.assert_falsy(entered, 'enter reports the abort')
+  h.assert_truthy(warned, 'WARN notify fired')
+  h.assert_eq('normal', modes.current(), 'mode not entered')
+  h.assert_falsy(buf.mode_filter, 'mode_filter cleared')
+  h.assert_eq(0, #vim.api.nvim_buf_get_extmarks(buf.buf, modes.ns, 0, -1, {}), 'no overlays left behind')
+
+  vim.api.nvim_win_close(buf.win, true)
+  vim.api.nvim_buf_delete(buf.buf, { force = true })
+end)

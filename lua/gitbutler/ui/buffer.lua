@@ -198,6 +198,8 @@ function Buffer:open()
     group = self.hint_augroup,
     callback = function()
       self:_position_hint_window()
+      -- Hotbar truncation is width-dependent, so it must be rebuilt too.
+      self:update_hint()
     end,
   })
   vim.api.nvim_create_autocmd('BufWinEnter', {

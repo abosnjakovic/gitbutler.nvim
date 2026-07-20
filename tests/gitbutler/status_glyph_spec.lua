@@ -56,18 +56,14 @@ end)
 ---Rerender a fixture through the graph pipeline and return the branch row.
 local function branch_row_for(data)
   local buf = h.mock_buffer()
-  local captured
-  ---@diagnostic disable-next-line: duplicate-set-field
-  buf.render = function(_, lines)
-    captured = lines
-  end
+  local cap = h.mock_render(buf)
   status.instance = buf
   status.data = data
   status.rerender()
   status.instance = nil
   status.data = nil
-  assert_truthy(captured, 'rerender produced rows')
-  for _, l in ipairs(captured) do
+  assert_truthy(cap.lines, 'rerender produced rows')
+  for _, l in ipairs(cap.lines) do
     if l.type == 'branch' then
       return l
     end
@@ -80,7 +76,7 @@ test('branch row text carries CI glyph and review id suffix', function()
   data.stacks[1].branches[1].reviewId = 42
   local br = branch_row_for(data)
   assert_truthy(br)
-  assert_eq('┊╭┄br [feature-auth] ✓ #42', br.text)
+  assert_eq('┊╭┄▾ br [feature-auth] ✓ #42', br.text)
 end)
 
 test('branch row text carries stack aggregate CI glyph from cache', function()
@@ -92,7 +88,7 @@ test('branch row text carries stack aggregate CI glyph from cache', function()
     error(br, 0)
   end
   assert_truthy(br)
-  assert_eq('┊╭┄br [feature-auth]  ✗', br.text)
+  assert_eq('┊╭┄▾ br [feature-auth]  ✗', br.text)
   local fail_span = false
   for _, s in ipairs(br.spans or {}) do
     if s[3] == 'GitButlerCIFail' then

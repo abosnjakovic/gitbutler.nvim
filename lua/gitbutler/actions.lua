@@ -885,10 +885,29 @@ function M.toggle_fold(buf)
   local toggled = buf:toggle_fold()
   if toggled then
     if buf.view == 'status' then
-      -- Graph rows are rebuilt from cached data; folds don't need a CLI refetch.
+      -- Graph rows are rebuilt from cached data; folds don't need a CLI
+      -- refetch, so buf.lines is already the post-fold layout here. The other
+      -- views refresh asynchronously — restoring there would walk stale rows.
       require('gitbutler.ui.status').rerender()
+      M._restore_fold_cursor(buf, toggled)
     else
       refresh()
+    end
+  end
+end
+
+---Park the cursor back on the header that was folded: collapsing a section
+---slides later rows up under a cursor that never moved.
+---@param buf GitButlerBuffer
+---@param fold_id string
+function M._restore_fold_cursor(buf, fold_id)
+  if not (buf.win and vim.api.nvim_win_is_valid(buf.win)) then
+    return
+  end
+  for i, line in ipairs(buf.lines or {}) do
+    if line.data and line.data.fold_id == fold_id then
+      pcall(vim.api.nvim_win_set_cursor, buf.win, { i, 0 })
+      return
     end
   end
 end

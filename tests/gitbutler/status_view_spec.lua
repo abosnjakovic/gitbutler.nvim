@@ -15,7 +15,7 @@ end
 
 test('status: renders graph rows', function()
   local lines = h.capture_lines(fixtures.status_full)
-  assert_eq('╭┄zz [uncommitted]', lines[1].text)
+  assert_eq('╭┄▾ zz [uncommitted]', lines[1].text)
   assert_truthy(lines[1].graph)
   local found_branch = false
   for _, l in ipairs(lines) do
@@ -125,7 +125,7 @@ end)
 test('handles empty workspace', function()
   local lines = h.capture_lines(fixtures.status_empty)
   assert_truthy(lines)
-  assert_eq('╭┄zz [uncommitted] (no changes)', lines[1].text)
+  assert_eq('╭┄▾ zz [uncommitted] (no changes)', lines[1].text)
   assert_truthy(#lines >= 2, 'at least uncommitted header + merge base')
 end)
 
@@ -147,11 +147,7 @@ end)
 test('rerender bakes marks and folds from cached data without a CLI call', function()
   local status = require('gitbutler.ui.status')
   local buf = h.mock_buffer()
-  local captured
-  ---@diagnostic disable-next-line: duplicate-set-field
-  buf.render = function(_, lines)
-    captured = lines
-  end
+  local cap = h.mock_render(buf)
   buf.selected = { ['change:up'] = true }
   buf.fold_state = { ['branch:feature-auth'] = true }
   status.instance = buf
@@ -162,9 +158,9 @@ test('rerender bakes marks and folds from cached data without a CLI call', funct
   status.instance = nil
   status.data = nil
 
-  assert_truthy(captured, 'rerender produced rows')
-  assert_truthy(captured[2].text:find('✔︎', 1, true), 'marked row shows check glyph')
-  for _, l in ipairs(captured) do
+  assert_truthy(cap.lines, 'rerender produced rows')
+  assert_truthy(cap.lines[2].text:find('✔︎', 1, true), 'marked row shows check glyph')
+  for _, l in ipairs(cap.lines) do
     assert_truthy(l.type ~= 'commit', 'folded branch hides commits')
   end
 end)

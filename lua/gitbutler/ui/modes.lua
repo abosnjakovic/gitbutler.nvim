@@ -293,8 +293,17 @@ end
 ---@param buf GitButlerBuffer
 ---@param is_target fun(line: GitButlerLine, row: integer): boolean
 ---@param source_rows? integer[]
+---@return boolean entered false when no row passes `is_target`
 local function setup_mode(buf, is_target, source_rows)
   buf.mode_filter = is_target
+
+  -- Bail before drawing any overlay: a mode with nothing to aim at is a trap
+  -- (every key dimmed, only Esc works).
+  local target = require('gitbutler.actions')._next_selectable(buf.lines or {}, 0, 1, 1, buf.mode_filter)
+  if target < 1 then
+    vim.notify('gitbutler: no valid target for this operation', vim.log.levels.WARN)
+    return false
+  end
 
   local src = {}
   for _, r in ipairs(source_rows or {}) do
@@ -316,27 +325,27 @@ local function setup_mode(buf, is_target, source_rows)
     end
   end
 
-  local target = require('gitbutler.actions')._next_selectable(buf.lines or {}, 0, 1, 1, buf.mode_filter)
-  if target >= 1 and buf.win and vim.api.nvim_win_is_valid(buf.win) then
+  if buf.win and vim.api.nvim_win_is_valid(buf.win) then
     vim.api.nvim_win_set_cursor(buf.win, { target, 0 })
   end
   M._on_cursor_moved(buf)
+  return true
 end
 
 ---Per-mode entry hooks run by M.enter after state/keymap/augroup are in place.
 local SETUP = {
   rub = function(buf)
-    setup_mode(buf, function(line, row)
+    return setup_mode(buf, function(line, row)
       return M.is_rub_target(M.state, line, row)
     end, M.state.source.rows)
   end,
   commit = function(buf)
-    setup_mode(buf, function(line)
+    return setup_mode(buf, function(line)
       return M.is_commit_target(line)
     end)
   end,
   move = function(buf)
-    setup_mode(buf, function(line, row)
+    return setup_mode(buf, function(line, row)
       return M.is_move_target(M.state, line, row)
     end, M.state.source.rows)
   end,
@@ -345,8 +354,9 @@ local SETUP = {
 ---Enter rub mode with a captured source.
 ---@param buf GitButlerBuffer
 ---@param source { kind: string, ids: string[], rows: integer[], label: string }
+---@return boolean entered
 function M.enter_rub(buf, source)
-  M.enter(buf, 'rub', source)
+  return M.enter(buf, 'rub', source)
 end
 
 ---Confirm the rub: target = cursor row; rub each source id onto it in
@@ -616,6 +626,7 @@ end
 ---@param mode string
 ---@param source? table
 ---@param opts? table
+---@return boolean entered
 function M.enter(buf, mode, source, opts)
   if M.state then
     M.exit(buf)
@@ -636,11 +647,15 @@ function M.enter(buf, mode, source, opts)
     })
   end
 
-  if SETUP[mode] then
-    SETUP[mode](buf)
+  -- A setup hook that finds no valid target aborts the entry; M.exit undoes
+  -- the state, keymap, overlays and augroup applied above.
+  if SETUP[mode] and SETUP[mode](buf) == false then
+    M.exit(buf)
+    return false
   end
 
   buf:update_hint()
+  return true
 end
 
 ---Leave the active mode: clear state, overlays, augroup, and restore the
