@@ -63,8 +63,10 @@ M.defaults = {
       -- modes
       ['r'] = 'rub_start',
       ['R'] = 'rub_reverse',
+      ['c'] = 'commit_mode_start',
+      ['m'] = 'move_start',
       -- operations (official keys)
-      ['c'] = 'commit',
+      ['n'] = 'insert_empty_commit',
       ['b'] = 'branch_new',
       ['x'] = 'discard',
       ['u'] = 'undo',
@@ -74,7 +76,6 @@ M.defaults = {
       -- direct actions retained until phase 2 replaces them with modes
       ['s'] = 'assign_to_branch',
       ['S'] = 'squash',
-      ['m'] = 'move',
       ['U'] = 'uncommit',
       ['d'] = 'describe',
       ['<Tab>'] = 'toggle_fold',

@@ -169,36 +169,22 @@ function M.absorb(_buf)
   end)
 end
 
----Commit changes to the branch under cursor.
----When files are selected, only those files are committed. Otherwise all changes.
-function M.commit(buf)
-  local branch = buf:get_cursor_branch()
-  local branch_name = branch and branch.name or nil
+---Enter commit mode: pick a branch or commit row as the insert anchor.
+function M.commit_mode_start(buf)
+  require('gitbutler.ui.modes').enter(buf, 'commit', nil, { above = false })
+end
 
-  local selected = buf:get_selected_lines({ 'file' })
-  local file_ids
-  if #selected > 0 then
-    file_ids = {}
-    for _, line in ipairs(selected) do
-      table.insert(file_ids, line.data.cli_id)
-    end
+---Insert an empty commit after the commit or branch under cursor (no mode).
+function M.insert_empty_commit(buf)
+  local line = buf:get_cursor_line()
+  if not line or (line.type ~= 'commit' and line.type ~= 'branch') or not (line.data and line.data.cli_id) then
+    vim.notify('gitbutler: place the cursor on a commit or branch', vim.log.levels.WARN)
+    return
   end
-
-  local title = 'Commit' .. (branch_name and (' to ' .. branch_name) or '')
-  if file_ids then
-    title = title .. ' (' .. #file_ids .. ' file' .. (#file_ids > 1 and 's' or '') .. ')'
-  end
-
-  float.input({
-    title = title,
-    on_submit = function(message)
-      notify_start('commit')
-      cli.commit(branch_name, message, function(err, result)
-        buf:clear_selection()
-        notify_result('commit', err, result)
-      end, file_ids)
-    end,
-  })
+  notify_start('empty commit')
+  cli.commit_empty({ after = line.data.cli_id }, function(err, result)
+    notify_result('empty commit', err, result)
+  end)
 end
 
 ---Amend: absorb uncommitted changes into HEAD commit of current branch.
@@ -244,59 +230,6 @@ function M.squash(buf)
   notify_start('squash')
   cli.squash(sha, function(err, result)
     notify_result('squash', err, result)
-  end)
-end
-
----Move commit(s) to a different branch.
-function M.move(buf)
-  local selected = buf:get_selected_lines({ 'commit' })
-  local targets
-  if #selected > 0 then
-    targets = selected
-  else
-    local line = buf:get_cursor_line()
-    if not line or line.type ~= 'commit' or not line.data then
-      return
-    end
-    targets = { line }
-  end
-
-  cli.branch_list(function(err, data)
-    if err then
-      vim.notify('gitbutler: ' .. err, vim.log.levels.ERROR)
-      return
-    end
-
-    local names = extract_branch_names(data)
-
-    float.picker({
-      title = 'Move commit(s) to',
-      items = names,
-      on_select = function(target_branch)
-        notify_start('move')
-        local i = 0
-        local function move_next()
-          i = i + 1
-          if i > #targets then
-            buf:clear_selection()
-            vim.notify('gitbutler: moved ' .. #targets .. ' commit(s) → ' .. target_branch, vim.log.levels.INFO)
-            refresh()
-            return
-          end
-          local sha = targets[i].data.sha
-          cli.move(sha, target_branch, function(move_err, _)
-            if move_err then
-              buf:clear_selection()
-              vim.notify('gitbutler move: ' .. move_err, vim.log.levels.ERROR)
-              refresh()
-              return
-            end
-            move_next()
-          end)
-        end
-        move_next()
-      end,
-    })
   end)
 end
 
@@ -1044,6 +977,44 @@ function M.rub_start(buf)
   -- affect glyphs, so the captured row indexes stay valid.
   require('gitbutler.ui.status').rerender()
   require('gitbutler.ui.modes').enter_rub(buf, { kind = kind, ids = ids, rows = rows, label = label })
+end
+
+---Enter move mode with the marked commits (or the cursor commit/branch) as source.
+function M.move_start(buf)
+  local sources = buf:get_selected_lines()
+  if #sources == 0 then
+    local line = buf:get_cursor_line()
+    sources = line and { line } or {}
+  end
+
+  local kind = sources[1] and sources[1].type or nil
+  if kind ~= 'commit' and kind ~= 'branch' then
+    vim.notify('gitbutler: nothing to move here', vim.log.levels.WARN)
+    return
+  end
+
+  local ids, rows = {}, {}
+  for _, src in ipairs(sources) do
+    local id = src.data and src.data.cli_id
+    if not id then
+      vim.notify('gitbutler: row has no CLI id', vim.log.levels.WARN)
+      return
+    end
+    table.insert(ids, id)
+    for row, l in ipairs(buf.lines or {}) do
+      if l == src then
+        table.insert(rows, row)
+        break
+      end
+    end
+  end
+
+  local label = rub_label(sources[1]) .. (#sources > 1 and (' +' .. (#sources - 1)) or '')
+  buf:clear_selection()
+  require('gitbutler.ui.status').rerender()
+  require('gitbutler.ui.modes').enter(buf, 'move', { kind = kind, ids = ids, rows = rows, label = label }, {
+    above = false,
+  })
 end
 
 ---Enter rub mode with every unassigned file as source (reverse rub).

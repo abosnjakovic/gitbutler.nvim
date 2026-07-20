@@ -190,9 +190,50 @@ function M.pr(callback)
   M.run({ 'pr', '--json' }, callback)
 end
 
----Convenience: but move
-function M.move(commit, target_branch, callback)
-  M.run({ 'move', commit, target_branch, '--json' }, callback)
+---Convenience: but move <source> <target> [--after]
+---@param commit string Commit/branch identifier (comma-join for multi-commit moves)
+---@param target_branch string Target commit/branch identifier, or 'zz' to unstack
+---@param callback fun(err?: string, result?: any)
+---@param opts? { after?: boolean } Place source after (above) the target; commit-to-commit only
+function M.move(commit, target_branch, callback, opts)
+  local args = { 'move', commit, target_branch }
+  if opts and opts.after then
+    table.insert(args, '--after')
+  end
+  table.insert(args, '--json')
+  M.run(args, callback)
+end
+
+---Convenience: but commit <branch> -m <msg> --before/--after <id>
+---@param branch string Branch name or CLI ID
+---@param message string Commit message
+---@param anchor { before?: string, after?: string } Commit/branch CLI ID to anchor on
+---@param callback fun(err?: string, result?: any)
+function M.commit_at(branch, message, anchor, callback)
+  local args = { 'commit', branch, '-m', message }
+  if anchor.before then
+    vim.list_extend(args, { '--before', anchor.before })
+  end
+  if anchor.after then
+    vim.list_extend(args, { '--after', anchor.after })
+  end
+  table.insert(args, '--json')
+  M.run(args, callback)
+end
+
+---Convenience: but commit empty --before/--after <target>
+---@param anchor { before?: string, after?: string } Commit/branch CLI ID to anchor on
+---@param callback fun(err?: string, result?: any)
+function M.commit_empty(anchor, callback)
+  local args = { 'commit', 'empty' }
+  if anchor.before then
+    vim.list_extend(args, { '--before', anchor.before })
+  end
+  if anchor.after then
+    vim.list_extend(args, { '--after', anchor.after })
+  end
+  table.insert(args, '--json')
+  M.run(args, callback)
 end
 
 ---Convenience: but rub <source> <target> — the CLI derives the operation

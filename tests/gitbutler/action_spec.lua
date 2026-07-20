@@ -110,102 +110,42 @@ test('actions.push_all does a pull first', function()
   vim.notify = original_notify
 end)
 
--- ── Select files > create branch > commit ───────────────
+-- ── Empty commit insertion (`n`) ───────────────
 
-test('commit with selected files passes only those file IDs via -p', function()
-  local committed_branch = nil
-  local committed_message = nil
-  local committed_file_ids = nil
-
-  local original_commit = cli.commit
+test('insert_empty_commit anchors after the cursor commit or branch', function()
+  local captured
+  local original_commit_empty = cli.commit_empty
   local original_notify = vim.notify
   vim.notify = function() end
-
-  -- Mock commit: records args including file_ids
-  cli.commit = function(branch, message, cb, file_ids)
-    committed_branch = branch
-    committed_message = message
-    committed_file_ids = file_ids
+  cli.commit_empty = function(anchor, cb)
+    captured = anchor
     cb(nil, 'ok')
-  end
-
-  -- Mock float.input to immediately call on_submit
-  local float = require('gitbutler.ui.float')
-  local original_input = float.input
-  float.input = function(opts)
-    opts.on_submit('add selected files')
-  end
-
-  -- Set up buffer with 3 unallocated files, select only 2
-  local buf = h.mock_buffer()
-  buf.lines = {
-    { type = 'branch', data = { name = 'new-feature' }, text = '  new-feature' },
-    { type = 'file', data = { cli_id = 'f1', path = 'src/a.lua', unassigned = true }, text = 'M  src/a.lua' },
-    { type = 'file', data = { cli_id = 'f2', path = 'src/b.lua', unassigned = true }, text = 'M  src/b.lua' },
-    { type = 'file', data = { cli_id = 'f3', path = 'src/c.lua', unassigned = true }, text = 'A  src/c.lua' },
-  }
-  buf.selected = { f1 = true, f3 = true }
-  buf._cursor_row = 1
-  buf.get_cursor_branch = function()
-    return { name = 'new-feature' }
-  end
-  buf.clear_selection = function(self)
-    self.selected = {}
-  end
-
-  actions.commit(buf)
-
-  assert_eq('new-feature', committed_branch)
-  assert_eq('add selected files', committed_message)
-  assert_truthy(committed_file_ids, 'file_ids should be passed')
-  assert_eq(2, #committed_file_ids, 'only 2 of 3 files')
-  assert_eq('f1', committed_file_ids[1])
-  assert_eq('f3', committed_file_ids[2])
-
-  -- Restore
-  cli.commit = original_commit
-  float.input = original_input
-  vim.notify = original_notify
-end)
-
-test('commit without selection commits all (no file_ids)', function()
-  local committed_file_ids = 'sentinel'
-
-  local original_commit = cli.commit
-  local original_notify = vim.notify
-  vim.notify = function() end
-
-  cli.commit = function(_branch, _message, cb, file_ids)
-    committed_file_ids = file_ids
-    cb(nil, 'ok')
-  end
-
-  local float = require('gitbutler.ui.float')
-  local original_input = float.input
-  float.input = function(opts)
-    opts.on_submit('commit all')
   end
 
   local buf = h.mock_buffer()
   buf.lines = {
-    { type = 'branch', data = { name = 'main' }, text = '  main' },
-    { type = 'file', data = { cli_id = 'f1', path = 'a.lua' }, text = 'M  a.lua' },
+    { type = 'commit', selectable = true, data = { cli_id = 'cd', branch_name = 'feat' } },
+    { type = 'branch', selectable = true, data = { cli_id = 'bb', name = 'feat' } },
+    { type = 'file', selectable = true, data = { cli_id = 'f1', path = 'a.lua' } },
   }
-  buf.selected = {}
-  buf._cursor_row = 1
-  buf.get_cursor_branch = function()
-    return { name = 'main' }
-  end
-  buf.clear_selection = function(self)
-    self.selected = {}
+  local cursor_row = 1
+  buf.get_cursor_line = function(self)
+    return self.lines[cursor_row]
   end
 
-  actions.commit(buf)
+  actions.insert_empty_commit(buf)
+  assert_eq('cd', captured.after, 'commit row anchors after its cli id')
 
-  assert_eq(nil, committed_file_ids, 'no file_ids means commit all')
+  cursor_row = 2
+  actions.insert_empty_commit(buf)
+  assert_eq('bb', captured.after, 'branch row anchors after the branch cli id')
 
-  cli.commit = original_commit
-  float.input = original_input
+  captured = nil
+  cursor_row = 3
+  actions.insert_empty_commit(buf)
+  assert_eq(nil, captured, 'file rows are rejected')
+
+  cli.commit_empty = original_commit_empty
   vim.notify = original_notify
 end)
 
