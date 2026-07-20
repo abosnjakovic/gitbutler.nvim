@@ -809,15 +809,23 @@ function M.toggle_fold(buf)
   -- Branch/section headers: toggle fold
   local toggled = buf:toggle_fold()
   if toggled then
-    refresh()
+    if buf.view == 'status' then
+      -- Graph rows are rebuilt from cached data; folds don't need a CLI refetch.
+      require('gitbutler.ui.status').rerender()
+    else
+      refresh()
+    end
   end
 end
 
 ---Toggle selection on the line under cursor.
 function M.toggle_select(buf)
   local toggled = buf:toggle_select()
-  -- Re-render to show updated markers without a full refresh (preserves selection)
-  if buf.lines and #buf.lines > 0 then
+  -- Graph rows bake the ✔︎ mark at build time, so the status view must
+  -- rebuild rows from cached data rather than repaint stale lines.
+  if buf.view == 'status' then
+    require('gitbutler.ui.status').rerender()
+  elseif buf.lines and #buf.lines > 0 then
     buf:render(buf.lines)
   end
   if toggled and buf.win and vim.api.nvim_win_is_valid(buf.win) then

@@ -79,6 +79,8 @@ function M.build(data, state)
     unassigned = list(data.unassignedChanges)
   end
   local hdr = row('uncommitted_header', { cli_id = 'zz', fold_id = 'unassigned' }, true)
+  -- Buffer:toggle_fold only walks rows flagged foldable.
+  hdr.foldable = true
   add(hdr, '╭┄', HL.connector)
   add(hdr, 'zz', HL.cli_id)
   add(hdr, ' [uncommitted]', HL.section)
@@ -124,6 +126,7 @@ function M.build(data, state)
         stack_cli_id = stack.cliId,
         fold_id = fold_id,
       }, true)
+      br.foldable = true
       add(br, bi == 1 and '┊╭┄' or '┊├┄', HL.connector)
       add(br, branch.cliId or '??', HL.cli_id)
       add(br, ' [' .. name .. ']', HL.branch)

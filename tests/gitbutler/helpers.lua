@@ -71,6 +71,7 @@ function M.capture_lines(fixture_data)
 
   cli.status = original
   status.instance = nil
+  status.data = nil
   return captured
 end
 

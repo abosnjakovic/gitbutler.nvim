@@ -4,6 +4,28 @@ local test, assert_eq, assert_truthy, assert_falsy = h.test, h.assert_eq, h.asse
 
 print('\n=== Status view tests ===')
 
+---Collect the set of highlight groups used by a graph row's spans.
+local function span_hls(line)
+  local hls = {}
+  for _, s in ipairs(line.spans or {}) do
+    hls[s[3]] = true
+  end
+  return hls
+end
+
+test('status: renders graph rows', function()
+  local lines = h.capture_lines(fixtures.status_full)
+  assert_eq('╭┄zz [uncommitted]', lines[1].text)
+  assert_truthy(lines[1].graph)
+  local found_branch = false
+  for _, l in ipairs(lines) do
+    if l.type == 'branch' and l.data.name == 'feature-auth' then
+      found_branch = true
+    end
+  end
+  assert_truthy(found_branch)
+end)
+
 test('renders branch from stacks', function()
   local lines = h.capture_lines(fixtures.status_full)
   assert_truthy(lines)
@@ -18,7 +40,8 @@ test('renders branch from stacks', function()
 
   assert_truthy(branch_line)
   assert_eq('feature-auth', branch_line.data.name)
-  assert_eq('GitButlerBranchApplied', branch_line.hl)
+  assert_truthy(branch_line.foldable, 'branch header is foldable')
+  assert_truthy(span_hls(branch_line)['GitButlerBranchApplied'], 'branch name span highlighted')
 end)
 
 test('renders commits with sha and message', function()
@@ -52,7 +75,7 @@ test('renders committed files with cli_id', function()
   assert_eq(2, #files)
   assert_eq('src/auth.lua', files[1].data.path)
   assert_eq('c4:xw', files[1].data.cli_id)
-  assert_eq('GitButlerFileAdd', files[1].hl)
+  assert_truthy(span_hls(files[1])['GitButlerFileAdd'], 'added file span highlighted')
 end)
 
 test('renders assigned uncommitted changes', function()
@@ -86,15 +109,24 @@ test('renders unassigned changes with cli_id', function()
   assert_eq('plan.md', unassigned[2].data.path)
 end)
 
-test('shows upstream behind count in header', function()
+test('shows upstream behind count as upstream row', function()
   local lines = h.capture_lines(fixtures.status_behind)
-  assert_truthy(lines[1].text:find('3 behind'), 'behind in header')
+  local up
+  for _, l in ipairs(lines) do
+    if l.type == 'upstream' then
+      up = l
+      break
+    end
+  end
+  assert_truthy(up, 'upstream row rendered')
+  assert_truthy(up.text:find('⏫ 3 commits', 1, true), 'behind count in upstream row')
 end)
 
 test('handles empty workspace', function()
   local lines = h.capture_lines(fixtures.status_empty)
   assert_truthy(lines)
-  assert_truthy(#lines >= 2, 'at least header + help')
+  assert_eq('╭┄zz [uncommitted] (no changes)', lines[1].text)
+  assert_truthy(#lines >= 2, 'at least uncommitted header + merge base')
 end)
 
 test('truncates multiline commit messages', function()
@@ -110,4 +142,29 @@ test('truncates multiline commit messages', function()
   assert_truthy(#commits >= 2)
   assert_truthy(commits[2].text:find('initial auth setup'))
   assert_falsy(commits[2].text:find('multiline'))
+end)
+
+test('rerender bakes marks and folds from cached data without a CLI call', function()
+  local status = require('gitbutler.ui.status')
+  local buf = h.mock_buffer()
+  local captured
+  ---@diagnostic disable-next-line: duplicate-set-field
+  buf.render = function(_, lines)
+    captured = lines
+  end
+  buf.selected = { ['change:up'] = true }
+  buf.fold_state = { ['branch:feature-auth'] = true }
+  status.instance = buf
+  status.data = fixtures.status_full
+
+  status.rerender()
+
+  status.instance = nil
+  status.data = nil
+
+  assert_truthy(captured, 'rerender produced rows')
+  assert_truthy(captured[2].text:find('✔︎', 1, true), 'marked row shows check glyph')
+  for _, l in ipairs(captured) do
+    assert_truthy(l.type ~= 'commit', 'folded branch hides commits')
+  end
 end)

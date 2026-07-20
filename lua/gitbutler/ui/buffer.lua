@@ -7,7 +7,7 @@ local MARK_CATS = { change = true, commit = true, cfile = true }
 ---@class GitButlerLine
 ---@field text string Display text for the line
 ---@field hl? string Highlight group name
----@field type string Line type: 'branch', 'commit', 'file', 'committed_file', 'section_header', 'blank', 'help', 'info', 'recent_commit'
+---@field type string Line type: 'branch', 'commit', 'file', 'committed_file', 'section_header', 'blank', 'help', 'info', 'recent_commit', 'uncommitted_header', 'connector', 'upstream', 'merge_base'
 ---@field data? table Arbitrary data associated with the line (branch info, commit sha, file path, etc.)
 ---@field foldable? boolean Whether this line is a fold header
 ---@field folded? boolean Current fold state
