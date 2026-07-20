@@ -277,6 +277,20 @@ function Buffer:update_hint()
     return
   end
 
+  if self.view == 'status' then
+    local hotbar = require('gitbutler.ui.hotbar')
+    local width = (self.win and vim.api.nvim_win_is_valid(self.win)) and vim.api.nvim_win_get_width(self.win) or 80
+    local built = hotbar.build('normal', hotbar.normal_items, width)
+    vim.bo[self.hint_buf].modifiable = true
+    vim.api.nvim_buf_clear_namespace(self.hint_buf, self.ns, 0, -1)
+    vim.api.nvim_buf_set_lines(self.hint_buf, 0, -1, false, { built.text })
+    for _, s in ipairs(built.spans) do
+      vim.api.nvim_buf_add_highlight(self.hint_buf, self.ns, s[3], 0, s[1], s[2])
+    end
+    vim.bo[self.hint_buf].modifiable = false
+    return
+  end
+
   local line = self:get_cursor_line()
   local line_type = line and line.type or nil
   local selectable = line ~= nil and (line.type == 'commit' or line.type == 'file' or line.type == 'committed_file')
