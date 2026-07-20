@@ -830,9 +830,9 @@ function M.toggle_select(buf)
   end
   if toggled and buf.win and vim.api.nvim_win_is_valid(buf.win) then
     local cursor = vim.api.nvim_win_get_cursor(buf.win)
-    local max_row = vim.api.nvim_buf_line_count(buf.buf)
-    if cursor[1] < max_row then
-      vim.api.nvim_win_set_cursor(buf.win, { cursor[1] + 1, cursor[2] })
+    local target = M._next_selectable(buf.lines, cursor[1], 1, 1)
+    if target ~= cursor[1] then
+      vim.api.nvim_win_set_cursor(buf.win, { target, cursor[2] })
     end
   end
 end
@@ -980,6 +980,106 @@ end
 ---Open commit timeline.
 function M.timeline(_buf)
   require('gitbutler.ui.timeline').open()
+end
+
+---Pure scanner: from row `from`, move `count` selectable rows in `dir` (1/-1).
+---Returns the destination row (stays put when no further selectable row exists).
+function M._next_selectable(lines, from, dir, count)
+  local at = from
+  for _ = 1, count do
+    local j = at + dir
+    local found
+    while j >= 1 and j <= #lines do
+      if lines[j] and lines[j].selectable then
+        found = j
+        break
+      end
+      j = j + dir
+    end
+    if not found then
+      break
+    end
+    at = found
+  end
+  return at
+end
+
+local SECTION_TYPES = { branch = true, uncommitted_header = true }
+
+---Pure scanner: next section header (branch / uncommitted area) in `dir`.
+function M._next_section(lines, from, dir)
+  local j = from + dir
+  while j >= 1 and j <= #lines do
+    if lines[j] and SECTION_TYPES[lines[j].type] then
+      return j
+    end
+    j = j + dir
+  end
+  return from
+end
+
+local function move_cursor(buf, target)
+  if buf.win and vim.api.nvim_win_is_valid(buf.win) then
+    vim.api.nvim_win_set_cursor(buf.win, { target, 0 })
+  end
+end
+
+---Guard: keymap handlers below assume a live window; bail out early in
+---headless contexts (e.g. tests) rather than let cursor_row throw.
+local function has_win(buf)
+  return buf.win and vim.api.nvim_win_is_valid(buf.win)
+end
+
+local function cursor_row(buf)
+  return vim.api.nvim_win_get_cursor(buf.win)[1]
+end
+
+function M.cursor_down(buf)
+  if not has_win(buf) then
+    return
+  end
+  move_cursor(buf, M._next_selectable(buf.lines, cursor_row(buf), 1, 1))
+end
+function M.cursor_up(buf)
+  if not has_win(buf) then
+    return
+  end
+  move_cursor(buf, M._next_selectable(buf.lines, cursor_row(buf), -1, 1))
+end
+function M.jump_down(buf)
+  if not has_win(buf) then
+    return
+  end
+  move_cursor(buf, M._next_selectable(buf.lines, cursor_row(buf), 1, 10))
+end
+function M.jump_up(buf)
+  if not has_win(buf) then
+    return
+  end
+  move_cursor(buf, M._next_selectable(buf.lines, cursor_row(buf), -1, 10))
+end
+function M.section_down(buf)
+  if not has_win(buf) then
+    return
+  end
+  move_cursor(buf, M._next_section(buf.lines, cursor_row(buf), 1))
+end
+function M.section_up(buf)
+  if not has_win(buf) then
+    return
+  end
+  move_cursor(buf, M._next_section(buf.lines, cursor_row(buf), -1))
+end
+function M.goto_top(buf)
+  move_cursor(buf, 1)
+end
+function M.goto_bottom(buf)
+  for i = #buf.lines, 1, -1 do
+    if buf.lines[i].selectable then
+      move_cursor(buf, i)
+      return
+    end
+  end
 end
 
 return M

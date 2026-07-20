@@ -24,7 +24,11 @@ test('actions.toggle_select moves cursor down if successful', function()
     return true
   end
   buf.render = function() end
-  buf.lines = { 'dummy' }
+  buf.lines = {
+    { selectable = true, type = 'file' },
+    { selectable = true, type = 'file' },
+    { selectable = true, type = 'file' },
+  }
 
   actions.toggle_select(buf)
 

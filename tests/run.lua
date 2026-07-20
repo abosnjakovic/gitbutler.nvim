@@ -16,6 +16,7 @@ require('tests.gitbutler.forge_gh_spec')
 require('tests.gitbutler.ci_view_spec')
 require('tests.gitbutler.direct_to_main_spec')
 require('tests.gitbutler.graph_spec')
+require('tests.gitbutler.nav_spec')
 
 -- Summary
 local h = require('tests.gitbutler.helpers')
