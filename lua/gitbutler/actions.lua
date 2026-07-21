@@ -34,9 +34,16 @@ function M._open_target(buf)
   return (buf:get_selected_lines({ 'file', 'committed_file' }))[1]
 end
 
----`o` — jump to the file under the cursor in the editor window, landing on its
----first changed hunk. Keeps the status view open so you can edit and flip back.
+---`o` — open whatever is under the cursor. A commit row opens in the configured
+---diff tool (`commit_diff` setup option); a file row jumps to code in the editor
+---window on its first changed hunk. The status view stays open either way.
 function M.open_file(buf)
+  local cursor = buf:get_cursor_line()
+  if cursor and cursor.type == 'commit' and cursor.data and cursor.data.sha then
+    require('gitbutler.ui.commit_diff').open(cursor.data.sha)
+    return
+  end
+
   local target = M._open_target(buf)
   if not target or not target.data or not target.data.path then
     vim.notify('gitbutler: no file to open here', vim.log.levels.WARN)
@@ -949,7 +956,7 @@ function M.help(_buf)
     '  q/d close pane. Committed diffs have no hunk ids: mark/discard/rub warn',
     '',
     'Extras',
-    '  o        Open file at its first hunk (keeps the view open)',
+    '  o        Open under cursor: file → jump to code; commit → diff tool',
     '  A        Absorb changes',
     '  p/P      Push branch / all',
     '  v        Create PR',

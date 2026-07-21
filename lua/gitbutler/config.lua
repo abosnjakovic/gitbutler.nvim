@@ -38,6 +38,15 @@ M.defaults = {
   watch = true,
   watch_interval = 1000,
 
+  -- What `o` on a commit row opens. One of:
+  --   nil / false        -> built-in read-only `git show <sha>` split (default)
+  --   'codediff'         -> :CodeDiff <sha>^ <sha>   (esmuellert/codediff.nvim)
+  --   'diffview'         -> :DiffviewOpen <sha>^!    (sindrets/diffview.nvim)
+  --   'fugitive'         -> :Git show <sha>          (tpope/vim-fugitive)
+  --   a string template  -> vim.cmd(template:format(sha, sha)), e.g. 'CodeDiff %s^ %s'
+  --   a function(sha)    -> called with the full commit SHA
+  commit_diff = nil,
+
   -- Timeline view settings
   timeline = {
     days = 7,

@@ -147,6 +147,26 @@ else
   H.skip('no commit row for the committed-diff check')
 end
 
+-- Open a commit in the diff tool: `o` on a commit row. With no `commit_diff`
+-- configured this is the built-in `git show` in the editor window.
+if commit_row then
+  vim.api.nvim_set_current_win(buf.win)
+  vim.api.nvim_win_set_cursor(buf.win, { commit_row, 0 })
+  local sha = buf.lines[commit_row].data.sha
+  require('gitbutler.actions').open_file(buf)
+  if not (editor.win and vim.api.nvim_win_is_valid(editor.win)) then
+    H.fail('o on a commit did not open a diff window')
+  end
+  local text = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(editor.win), 0, 20, false), '\n')
+  if not text:match(sha:sub(1, 7)) then
+    H.fail('git show output does not mention the commit sha')
+  end
+  H.ok('commit diff: o opened git show for ' .. sha:sub(1, 7))
+  vim.api.nvim_win_close(editor.win, true)
+  editor.win = nil
+  vim.api.nvim_set_current_win(details.win_state.win)
+end
+
 -- q closes only the pane.
 H.press(dbuf, 'q')
 if details.is_open() then

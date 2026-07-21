@@ -160,7 +160,7 @@ l        Focus the details pane
 Extras (plugin actions on free keys):
 
 ```
-o        Open file under cursor
+o        Open under cursor: file → jump to code; commit → diff tool
 A        Absorb uncommitted changes into logical commits
 p        Push the branch under cursor
 P        Push all branches
@@ -228,6 +228,23 @@ Note that `q` here closes the *pane*, not the whole view — deliberately differ
 **Jump to code.** `<CR>` or `o` on a hunk opens its file in an editor window beside the pane, cursor on the hunk's line, so you can edit the change in place — the TUI stays open, and your edits flow straight back into the next `but` diff or commit. From the status view, `o` on a file row does the same, landing on the file's first changed hunk. The editor window is reused across jumps rather than stacking new splits.
 
 **Committed diffs are read-only in the pane.** `but diff` returns no hunk ids for committed entities (a commit, a file inside a commit, or a branch), so navigation, scrolling, and `y` work there, but `<Space>`, `x`, and `r` have nothing to address and warn instead. Hunk operations are available on uncommitted changes only.
+
+### Open a commit in a diff tool (o)
+
+`o` on a commit row opens that commit in a diff tool. Out of the box it shows a read-only `git show <sha>` in the editor window (zero dependencies). Point it at an external tool with the `commit_diff` setup option:
+
+```lua
+require('gitbutler').setup({
+  -- nil / false      -> built-in `git show <sha>` (default)
+  commit_diff = 'codediff',   -- :CodeDiff <sha>^ <sha>   (esmuellert/codediff.nvim)
+  -- commit_diff = 'diffview', -- :DiffviewOpen <sha>^!   (sindrets/diffview.nvim)
+  -- commit_diff = 'fugitive', -- :Git show <sha>         (tpope/vim-fugitive)
+  -- commit_diff = 'CodeDiff %s^ %s',           -- a raw command template (%s = full sha)
+  -- commit_diff = function(sha) ... end,       -- do anything with the sha
+})
+```
+
+The three named presets expand to the commands shown. A string with `%s` is a command template (the sha is substituted, and passed twice so single- or double-placeholder templates both work). A function receives the full SHA and can do whatever you like. The commit's full SHA comes from `but status`, so no diff tool needs to be installed for the default to work.
 
 ### Branch management (B)
 
@@ -311,6 +328,11 @@ require('gitbutler').setup({
   cmd = 'but',
   kind = 'tab',              -- 'tab', 'split', 'vsplit', 'float', 'current'
 
+  -- What `o` on a commit opens (see "Open a commit in a diff tool"):
+  --   nil (default) built-in git show · 'codediff'/'diffview'/'fugitive' presets
+  --   a 'Cmd %s^ %s' template · or a function(sha)
+  commit_diff = nil,
+
   float = {
     relative = 'editor',
     width = 0.8,
@@ -337,7 +359,7 @@ The plugin talks to the `but` CLI exclusively through `but <command> --json`, wh
 
 `cli.lua` wraps every `but` subcommand with `vim.system()` for async execution and `vim.json.decode()` for parsing. All other modules go through this layer.
 
-`ui/` modules handle rendering. `graph.lua` is a pure renderer that turns `but status` JSON into the commit-graph rows — glyphs, highlight spans, and a line-to-entity map — with no Neovim calls, so it is tested directly on fixtures. `buffer.lua` is the managed scratch buffer that draws those rows and tracks marks and folds. `modes.lua` is the modal state machine (rub / commit / move / stack) with its verb table; `details.lua` renders diffs in the side pane and owns its window; `editor.lua` handles jump-to-code (the reusable file window). `hotbar.lua` draws the mode pill and key hints, and `float.lua` provides input floats and the fuzzy picker. `status.lua`, `log.lua`, `timeline.lua`, `branch.lua`, and `oplog.lua` build the specific views.
+`ui/` modules handle rendering. `graph.lua` is a pure renderer that turns `but status` JSON into the commit-graph rows — glyphs, highlight spans, and a line-to-entity map — with no Neovim calls, so it is tested directly on fixtures. `buffer.lua` is the managed scratch buffer that draws those rows and tracks marks and folds. `modes.lua` is the modal state machine (rub / commit / move / stack) with its verb table; `details.lua` renders diffs in the side pane and owns its window; `editor.lua` handles jump-to-code (the reusable file window); `commit_diff.lua` adapts a commit SHA to a diff tool (built-in `git show`, a preset, a template, or a function). `hotbar.lua` draws the mode pill and key hints, and `float.lua` provides input floats and the fuzzy picker. `status.lua`, `log.lua`, `timeline.lua`, `branch.lua`, and `oplog.lua` build the specific views.
 
 `actions.lua` connects keybindings to CLI operations and manages the interaction flow (mode entry, input floats, confirmations, refresh cycles). Keeping the load-bearing logic (graph rendering, the verb table, navigation, diff parsing) in pure functions is what lets the suite catch regressions without driving a live UI.
 

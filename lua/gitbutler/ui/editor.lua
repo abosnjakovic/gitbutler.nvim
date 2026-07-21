@@ -63,4 +63,24 @@ function M.open(path, line)
   vim.cmd('normal! zz')
 end
 
+---Show read-only scratch content (e.g. a `git show` patch) in the reusable
+---editor window, so it shares the layout with jump-to-code. `q` closes it.
+---@param name string buffer name shown in the statusline
+---@param lines string[] content
+---@param filetype? string syntax (e.g. 'git', 'diff')
+function M.show(name, lines, filetype)
+  local win = ensure_win()
+  vim.api.nvim_set_current_win(win)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf].buftype = 'nofile'
+  vim.bo[buf].bufhidden = 'wipe'
+  vim.bo[buf].swapfile = false
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  pcall(vim.api.nvim_buf_set_name, buf, name)
+  vim.bo[buf].filetype = filetype or ''
+  vim.bo[buf].modifiable = false
+  vim.api.nvim_win_set_buf(win, buf)
+  vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = buf, nowait = true })
+end
+
 return M

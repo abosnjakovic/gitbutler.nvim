@@ -322,6 +322,27 @@ h.test('toggle_fold parks the cursor back on the fold header after rerender', fu
   vim.api.nvim_buf_delete(buf.buf, { force = true })
 end)
 
+test('open_file: a commit row routes to the commit_diff tool with its sha', function()
+  local buf = h.mock_buffer()
+  buf.lines = {
+    { type = 'commit', selectable = true, data = { sha = 'deadbeef', cli_id = 'c1' } },
+  }
+  buf.get_cursor_line = function(self)
+    return self.lines[1]
+  end
+
+  local commit_diff = require('gitbutler.ui.commit_diff')
+  local opened
+  local orig = commit_diff.open
+  commit_diff.open = function(sha)
+    opened = sha
+  end
+  actions.open_file(buf)
+  commit_diff.open = orig
+
+  assert_eq('deadbeef', opened, 'o on a commit opens its sha in the diff tool')
+end)
+
 test('open_file target: cursor file wins, else first selected file', function()
   local buf = h.mock_buffer()
   buf.lines = {
