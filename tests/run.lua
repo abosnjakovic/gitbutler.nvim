@@ -21,6 +21,7 @@ require('tests.gitbutler.hotbar_spec')
 require('tests.gitbutler.modes_spec')
 require('tests.gitbutler.fuzzy_spec')
 require('tests.gitbutler.details_spec')
+require('tests.gitbutler.cli_spec')
 
 -- Summary
 local h = require('tests.gitbutler.helpers')
