@@ -1,13 +1,13 @@
 # gitbutler.nvim
 
-A neovim interface for [Git Butler](https://gitbutler.com) virtual branches. Manage parallel branches, select and assign files, commit, absorb, squash, reword, push, open pull requests, and inspect CI — all from a buffer-based UI without leaving your editor.
+A Neovim interface for [Git Butler](https://gitbutler.com) virtual branches, modelled on the official `but tui`. A scrollable commit graph is the workspace: navigate branches and commits, assign and commit changes through modal rub / commit / move / stack operations, inspect diffs in a details pane, and jump straight from a hunk into the file to edit it — all without leaving your editor. Push, open pull requests, land, and inspect CI from the same buffer.
 
 Requires neovim 0.10+ and the [`but` CLI](https://docs.gitbutler.com/cli-overview). The CI view also uses the [`gh` CLI](https://cli.github.com) when available; everything else has zero runtime dependencies.
 
 <img width="6016" height="3384" alt="image" src="https://github.com/user-attachments/assets/22bf9735-0d5a-4118-8562-31febf1bb875" />
 
 Timeline view (T)
-Greate for a birds eye view on work being done around you
+Great for a bird's-eye view on work being done around you
 <img width="6016" height="3384" alt="image" src="https://github.com/user-attachments/assets/e23f355e-c21c-43c7-885e-4cadbefa9c82" />
 
 Expanded CI view (C)
@@ -337,14 +337,16 @@ The plugin talks to the `but` CLI exclusively through `but <command> --json`, wh
 
 `cli.lua` wraps every `but` subcommand with `vim.system()` for async execution and `vim.json.decode()` for parsing. All other modules go through this layer.
 
-`ui/` modules handle rendering. `buffer.lua` is the managed scratch buffer with collapsible sections. `float.lua` provides floating windows for input and pickers. `status.lua`, `log.lua`, `timeline.lua`, `branch.lua`, and `oplog.lua` build the specific views.
+`ui/` modules handle rendering. `graph.lua` is a pure renderer that turns `but status` JSON into the commit-graph rows — glyphs, highlight spans, and a line-to-entity map — with no Neovim calls, so it is tested directly on fixtures. `buffer.lua` is the managed scratch buffer that draws those rows and tracks marks and folds. `modes.lua` is the modal state machine (rub / commit / move / stack) with its verb table; `details.lua` renders diffs in the side pane and owns its window; `editor.lua` handles jump-to-code (the reusable file window). `hotbar.lua` draws the mode pill and key hints, and `float.lua` provides input floats and the fuzzy picker. `status.lua`, `log.lua`, `timeline.lua`, `branch.lua`, and `oplog.lua` build the specific views.
 
-`actions.lua` connects keybindings to CLI operations and manages the interaction flow (inline pickers, input floats, confirmations, refresh cycles).
+`actions.lua` connects keybindings to CLI operations and manages the interaction flow (mode entry, input floats, confirmations, refresh cycles). Keeping the load-bearing logic (graph rendering, the verb table, navigation, diff parsing) in pure functions is what lets the suite catch regressions without driving a live UI.
 
 ## Running tests
 
 ```sh
-make test
+make test    # unit suite, pure and hermetic
+make ci       # stylua --check + luacheck + test (what CI runs)
+make smoke    # end-to-end checks against the real `but` CLI
 ```
 
-Tests run in an isolated neovim instance (`--clean --headless`) with no user config loaded. CI runs against both neovim stable and nightly.
+`make test` runs the unit suite in an isolated neovim instance (`--clean --headless`) with no user config loaded. `make smoke` drives the plugin against the real `but` CLI in the current workspace, opening the graph, entering modes, and jumping into files; it skips gracefully when `but` is unavailable or the state a check needs is absent, so it is safe to run on any GitButler repo. CI runs `make ci` against both neovim stable and nightly.
