@@ -322,6 +322,28 @@ h.test('toggle_fold parks the cursor back on the fold header after rerender', fu
   vim.api.nvim_buf_delete(buf.buf, { force = true })
 end)
 
+test('open_file target: cursor file wins, else first selected file', function()
+  local buf = h.mock_buffer()
+  buf.lines = {
+    { type = 'branch', selectable = true, data = { name = 'feat' } },
+    { type = 'file', selectable = true, data = { cli_id = 'f1', path = 'a.lua' } },
+    { type = 'file', selectable = true, data = { cli_id = 'f2', path = 'b.lua' } },
+  }
+  local cursor_row = 2
+  buf.get_cursor_line = function(self)
+    return self.lines[cursor_row]
+  end
+
+  assert_eq('a.lua', actions._open_target(buf).data.path, 'cursor file row is the target')
+
+  -- Cursor on a non-file row falls back to the first selected file.
+  cursor_row = 1
+  buf.get_selected_lines = function(_, _)
+    return { buf.lines[3] }
+  end
+  assert_eq('b.lua', actions._open_target(buf).data.path, 'first selected file is the fallback')
+end)
+
 -- Every action named in the status keymap must be registered as a handler in
 -- status.M.open, or the key silently does nothing at runtime. Unit tests that
 -- call actions.<name> directly bypass this dispatch layer and cannot catch it

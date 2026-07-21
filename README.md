@@ -211,6 +211,7 @@ j/k      Next / previous hunk (the ▌ bar marks the selected hunk)
 J/K      Scroll one line
 <C-d>/<C-u>  Scroll 10 lines
 g/G      First / last hunk
+<CR>/o   Open the file at this hunk's line (jump to code)
 <Space>  Mark / unmark the hunk (✔︎)
 x        Discard marked hunks, else the selected one (with confirmation)
 y        Copy the selected hunk's body to the clipboard
@@ -223,6 +224,8 @@ q/d      Close the pane
 ```
 
 Note that `q` here closes the *pane*, not the whole view — deliberately different from the status window's `q`. This matches `but tui`.
+
+**Jump to code.** `<CR>` or `o` on a hunk opens its file in an editor window beside the pane, cursor on the hunk's line, so you can edit the change in place — the TUI stays open, and your edits flow straight back into the next `but` diff or commit. From the status view, `o` on a file row does the same, landing on the file's first changed hunk. The editor window is reused across jumps rather than stacking new splits.
 
 **Committed diffs are read-only in the pane.** `but diff` returns no hunk ids for committed entities (a commit, a file inside a commit, or a branch), so navigation, scrolling, and `y` work there, but `<Space>`, `x`, and `r` have nothing to address and warn instead. Hunk operations are available on uncommitted changes only.
 

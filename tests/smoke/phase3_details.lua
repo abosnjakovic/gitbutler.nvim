@@ -83,6 +83,30 @@ if not (vim.fn.getreg('"'):match('smoke scratch')) then
 end
 H.ok('copy: register holds the hunk body')
 
+-- Jump-to-code: <CR> on a hunk opens the file at the hunk's line, in a
+-- window beside the pane, with the TUI still alive.
+local hunk = details.win_state.hunks[details.win_state.selected]
+H.press(dbuf, '<CR>')
+local editor = require('gitbutler.ui.editor')
+if not (editor.win and vim.api.nvim_win_is_valid(editor.win)) then
+  H.fail('<CR> did not open an editor window')
+end
+if vim.api.nvim_get_current_win() ~= editor.win then
+  H.fail('<CR> did not focus the editor window')
+end
+local ebuf = vim.api.nvim_win_get_buf(editor.win)
+if not vim.api.nvim_buf_get_name(ebuf):match(scratch) then
+  H.fail('editor window is not showing the scratch file')
+end
+if vim.api.nvim_win_get_cursor(editor.win)[1] ~= hunk.line then
+  H.fail('cursor did not land on the hunk line ' .. hunk.line)
+end
+if not details.is_open() then
+  H.fail('jumping to the file closed the pane')
+end
+H.ok('jump-to-code: <CR> opened ' .. scratch .. ' at line ' .. hunk.line .. ', pane still open')
+vim.api.nvim_set_current_win(details.win_state.win)
+
 -- Rub from the hunk -> status-side rub mode with the hunk id.
 H.press(dbuf, '<Space>') -- unmark so the source is the selected hunk
 local hunk_id = details.win_state.hunks[details.win_state.selected].id

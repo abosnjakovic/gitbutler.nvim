@@ -169,7 +169,13 @@ function M.build(data, state)
             end_row = push(r)
           end
 
-          table.insert(hunks, { id = id, path = path, row = head_row, end_row = end_row })
+          table.insert(hunks, {
+            id = id,
+            path = path,
+            row = head_row,
+            end_row = end_row,
+            line = tonumber(hunk.newStart) or 1,
+          })
         end
       end
     end
@@ -390,6 +396,17 @@ local function warn_no_ids()
   vim.notify('gitbutler: this diff has no hunk ids (committed diffs are read-only here)', vim.log.levels.WARN)
 end
 
+---`<CR>`/`o` — open the selected hunk's file in the editor window at the
+---hunk's line, keeping the pane open beside it.
+function M._open_hunk()
+  local hunk = M.win_state.hunks[M.win_state.selected]
+  if not hunk or not hunk.path then
+    vim.notify('gitbutler: no file for this row', vim.log.levels.WARN)
+    return
+  end
+  require('gitbutler.ui.editor').open(hunk.path, hunk.line)
+end
+
 ---Toggle the mark on the selected hunk. A hunk with no id (committed diff)
 ---cannot be marked — and must not be used as a table key.
 function M._toggle_mark()
@@ -569,6 +586,8 @@ local function set_keymap(buf)
     ['<C-u>'] = function()
       scroll(10, '\25')
     end,
+    ['<CR>'] = M._open_hunk,
+    ['o'] = M._open_hunk,
     ['<Space>'] = M._toggle_mark,
     ['x'] = M._hunk_discard,
     ['y'] = M._hunk_copy,

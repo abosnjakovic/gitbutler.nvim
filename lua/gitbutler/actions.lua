@@ -22,66 +22,38 @@ local function notify_result(action, err, _result)
   end
 end
 
----Open the file(s) under cursor or selected, or show commit details for recent commits.
-function M.open_file(buf)
-  -- Multi-select: open each selected file without closing status buffer
-  local selected = buf:get_selected_lines({ 'file', 'committed_file' })
-  if #selected > 0 then
-    buf:clear_selection()
-    for _, line in ipairs(selected) do
-      if line.data and line.data.path then
-        vim.cmd('edit ' .. vim.fn.fnameescape(line.data.path))
-      end
-    end
-    return
-  end
-
-  -- Single file / recent commit: existing behaviour
+---Resolve which file row `o`/open should act on: the cursor row when it is a
+---file, else the first selected file. Pure.
+---@param buf GitButlerBuffer
+---@return GitButlerLine?
+function M._open_target(buf)
   local line = buf:get_cursor_line()
-  if not line or not line.data then
+  if line and (line.type == 'file' or line.type == 'committed_file') then
+    return line
+  end
+  return (buf:get_selected_lines({ 'file', 'committed_file' }))[1]
+end
+
+---`o` — jump to the file under the cursor in the editor window, landing on its
+---first changed hunk. Keeps the status view open so you can edit and flip back.
+function M.open_file(buf)
+  local target = M._open_target(buf)
+  if not target or not target.data or not target.data.path then
+    vim.notify('gitbutler: no file to open here', vim.log.levels.WARN)
     return
   end
 
-  if line.type == 'recent_commit' then
-    local sha = line.data.sha
-    if not sha then
-      return
-    end
-
-    local result = vim
-      .system({ 'git', 'show', '--patch', '--stat', '--format=%H%n%an <%ae>%n%aD%n%n%B', sha }, { text = true })
-      :wait()
-
-    if result.code ~= 0 or not result.stdout then
-      vim.notify('gitbutler: failed to show commit', vim.log.levels.ERROR)
-      return
-    end
-
-    local show_lines = vim.split(result.stdout, '\n')
-    vim.cmd('belowright split')
-    local diff_buf = vim.api.nvim_create_buf(false, true)
-    vim.api.nvim_win_set_buf(0, diff_buf)
-    vim.api.nvim_buf_set_lines(diff_buf, 0, -1, false, show_lines)
-    vim.bo[diff_buf].buftype = 'nofile'
-    vim.bo[diff_buf].bufhidden = 'wipe'
-    vim.bo[diff_buf].filetype = 'diff'
-    vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = diff_buf })
-    vim.keymap.set('n', '<Tab>', '<cmd>close<CR>', { buffer = diff_buf })
-    -- Commits are immutable; absorb `r`/`<C-r>` so they don't fall through to vim's replace.
-    vim.keymap.set('n', 'r', '<cmd>close<CR>', { buffer = diff_buf })
-    vim.keymap.set('n', '<C-r>', '<cmd>close<CR>', { buffer = diff_buf })
-    return
+  local path, cli_id = target.data.path, target.data.cli_id
+  local editor = require('gitbutler.ui.editor')
+  -- With a cli_id we can ask `but diff` for the first hunk's line; without one
+  -- (or on error) fall back to the top of the file.
+  if cli_id then
+    cli.diff_json(cli_id, function(err, data)
+      editor.open(path, (not err) and editor.first_hunk_line(data) or nil)
+    end)
+  else
+    editor.open(path, nil)
   end
-
-  if not line.data.path then
-    return
-  end
-  local path = line.data.path
-
-  buf:close()
-  local status = require('gitbutler.ui.status')
-  status.instance = nil
-  vim.cmd('edit ' .. vim.fn.fnameescape(path))
 end
 
 ---Enter stack mode: apply/unapply/move stacks.
@@ -973,11 +945,11 @@ function M.help(_buf)
     '  +/-      Grow / shrink the pane',
     '  l        Focus the pane (h/<Esc> focuses back)',
     '  In the pane: j/k hunk, J/K scroll, <C-d>/<C-u> scroll 10, g/G first/last',
-    '  <Space> mark, x discard, y copy hunk, r rub hunk, q/d close pane',
-    '  Committed diffs have no hunk ids: mark/discard/rub warn there',
+    '  <CR>/o open file at the hunk line, <Space> mark, x discard, y copy, r rub',
+    '  q/d close pane. Committed diffs have no hunk ids: mark/discard/rub warn',
     '',
     'Extras',
-    '  o        Open file',
+    '  o        Open file at its first hunk (keeps the view open)',
     '  A        Absorb changes',
     '  p/P      Push branch / all',
     '  v        Create PR',

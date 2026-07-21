@@ -484,6 +484,33 @@ h.test('details: <Space> toggles the mark and the header shows an aligned ✔︎
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
 end)
 
+h.test('details: hunk entries carry the new-file line for jump-to-code', function()
+  local _, hunks = details.build(fixtures.diff_json, {})
+  h.assert_eq(1, hunks[1].line) -- src/auth.lua first hunk, newStart = 1
+  h.assert_eq(22, hunks[2].line) -- second hunk, newStart = 22
+  h.assert_eq(5, hunks[3].line) -- src/config.lua, newStart = 5
+end)
+
+h.test('details: <CR>/o opens the selected hunk file at its line', function()
+  local sb, st = open_with_diff()
+  st.selected = 2
+
+  local opened
+  local editor = require('gitbutler.ui.editor')
+  local orig = editor.open
+  editor.open = function(path, line)
+    opened = { path = path, line = line }
+  end
+  details._open_hunk()
+  editor.open = orig
+
+  h.assert_eq('src/auth.lua', opened.path)
+  h.assert_eq(22, opened.line, 'landed on the selected hunk line')
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
 h.test('details: _targets prefers marked hunks over the selection', function()
   local sb, st = open_with_diff()
   local ids = details._targets()
