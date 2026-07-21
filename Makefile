@@ -1,4 +1,4 @@
-.PHONY: help ci test lint fmt fmt-check test-release check-env clean
+.PHONY: help ci test smoke lint fmt fmt-check test-release check-env clean
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -7,6 +7,9 @@ ci: fmt-check lint test ## Run everything CI runs (stylua --check, luacheck, tes
 
 test: ## Run nvim --headless test suite
 	nvim --clean --headless -u tests/minimal_init.lua -l tests/run.lua
+
+smoke: ## Run end-to-end checks against the real `but` CLI (needs a GitButler workspace)
+	./scripts/smoke.sh
 
 lint: ## Run luacheck
 	luacheck lua/ tests/
