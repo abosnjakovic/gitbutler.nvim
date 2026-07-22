@@ -208,7 +208,7 @@ function M.open()
       float.input({
         title = 'Rename ' .. e.name,
         content = { e.name },
-        height = 1,
+        single_line = true,
         on_submit = function(new_name)
           cli.run({ 'reword', e.name, '-m', new_name, '--json' }, function(ren_err, _)
             notify('rename → ' .. new_name, ren_err)
