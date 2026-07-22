@@ -263,6 +263,8 @@ function M.describe(buf)
         end)
       end,
     })
+  else
+    vim.notify('gitbutler: place the cursor on a commit or branch', vim.log.levels.WARN)
   end
 end
 
@@ -829,6 +831,7 @@ function M.discard(buf)
   else
     local line = buf:get_cursor_line()
     if not line or line.type ~= 'file' or not line.data then
+      vim.notify('gitbutler: place the cursor on an uncommitted file to discard', vim.log.levels.WARN)
       return
     end
     targets = { line }
