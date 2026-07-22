@@ -4,9 +4,9 @@ A Neovim interface for [Git Butler](https://gitbutler.com) virtual branches, mod
 
 Requires neovim 0.10+ and the [`but` CLI](https://docs.gitbutler.com/cli-overview). The CI view also uses the [`gh` CLI](https://cli.github.com) when available; everything else has zero runtime dependencies.
 
-The commit graph, a file's diff in the details pane, and jump-to-code — the whole workspace in one buffer:
+One flow through the workspace: navigate the commit graph, rub a change onto a target (the pill names the verb), inspect the diff in the details pane, and jump straight into the file to edit it:
 
-![The graph status view and details pane](doc/demo/butler.gif)
+![The graph, rub mode, the details pane, and jump-to-code](doc/demo/butler.gif)
 
 Modal operations mirror `but rub`: pick a source, move to a target, and the pill names the verb (`assign`, `amend`, `squash`, `move`…) before you confirm:
 
