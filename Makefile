@@ -1,4 +1,4 @@
-.PHONY: help ci test smoke lint fmt fmt-check test-release check-env clean
+.PHONY: help ci test smoke demo lint fmt fmt-check test-release check-env clean
 
 help: ## List available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -10,6 +10,9 @@ test: ## Run nvim --headless test suite
 
 smoke: ## Run end-to-end checks against the real `but` CLI (needs a GitButler workspace)
 	./scripts/smoke.sh
+
+demo: ## Regenerate the README demo GIFs (needs vhs + a GitButler workspace)
+	./scripts/demo.sh
 
 lint: ## Run luacheck
 	luacheck lua/ tests/

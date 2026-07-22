@@ -4,15 +4,17 @@ A Neovim interface for [Git Butler](https://gitbutler.com) virtual branches, mod
 
 Requires neovim 0.10+ and the [`but` CLI](https://docs.gitbutler.com/cli-overview). The CI view also uses the [`gh` CLI](https://cli.github.com) when available; everything else has zero runtime dependencies.
 
-<img width="6016" height="3384" alt="image" src="https://github.com/user-attachments/assets/22bf9735-0d5a-4118-8562-31febf1bb875" />
+The commit graph, a file's diff in the details pane, and jump-to-code — the whole workspace in one buffer:
 
-Timeline view (T)
-Great for a bird's-eye view on work being done around you
-<img width="6016" height="3384" alt="image" src="https://github.com/user-attachments/assets/e23f355e-c21c-43c7-885e-4cadbefa9c82" />
+![The graph status view and details pane](doc/demo/butler.gif)
 
-Expanded CI view (C)
-It shows logs and status via gh cli
-<img width="6016" height="3384" alt="image" src="https://github.com/user-attachments/assets/6f0d8040-01d6-4b46-b3bf-73e3cfdec10f" />
+Modal operations mirror `but rub`: pick a source, move to a target, and the pill names the verb (`assign`, `amend`, `squash`, `move`…) before you confirm:
+
+![Rub mode showing verb pills per target](doc/demo/rub.gif)
+
+Timeline (`T`) — a bird's-eye view of recent work across every branch and contributor:
+
+![Timeline view](doc/demo/timeline.gif)
 
 
 
