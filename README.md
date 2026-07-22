@@ -12,7 +12,13 @@ Modal operations mirror `but rub`: pick a source, move to a target, and the pill
 
 ![Rub mode showing verb pills per target](doc/demo/rub.gif)
 
-The graph continues below the common base into the trunk's already-landed history. Those read-only commits expand (`<Tab>`) to show their message and files, open in the diff tool (`o`), and load older history on demand.
+The graph continues below the common base into the trunk's already-landed history. Those read-only commits expand (`<Tab>`) to show their message and files, or open in the details pane / diff tool:
+
+![Landed history: expand a commit and open it in the details pane](doc/demo/landed-history.gif)
+
+The details pane shows a commit's diff under its `commit / Author / Date / message` header, with per-hunk navigation and jump-to-file:
+
+![Details pane with the commit header and hunk navigation](doc/demo/details.gif)
 
 
 

@@ -16,13 +16,20 @@ if ! command -v but >/dev/null 2>&1 || ! but status >/dev/null 2>&1; then
   exit 1
 fi
 
-# The graph needs an uncommitted change to show; stage a throwaway file.
+# For the richest recording the graph wants an applied feature branch with a
+# couple of commits, an uncommitted change, and landed history below the base.
+# This script only stages the uncommitted change; set up (and later tear down)
+# a demo branch by hand for the full hero — e.g.
+#   printf 'local M = {}\nreturn M\n' > .demo/auth.lua
+#   but commit demo/auth-endpoint -c -m "feat(auth): token verification" --changes <id>
+# The landed history below the common base is whatever `git log <base>` already
+# shows, so no setup is needed for the landed-history / details recordings.
 scratch="DEMO.md"
 cleanup() { rm -f "$scratch"; }
 trap cleanup EXIT INT TERM
-printf '# Demo change\n\nA new file so the workspace has an uncommitted change to show.\nAssign it to a branch, commit it, or open it — from the graph.\n' >"$scratch"
+printf '# Release notes\n\n- Token verification on the login route\n- Inline landed history in the graph\n' >"$scratch"
 
-for tape in doc/demo/butler.tape doc/demo/rub.tape; do
+for tape in doc/demo/butler.tape doc/demo/rub.tape doc/demo/landed-history.tape doc/demo/details.tape; do
   echo "=== $tape ==="
   vhs "$tape" || { echo "  -> FAILED"; exit 1; }
 done

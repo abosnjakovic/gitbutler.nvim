@@ -1,10 +1,10 @@
-# Rub mode: source -> target verb pills (assign / amend / unassign …).
-# Regenerate with `make demo` from the repo root.
+# Rub mode: source -> target verb pills (unassign / assign / amend …).
+# Records against the demo scenario in scripts/demo.sh. Regenerate with `make demo`.
 Output "doc/demo/rub.gif"
 Set Shell "bash"
 Set FontSize 16
 Set Width 1500
-Set Height 850
+Set Height 760
 Set Padding 16
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 45ms
@@ -21,10 +21,12 @@ Sleep 1200ms
 Type "j"
 Sleep 1200ms
 Type "r"
-Sleep 2500ms
+Sleep 2200ms
+Type "j"
+Sleep 2000ms
 Type "j"
 Sleep 2000ms
 Type "k"
 Sleep 1800ms
 Escape
-Sleep 1500ms
+Sleep 1400ms
