@@ -36,6 +36,48 @@ h.test('details: _show_line_hl classifies git show lines', function()
   h.assert_eq(nil, details._show_line_hl(' unchanged context'))
 end)
 
+-- A whole-commit details view prepends the same commit/Author/Date/message
+-- header the landed-history git-show view uses, so the two read consistently.
+h.test('details: build prepends commit meta header before the diff', function()
+  local meta = {
+    sha = 'deadbeef',
+    author = 'Adam Bosnjakovic',
+    email = 'adam@adimension.io',
+    date = '2026-03-24T02:31:23+00:00',
+    message = 'add login endpoint\n\nwith a body line',
+  }
+  local rows = details.build(fixtures.diff_json, { meta = meta })
+  h.assert_eq('detail_meta', rows[1].type)
+  h.assert_eq('commit deadbeef', rows[1].text)
+  h.assert_eq('Author: Adam Bosnjakovic <adam@adimension.io>', rows[2].text)
+  h.assert_eq('Date:   2026-03-24 02:31:23+00:00', rows[3].text)
+  h.assert_eq('    add login endpoint', rows[5].text)
+  h.assert_eq('    with a body line', rows[7].text)
+  -- The structured diff still follows, and hunk row indices account for the header.
+  local _, hunks = details.build(fixtures.diff_json, { meta = meta })
+  local _, hunks_no_meta = details.build(fixtures.diff_json, {})
+  h.assert_truthy(hunks[1].row > hunks_no_meta[1].row, 'hunk rows shift down by the header height')
+  -- Meta rows are read-only.
+  h.assert_truthy(not rows[1].selectable)
+end)
+
+h.test('details: build without meta is unchanged (no header rows)', function()
+  local rows = details.build(fixtures.diff_json, {})
+  h.assert_eq('detail_file', rows[1].type)
+end)
+
+h.test('details: build prepends meta even when the commit has no changes', function()
+  local rows = details.build({ changes = {} }, { meta = { sha = 'abc', message = 'empty' } })
+  h.assert_eq('detail_meta', rows[1].type)
+  local saw_no_changes = false
+  for _, r in ipairs(rows) do
+    if r.text:match('%(no changes%)') then
+      saw_no_changes = true
+    end
+  end
+  h.assert_truthy(saw_no_changes, 'still shows (no changes) after the header')
+end)
+
 h.test('details: _commit_rows is read-only and spans every classified line', function()
   local raw = table.concat({
     'commit deadbeef',

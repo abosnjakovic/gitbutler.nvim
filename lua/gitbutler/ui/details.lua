@@ -86,9 +86,48 @@ function M._file_header(path, status)
   return text .. string.rep('─', pad) .. '╮'
 end
 
+---Header rows (commit / Author / Date / message) prepended to a commit's diff,
+---so the details pane matches the landed-history `git show` view. Pure.
+---@param meta? { sha?: string, author?: string, email?: string, date?: string, message?: string }
+---@return DetailsRow[]
+function M._commit_meta_rows(meta)
+  if not meta then
+    return {}
+  end
+  local rows = {}
+  local function line(text, hl)
+    local r = { text = text, spans = {}, type = 'detail_meta', graph = true, selectable = false }
+    if hl and #text > 0 then
+      table.insert(r.spans, { 0, #text, hl })
+    end
+    table.insert(rows, r)
+  end
+
+  local sha = scalar(meta.sha, '')
+  if sha ~= '' then
+    line('commit ' .. sha, HL.dim)
+  end
+  local author = scalar(meta.author, '')
+  if author ~= '' then
+    local email = scalar(meta.email, '')
+    line('Author: ' .. author .. (email ~= '' and (' <' .. email .. '>') or ''), HL.dim)
+  end
+  local date = scalar(meta.date, '')
+  if date ~= '' then
+    -- ISO `2026-03-24T02:31:23+00:00` -> git-show-like `2026-03-24 02:31:23+00:00`.
+    line('Date:   ' .. (date:gsub('T', ' ')), HL.dim)
+  end
+  line('', nil)
+  for _, ml in ipairs(split_lines(scalar(meta.message, ''))) do
+    line('    ' .. ml, nil)
+  end
+  line('', nil)
+  return rows
+end
+
 ---Build detail rows from decoded `but diff <id> --format=json`.
 ---@param data table
----@param state? { selected_hunk?: integer, marked?: table<string,boolean> }
+---@param state? { selected_hunk?: integer, marked?: table<string,boolean>, meta?: table }
 ---@return DetailsRow[] rows, { id?: string, path: string, row: integer, end_row: integer }[] hunks
 function M.build(data, state)
   state = state or {}
@@ -97,6 +136,12 @@ function M.build(data, state)
   local function push(r)
     table.insert(rows, r)
     return #rows
+  end
+
+  -- Commit meta first (when showing a whole commit) so hunk row indices, which
+  -- are recorded from push() below, already account for the header height.
+  for _, r in ipairs(M._commit_meta_rows(state.meta)) do
+    push(r)
   end
 
   -- Group by path, preserving first-seen order.
@@ -198,7 +243,7 @@ local NS = vim.api.nvim_create_namespace('gitbutler')
 ---@field status_buf? GitButlerBuffer the status view this pane hangs off
 ---@field full boolean fullscreen (status window hidden)
 ---@field width_pct integer 30..90
----@field entity? { cli_id: string, kind?: string }
+---@field entity? { cli_id?: string, kind?: string, sha?: string, meta?: table }
 ---@field data? table last decoded diff payload
 ---@field rows? DetailsRow[] last rendered rows
 ---@field hunks { id?: string, path: string, row: integer, end_row: integer }[]
@@ -371,7 +416,11 @@ function M._rebuild()
   if not st.data then
     return
   end
-  local rows, hunks = M.build(st.data, { selected_hunk = st.selected, marked = st.marked })
+  local rows, hunks = M.build(st.data, {
+    selected_hunk = st.selected,
+    marked = st.marked,
+    meta = st.entity and st.entity.meta or nil,
+  })
   st.hunks = hunks
   M._render(rows)
 end
@@ -844,7 +893,7 @@ function M.resize(delta)
 end
 
 ---Load and display the diff for `entity`. No-op when it is already showing.
----@param entity { cli_id: string, kind?: string }
+---@param entity { cli_id: string, kind?: string, meta?: table }
 function M.show(entity)
   local st = M.win_state
   if not entity or not entity.cli_id then
@@ -945,7 +994,20 @@ function M.show_for_line(line)
   if not id then
     return
   end
-  M.show({ cli_id = id, kind = line.type })
+  -- A whole-commit row gets the same commit/Author/Date/message header the
+  -- landed-history view shows, prepended to its structured diff.
+  local meta
+  if line.type == 'commit' then
+    local c = line.data.commit or {}
+    meta = {
+      sha = line.data.sha,
+      author = c.authorName,
+      email = c.authorEmail,
+      date = c.createdAt,
+      message = c.message,
+    }
+  end
+  M.show({ cli_id = id, kind = line.type, meta = meta })
 end
 
 ---Debounced follow-the-cursor entry point, called from the status buffer's
