@@ -1,3 +1,32 @@
+## [1.0.0] - 2026-07-22
+
+### Features
+
+- feat(ui): open a commit in a diff tool via the commit_diff setting
+- feat(ui): jump to code — open files at the hunk line, keeping the TUI open
+- feat(ui): fold indicators, commit dot states, and carry-over fixes
+- feat(ui): hunk-level mark, discard, copy and rub
+- feat(ui): details focus switching and hunk cursor
+- feat(ui): details pane window with follow-the-cursor diffs
+- feat(ui): details pane diff renderer
+- feat(ui): mode keymap final, file-list toggles, per-mode hotbar
+- feat(ui): jump mode, command modes, copy, undo confirm and redo
+- feat(ui): stack mode, fuzzy picker, goto-branch
+- feat(ui): commit and move modes with insert anchors
+- feat(ui): rub mode with verb pills and but-rub execution
+- feat(ui): mode engine core with rub verb table
+- feat(ui): official but-tui keymap; extras move to free keys
+- feat(ui): mode-pill hotbar for status view
+- feat(ui): official nav keys with selectable-row skipping
+- feat(ui): status view renders but-tui graph
+- feat(ui): span rendering and homogeneous marks in buffer
+- feat(ui): add graph renderer for but-tui style status view
+
+### Bug Fixes
+
+- fix(ui): guard remaining vim.NIL crash sites in graph renderer
+- fix(ui): register details_focus handler; test keymap dispatch coverage
+
 ## [0.4.0] - 2026-07-11
 
 ### Features
