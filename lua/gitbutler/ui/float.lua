@@ -48,8 +48,11 @@ end
 ---@return number buf, number win
 function M.input(opts)
   local is_single = opts.single_line == true
+  -- Advertise the submit key in the title: single-line takes <CR>, multi-line
+  -- (commit messages, PR bodies) needs Ctrl-C Ctrl-C since <CR> inserts a line.
+  local hint = is_single and '  (⏎ save · Esc cancel)' or '  (Ctrl-C Ctrl-C save · Esc cancel)'
   local buf, win = M.open({
-    title = opts.title,
+    title = (opts.title or 'Input') .. hint,
     width = opts.width or config.values.input_float.width,
     height = is_single and 1 or (opts.height or config.values.input_float.height),
     relative = 'editor',

@@ -19,6 +19,46 @@ h.test('details: file header row per path, closing row after hunks', function()
   h.assert_truthy(closer.text:match('╯$'), closer.text)
 end)
 
+-- Landed commits (below the base) can't be addressed by `but diff`, so `d`
+-- renders `git show` output. The rows are read-only and classify message,
+-- meta, and +/- diff lines for highlighting.
+h.test('details: _show_line_hl classifies git show lines', function()
+  -- File markers must win over the bare +/- diff-line rules.
+  h.assert_eq('GitButlerDetailFile', details._show_line_hl('--- a/foo.lua'))
+  h.assert_eq('GitButlerDetailFile', details._show_line_hl('+++ b/foo.lua'))
+  h.assert_eq('GitButlerDetailFile', details._show_line_hl('diff --git a/foo.lua b/foo.lua'))
+  h.assert_eq('DiffAdd', details._show_line_hl('+added line'))
+  h.assert_eq('DiffDelete', details._show_line_hl('-removed line'))
+  h.assert_eq('GitButlerDetailHunk', details._show_line_hl('@@ -1,2 +1,3 @@'))
+  h.assert_eq('GitButlerHelp', details._show_line_hl('Author: Adam <a@b.c>'))
+  -- Message body and context lines carry no highlight.
+  h.assert_eq(nil, details._show_line_hl('    a commit subject'))
+  h.assert_eq(nil, details._show_line_hl(' unchanged context'))
+end)
+
+h.test('details: _commit_rows is read-only and spans every classified line', function()
+  local raw = table.concat({
+    'commit deadbeef',
+    'Author: Adam <a@b.c>',
+    '',
+    '    subject line',
+    '',
+    'diff --git a/f.lua b/f.lua',
+    '@@ -1 +1 @@',
+    '-old',
+    '+new',
+  }, '\n')
+  local rows = details._commit_rows(raw)
+  h.assert_eq(9, #rows)
+  for _, r in ipairs(rows) do
+    h.assert_truthy(not r.selectable, 'landed commit rows are read-only')
+    h.assert_eq('commit_show', r.type)
+  end
+  h.assert_eq('-old', rows[8].text)
+  h.assert_eq('DiffDelete', rows[8].spans[1][3])
+  h.assert_eq('DiffAdd', rows[9].spans[1][3])
+end)
+
 h.test('details: hunk headers are selectable and carry hunk cli ids', function()
   local rows, hunks = details.build(fixtures.diff_json, {})
   h.assert_eq(3, #hunks)

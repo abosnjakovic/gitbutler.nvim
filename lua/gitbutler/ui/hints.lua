@@ -5,7 +5,7 @@ local HELP = { '?', 'Help' }
 local hints = {
   status = {
     default = { HELP, { '<C-r>', 'Refresh' }, { 'q', 'Close' } },
-    base_commit = { HELP, { '<Tab>', 'Expand' }, { 'o', 'Diff' }, { 'y', 'Yank SHA' } },
+    base_commit = { HELP, { '<Tab>', 'Expand' }, { 'd', 'Details' }, { 'o', 'Diff' }, { 'y', 'Yank SHA' } },
     base_more = { HELP, { '<Tab>', 'Load more' } },
   },
   log = {

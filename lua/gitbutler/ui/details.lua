@@ -271,6 +271,58 @@ local function info_rows(text, hl)
   return { { text = text, spans = { { 0, #text, hl } }, type = 'detail_info', graph = true, selectable = false } }
 end
 
+---Classify a `git show` output line into a highlight group, or nil for plain
+---message / context text. Order matters: `--- `/`+++ ` file markers must be
+---tested before the bare `-`/`+` diff lines. Pure.
+---@param l string
+---@return string?
+function M._show_line_hl(l)
+  if
+    l:match('^commit ')
+    or l:match('^Author:')
+    or l:match('^Date:')
+    or l:match('^Merge:')
+    or l:match('^AuthorDate:')
+  then
+    return HL.dim
+  elseif
+    l:match('^diff %-%-git')
+    or l:match('^index ')
+    or l:match('^%-%-%- ')
+    or l:match('^%+%+%+ ')
+    or l:match('^new file')
+    or l:match('^deleted file')
+    or l:match('^similarity ')
+    or l:match('^rename ')
+  then
+    return HL.file
+  elseif l:match('^@@') then
+    return HL.hunk
+  elseif l:match('^%+') then
+    return HL.add
+  elseif l:match('^%-') then
+    return HL.del
+  end
+  return nil
+end
+
+---Build read-only detail rows from raw `git show` output (full message + patch).
+---Used for landed-history commits, which `but diff` cannot address. Pure.
+---@param raw string
+---@return DetailsRow[]
+function M._commit_rows(raw)
+  local rows = {}
+  for _, l in ipairs(vim.split(raw, '\n', { plain = true })) do
+    local hl = M._show_line_hl(l)
+    local r = { text = l, spans = {}, type = 'commit_show', graph = true, selectable = false }
+    if hl then
+      table.insert(r.spans, { 0, #l, hl })
+    end
+    table.insert(rows, r)
+  end
+  return rows
+end
+
 ---ponytail: width is a share of the whole editor rather than of the status
 ---window's column group — correct for the common one-window-plus-pane layout,
 ---and the user has `+`/`-` when it isn't.
@@ -560,6 +612,12 @@ end
 local function set_keymap(buf)
   local function step(dir)
     return function()
+      -- A plain commit view (git show) has no hunks; let j/k move the cursor
+      -- normally so the message and patch are scrollable.
+      if #M.win_state.hunks == 0 then
+        vim.cmd('normal! ' .. (dir > 0 and 'j' or 'k'))
+        return
+      end
       M._select_hunk(M._next_hunk(M.win_state.hunks, M.win_state.selected, dir))
     end
   end
@@ -825,6 +883,41 @@ function M.show(entity)
   end)
 end
 
+---Load and display a landed commit's full message + patch via `git show`.
+---Landed history sits below the workspace base, so `but diff` can't address it;
+---this renders read-only text (no hunk marks) keyed on the sha.
+---@param sha string
+function M.show_commit(sha)
+  local st = M.win_state
+  if not sha or sha == '' then
+    return
+  end
+  if st.entity and st.entity.sha == sha then
+    return
+  end
+  st.entity = { sha = sha }
+  st.hunks = {}
+  st.marked = {}
+  st.data = nil
+  st.selected = 1
+  st.gen = st.gen + 1
+  local gen = st.gen
+  M._render(info_rows('  loading commit…', HL.dim))
+
+  vim.system({ 'git', 'show', '--no-color', sha }, { text = true }, function(res)
+    vim.schedule(function()
+      if gen ~= M.win_state.gen then
+        return
+      end
+      if res.code ~= 0 then
+        M._render(info_rows('  git show failed', HL.dim))
+        return
+      end
+      M._render(M._commit_rows(res.stdout or ''))
+    end)
+  end)
+end
+
 ---Row types that name something `but diff` can be asked about.
 local ENTITY_TYPES = {
   file = true,
@@ -837,7 +930,15 @@ local ENTITY_TYPES = {
 ---Show the diff for a status row; rows that name no entity leave the pane alone.
 ---@param line? GitButlerLine
 function M.show_for_line(line)
-  if not line or not ENTITY_TYPES[line.type] then
+  if not line then
+    return
+  end
+  -- Landed-history commits carry a sha but no cli_id; show them via `git show`.
+  if line.type == 'base_commit' then
+    M.show_commit(line.data and line.data.sha or '')
+    return
+  end
+  if not ENTITY_TYPES[line.type] then
     return
   end
   local id = line.data and line.data.cli_id
