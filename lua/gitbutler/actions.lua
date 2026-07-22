@@ -410,6 +410,12 @@ end
 function M.push(buf)
   local branch = buf:get_cursor_branch()
   local name = branch and branch.name or nil
+  -- Guard: a nil branch makes `but push` push *every* branch. That is `P`
+  -- (push_all), not `p`. Refuse rather than silently pushing everything.
+  if not name then
+    vim.notify('gitbutler: no branch under cursor (use P to push all)', vim.log.levels.WARN)
+    return
+  end
   notify_start('sync (pull + push)')
   cli.pull(function(err, result)
     if err then

@@ -76,6 +76,34 @@ test('actions.push does a pull first', function()
   vim.notify = original_notify
 end)
 
+-- `p` with the cursor off any branch (e.g. the uncommitted area) must NOT fall
+-- through to `but push` with no branch — that would push every branch. It
+-- refuses; `P` (push_all) is the deliberate all-branches action.
+test('actions.push refuses when there is no branch under the cursor', function()
+  local push_called = false
+  local original_pull, original_push = cli.pull, cli.push
+  cli.pull = function(cb)
+    cb(nil, 'pulled')
+  end
+  cli.push = function(_, cb)
+    push_called = true
+    cb(nil, 'pushed')
+  end
+
+  local buf = h.mock_buffer()
+  buf.get_cursor_branch = function()
+    return nil
+  end
+  local original_notify = vim.notify
+  vim.notify = function() end
+
+  actions.push(buf)
+
+  assert_truthy(not push_called, 'push must not run without a branch under the cursor')
+
+  cli.pull, cli.push, vim.notify = original_pull, original_push, original_notify
+end)
+
 test('actions.push_all does a pull first', function()
   local pull_called = false
   local push_called = false

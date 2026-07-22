@@ -124,7 +124,7 @@ function M.open()
       close()
       float.input({
         title = 'Snapshot message',
-        height = 1,
+        single_line = true,
         on_submit = function(message)
           cli.oplog_snapshot(message, function(snap_err, _)
             notify('snapshot', snap_err)

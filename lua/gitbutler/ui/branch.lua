@@ -166,7 +166,7 @@ function M.open()
       close()
       float.input({
         title = 'New branch name',
-        height = 1,
+        single_line = true,
         on_submit = function(name)
           cli.branch_new(name, function(new_err, _)
             notify('branch new ' .. name, new_err)
