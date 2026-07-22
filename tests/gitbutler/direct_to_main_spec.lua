@@ -36,3 +36,37 @@ test('commit_id_of returns nil on missing/empty/non-table input', function()
   assert_eq(nil, actions.commit_id_of({ commit_id = '' }))
   assert_eq(nil, actions.commit_id_of('nope'))
 end)
+
+-- L on branch/commit rows lands their branches. A commit row resolves to its
+-- owning branch, a branch row to itself, and each branch lands only once even
+-- when several of its rows are selected.
+test('_land_targets resolves branch and commit rows to unique branch names', function()
+  local rows = {
+    { type = 'branch', data = { name = 'fix/rename', cli_id = 'fi' } },
+    { type = 'commit', data = { branch_name = 'chore/hero', cli_id = 'b2' } },
+  }
+  local names = actions._land_targets(rows)
+  assert_eq(2, #names)
+  assert_eq('fix/rename', names[1])
+  assert_eq('chore/hero', names[2])
+end)
+
+test('_land_targets de-dupes when branch and its commit are both selected', function()
+  local rows = {
+    { type = 'branch', data = { name = 'feat/x', cli_id = 'fx' } },
+    { type = 'commit', data = { branch_name = 'feat/x', cli_id = 'c1' } },
+  }
+  local names = actions._land_targets(rows)
+  assert_eq(1, #names)
+  assert_eq('feat/x', names[1])
+end)
+
+test('_land_targets skips rows without a resolvable branch', function()
+  local rows = {
+    { type = 'commit', data = {} },
+    { type = 'branch', data = { name = 'only-one' } },
+  }
+  local names = actions._land_targets(rows)
+  assert_eq(1, #names)
+  assert_eq('only-one', names[1])
+end)

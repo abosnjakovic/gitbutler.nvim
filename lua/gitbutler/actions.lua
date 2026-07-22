@@ -462,11 +462,78 @@ function M.commit_id_of(result)
 end
 local commit_id_of = M.commit_id_of
 
----Commit selected (or unassigned) files onto an ephemeral virtual branch,
----then land that branch directly onto the target with `but land`, which
+---Resolve selected branch/commit rows to a de-duped list of branch names to
+---land (branch rows use their name; commit rows use their owning branch). Pure.
+---@param rows GitButlerLine[]
+---@return string[]
+function M._land_targets(rows)
+  local names, seen = {}, {}
+  for _, l in ipairs(rows) do
+    local name = l.data and (l.data.name or l.data.branch_name)
+    if name and not seen[name] then
+      seen[name] = true
+      table.insert(names, name)
+    end
+  end
+  return names
+end
+
+---Land `names[i]` and chain to the next on success. Landing reconciles the
+---workspace, so we go one branch at a time and refresh once at the end.
+local function land_next(buf, names, i)
+  local name = names[i]
+  if not name then
+    vim.notify('gitbutler: landed ' .. (i - 1) .. ' branch' .. (i - 1 == 1 and '' or 'es'), vim.log.levels.INFO)
+    refresh()
+    return
+  end
+  local sp = spinner.start('landing ' .. name .. ' (' .. i .. '/' .. #names .. ')')
+  cli.land(name, function(err)
+    sp:stop()
+    if err then
+      surface_error('land', err)
+      refresh()
+      return
+    end
+    land_next(buf, names, i + 1)
+  end)
+end
+
+---Land the branches under the selected branch/commit rows straight onto the
+---target. Confirms first because landing rewrites the target and pushes.
+local function land_branches(buf, rows)
+  local names = M._land_targets(rows)
+  if #names == 0 then
+    vim.notify('gitbutler: no branch to land', vim.log.levels.WARN)
+    return
+  end
+  local prompt = 'Land ' .. table.concat(names, ', ') .. ' onto the target?'
+  vim.ui.select({ 'No', 'Yes' }, { prompt = prompt }, function(choice)
+    if choice ~= 'Yes' then
+      return
+    end
+    buf:clear_selection()
+    land_next(buf, names, 1)
+  end)
+end
+
+---Land onto the target. With branch/commit rows selected (or under the cursor),
+---land those branches via `but land`. Otherwise commit the selected (or
+---unassigned) files onto an ephemeral virtual branch and land that — `but land`
 ---fast-forwards (or merges) the target, pushes to the remote, and reconciles
 ---the workspace in a single call.
 function M.direct_to_main(buf)
+  local branch_rows = buf:get_selected_lines({ 'branch', 'commit' })
+  if #branch_rows == 0 then
+    local cur = buf:get_cursor_line()
+    if cur and (cur.type == 'branch' or cur.type == 'commit') then
+      branch_rows = { cur }
+    end
+  end
+  if #branch_rows > 0 then
+    return land_branches(buf, branch_rows)
+  end
+
   local file_ids = {}
   local selected = buf:get_selected_lines({ 'file' })
   if #selected > 0 then

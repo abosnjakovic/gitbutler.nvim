@@ -169,7 +169,9 @@ P        Push all branches
 v        Create PR for the branch under cursor
 V        Toggle PR draft / ready
 C        Open CI view for the branch under cursor
-L        Land selected (or unassigned) files directly onto the target
+L        Land onto the target: selected branch/commit rows land those
+         branches; otherwise selected (or unassigned) files land via an
+         ephemeral branch
 i        Pull / sync from upstream
 T        Commit timeline (all branches)
 H        Commit log for the branch under cursor
