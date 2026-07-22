@@ -12,9 +12,7 @@ Modal operations mirror `but rub`: pick a source, move to a target, and the pill
 
 ![Rub mode showing verb pills per target](doc/demo/rub.gif)
 
-Timeline (`T`) — a bird's-eye view of recent work across every branch and contributor:
-
-![Timeline view](doc/demo/timeline.gif)
+The graph continues below the common base into the trunk's already-landed history. Those read-only commits expand (`<Tab>`) to show their message and files, open in the diff tool (`o`), and load older history on demand.
 
 
 
@@ -91,7 +89,7 @@ The status view mirrors the graph layout and modal interaction of the official `
 
 ### Commands
 
-`:Butler` toggles the status view. `:ButlerBranches` opens the branch management popup. `:ButlerLog [branch]` shows the commit log for a branch (defaults to the first applied branch). `:ButlerTimeline` shows a chronological view of recent commits across all branches and contributors. `:ButlerOplog` opens the operations history. `:ButlerAbsorb`, `:ButlerPush`, `:ButlerPull`, and `:ButlerUndo` run the corresponding operations directly. `:ButlerCI [branch]` opens the CI view for a branch. `:ButlerAutoMerge <branch>` toggles auto-merge on the PR for that branch.
+`:Butler` toggles the status view. `:ButlerBranches` opens the branch management popup. `:ButlerLog [branch]` shows the commit log for a branch (defaults to the first applied branch). `:ButlerOplog` opens the operations history. `:ButlerAbsorb`, `:ButlerPush`, `:ButlerPull`, and `:ButlerUndo` run the corresponding operations directly. `:ButlerCI [branch]` opens the CI view for a branch. `:ButlerAutoMerge <branch>` toggles auto-merge on the PR for that branch.
 
 ### Multi-select
 
@@ -173,11 +171,12 @@ L        Land onto the target: selected branch/commit rows land those
          branches; otherwise selected (or unassigned) files land via an
          ephemeral branch
 i        Pull / sync from upstream
-T        Commit timeline (all branches)
 H        Commit log for the branch under cursor
 O        Operations log
 B        Branch management popup
 ```
+
+On a landed-history row (below the common base): `<Tab>` expands the commit's message and files (or loads more history on the `↓ load more` row), `o` opens it in the diff tool, and `y` copies its SHA. These commits are read-only — the mutation keys don't apply.
 
 ### Modes
 
@@ -275,19 +274,17 @@ S        Squash commit into parent
 q        Close
 ```
 
-### Timeline (T)
+### Landed history (below the common base)
 
-Shows a chronological view of recent commits across all branches and contributors, grouped by date. Useful as a quick pulse check on repo activity. Data comes from `git log --all`, so it sees every ref regardless of GitButler's virtual branch state.
+The commit graph continues past the common base into the trunk's already-landed history — the linear ancestry of the base, newest first. This replaces the old standalone timeline view: the history now lives inline in the main graph instead of a separate window.
 
 ```
-<Tab>    Toggle file list for a commit
-y        Yank full SHA to clipboard
-l        Jump to commit log for that branch
-<C-r>    Refresh
-q        Close
+<Tab>    Expand a commit (message + files), or load more on the ↓ row
+o        Open the commit in the diff tool
+y        Copy the commit SHA
 ```
 
-The time window defaults to 7 days and can be configured via `timeline = { days = 14 }` in your setup.
+These rows are read-only — rub, commit, move, and the other mutation keys don't act on landed commits. The section loads 15 commits at a time; configure with `base_history = { count = 15 }` in your setup.
 
 ### Operations log (O)
 

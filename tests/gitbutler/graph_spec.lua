@@ -101,6 +101,85 @@ h.test('graph: stack closes with join, merge base last', function()
   h.assert_truthy(join_found, 'stack join row ├╯ missing')
 end)
 
+-- Landed history: read-only commit rows below the common base, fed in via state.
+local BASE_HIST = {
+  { sha = 'aaaaaaa1111', short_sha = 'aaaaaa1', message = 'feat: land it\n\nbody line' },
+  { sha = 'bbbbbbb2222', short_sha = 'bbbbbb2', message = 'fix: a thing' },
+}
+
+h.test('graph: base history renders read-only commit rows below the merge base', function()
+  local rows = graph.build(fixtures.status_full, { base_history = BASE_HIST })
+  local base = {}
+  for _, r in ipairs(rows) do
+    if r.type == 'base_commit' then
+      table.insert(base, r)
+    end
+  end
+  h.assert_eq(2, #base)
+  h.assert_eq('  ▸ aaaaaa1 feat: land it', base[1].text)
+  h.assert_eq('aaaaaaa1111', base[1].data.sha)
+  h.assert_truthy(base[1].selectable)
+  -- Base rows sit after the merge base row.
+  local mb_row, first_base_row
+  for i, r in ipairs(rows) do
+    if r.type == 'merge_base' then
+      mb_row = i
+    end
+    if r.type == 'base_commit' and not first_base_row then
+      first_base_row = i
+    end
+  end
+  h.assert_truthy(mb_row < first_base_row, 'base history must follow the merge base')
+end)
+
+h.test('graph: an expanded base commit shows its body and files', function()
+  local hist = {
+    {
+      sha = 'aaaaaaa1111',
+      short_sha = 'aaaaaa1',
+      message = 'feat: land it',
+      body = { 'first body line' },
+      files = { { path = 'a.lua', status = 'M' }, { path = 'b.lua', status = 'A' } },
+    },
+  }
+  local rows = graph.build(fixtures.status_full, {
+    base_history = hist,
+    base_expanded = { ['aaaaaaa1111'] = true },
+  })
+  local body, files, marker
+  for _, r in ipairs(rows) do
+    if r.type == 'base_commit' then
+      marker = r.text:match('▾') and 'open' or 'closed'
+    elseif r.type == 'base_body' then
+      body = r.text
+    elseif r.type == 'base_file' and not files then
+      files = r.text
+    end
+  end
+  h.assert_eq('open', marker)
+  h.assert_eq('      first body line', body)
+  h.assert_eq('      M a.lua', files)
+end)
+
+h.test('graph: base_more row appears only when state.base_more is set', function()
+  local without = graph.build(fixtures.status_full, { base_history = BASE_HIST })
+  for _, r in ipairs(without) do
+    h.assert_truthy(r.type ~= 'base_more', 'no load-more without base_more')
+  end
+  local with = graph.build(fixtures.status_full, { base_history = BASE_HIST, base_more = true, base_count = 2 })
+  local more = with[#with]
+  h.assert_eq('base_more', more.type)
+  h.assert_eq('  ↓ load more (2 shown)', more.text)
+  h.assert_truthy(more.selectable)
+end)
+
+h.test('graph: no base rows when base_history is absent', function()
+  local rows = graph.build(fixtures.status_full, {})
+  for _, r in ipairs(rows) do
+    h.assert_truthy(r.type ~= 'base_commit' and r.type ~= 'base_more', 'no base rows without history')
+  end
+end)
+
 h.test('graph: spans are within line byte length', function()
   local rows = graph.build(fixtures.status_full, {})
   for _, r in ipairs(rows) do

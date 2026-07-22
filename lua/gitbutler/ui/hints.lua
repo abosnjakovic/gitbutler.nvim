@@ -5,16 +5,13 @@ local HELP = { '?', 'Help' }
 local hints = {
   status = {
     default = { HELP, { '<C-r>', 'Refresh' }, { 'q', 'Close' } },
+    base_commit = { HELP, { '<Tab>', 'Expand' }, { 'o', 'Diff' }, { 'y', 'Yank SHA' } },
+    base_more = { HELP, { '<Tab>', 'Load more' } },
   },
   log = {
     default = { HELP, { 'r', 'Refresh' }, { 'q', 'Close' } },
     commit = { HELP, { 'd', 'Reword' }, { 'S', 'Squash' }, { '<Tab>', 'Expand' } },
     log_file = { HELP, { '<Tab>', 'Diff' }, { '<CR>', 'Open' } },
-  },
-  timeline = {
-    default = { HELP, { 'r', 'Refresh' }, { 'q', 'Close' } },
-    timeline_commit = { HELP, { 'y', 'Yank SHA' }, { 'l', 'Log' }, { '<Tab>', 'Expand' } },
-    timeline_file = { HELP, { '<CR>', 'Open' } },
   },
 }
 

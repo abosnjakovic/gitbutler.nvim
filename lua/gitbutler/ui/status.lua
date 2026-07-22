@@ -1,10 +1,85 @@
 local buffer_mod = require('gitbutler.ui.buffer')
 local cli = require('gitbutler.cli')
+local config = require('gitbutler.config')
+local timeline = require('gitbutler.ui.timeline')
 
 local M = {}
 
 ---@type GitButlerBuffer?
 M.instance = nil
+
+---Landed-history section shown below the common base.
+---  sha      — the common-base commit whose ancestors we list
+---  commits  — parsed git-log entries (newest first), read-only
+---  expanded — set of shas showing their body + file list
+---  detail   — lazily-fetched { body, files } per sha
+---  limit    — how many ancestors to fetch (grows with "load more")
+---  more     — whether the last fetch filled the page (there may be more)
+M._base = M._base or { sha = nil, commits = {}, expanded = {}, detail = {}, limit = nil, more = false }
+
+---Default / per-page count for the landed-history section.
+local function base_page()
+  local c = config.values.base_history or {}
+  return c.count or 15
+end
+
+---Build the base_history list passed to graph.build, merging in any cached
+---body/file detail for expanded commits.
+local function base_history_state()
+  local b = M._base
+  local hist = {}
+  for _, c in ipairs(b.commits) do
+    local d = b.detail[c.sha]
+    hist[#hist + 1] = {
+      sha = c.sha,
+      short_sha = c.short_sha,
+      message = c.message,
+      body = d and d.body or nil,
+      files = d and d.files or nil,
+    }
+  end
+  return hist
+end
+
+---Fetch (or re-fetch) the landed history for the current base sha and re-render.
+local function fetch_base_history()
+  local sha = M._base.sha
+  if not sha then
+    return
+  end
+  timeline.fetch_base(sha, M._base.limit or base_page(), function(commits)
+    if not M.instance then
+      return
+    end
+    M._base.commits = commits
+    M._base.more = #commits >= (M._base.limit or base_page())
+    M.rerender()
+  end)
+end
+
+---Toggle the body + file list for a landed commit (lazy-fetches on first open).
+---@param sha string
+function M.toggle_base_expand(sha)
+  if not sha or sha == '' then
+    return
+  end
+  local b = M._base
+  if not b.expanded[sha] then
+    if not b.detail[sha] then
+      b.detail[sha] = { body = timeline.fetch_body(sha), files = timeline.fetch_files(sha) }
+    end
+    b.expanded[sha] = true
+  else
+    b.expanded[sha] = nil
+  end
+  M.rerender()
+end
+
+---Grow the landed-history window by one page and re-fetch.
+function M.load_more_base()
+  M._base.limit = (M._base.limit or base_page()) + base_page()
+  fetch_base_history()
+end
 
 ---Per-session aggregate CI cache keyed by stack head branch name.
 ---Value: { state = 'pass' | 'fail' | 'pending' | 'unknown', sha = string }
@@ -175,6 +250,10 @@ function M.rerender()
     file_lists = buf.file_lists,
     show_all_files = buf.show_all_files,
     branch_suffix = branch_suffix,
+    base_history = base_history_state(),
+    base_expanded = M._base.expanded,
+    base_more = M._base.more,
+    base_count = #M._base.commits,
   }))
 end
 
@@ -225,7 +304,6 @@ function M.open()
   buf:on('branches', actions.branches)
   buf:on('log', actions.log)
   buf:on('oplog', actions.oplog)
-  buf:on('timeline', actions.timeline)
   buf:on('direct_to_main', actions.direct_to_main)
   buf:on('ci_open', actions.ci_open)
   buf:on('cursor_down', actions.cursor_down)
@@ -268,6 +346,15 @@ function M.refresh()
     end
     M.data = data
     M.rerender()
+    -- Fetch the landed history below the common base (async), then re-render.
+    local mb = type(data.mergeBase) == 'table' and data.mergeBase.commitId or nil
+    if mb and mb ~= vim.NIL then
+      M._base.sha = mb
+      M._base.limit = M._base.limit or base_page()
+      fetch_base_history()
+    else
+      M._base.sha, M._base.commits, M._base.more = nil, {}, false
+    end
     -- Kick off async CI aggregate fetches for stack heads with PRs.
     -- The callback will trigger another refresh when results arrive; the
     -- cache prevents refetch loops.
@@ -290,6 +377,7 @@ function M.close()
     M.instance = nil
   end
   M.data = nil
+  M._base = { sha = nil, commits = {}, expanded = {}, detail = {}, limit = nil, more = false }
 end
 
 ---Toggle the status buffer.

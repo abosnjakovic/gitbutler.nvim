@@ -1,9 +1,8 @@
-local fixtures = require('tests.gitbutler.fixtures')
 local h = require('tests.gitbutler.helpers')
 local timeline = require('gitbutler.ui.timeline')
 local test, assert_eq, assert_truthy = h.test, h.assert_eq, h.assert_truthy
 
-print('\n=== Timeline view tests ===')
+print('\n=== Landed-history helper tests ===')
 
 test('parse_git_log parses structured git log output', function()
   local raw = table.concat({
@@ -55,155 +54,26 @@ test('parse_diff_tree handles empty output', function()
   assert_eq(0, #files)
 end)
 
-test('build_lines groups commits by date', function()
-  local buf = h.mock_buffer()
-  local lines = timeline.build_lines(buf, fixtures.timeline_commits, 7)
+-- fetch_base excludes the base commit itself (--skip=1) so it isn't shown
+-- twice: once as the (common base) row and once in the history below it.
+test('fetch_base passes --skip=1 and the base sha to git log', function()
+  local captured
+  local orig = vim.system
+  ---@diagnostic disable-next-line: duplicate-set-field
+  vim.system = function(cmd)
+    captured = cmd
+    return { wait = function() end }
+  end
+  timeline.fetch_base('deadbeef', 15, function() end)
+  vim.system = orig
 
-  local headers = {}
-  for _, l in ipairs(lines) do
-    if l.type == 'date_header' then
-      table.insert(headers, l)
+  assert_truthy(vim.tbl_contains(captured, '--skip=1'), 'skips the base commit itself')
+  assert_eq('deadbeef', captured[#captured], 'base sha is the final positional arg')
+  local n_idx
+  for i, a in ipairs(captured) do
+    if a == '-n' then
+      n_idx = i
     end
   end
-
-  assert_eq(2, #headers)
-  assert_truthy(headers[1].text:find('2026%-04%-08'))
-  assert_truthy(headers[2].text:find('2026%-04%-07'))
-end)
-
-test('build_lines creates timeline_commit lines with correct data', function()
-  local buf = h.mock_buffer()
-  local lines = timeline.build_lines(buf, fixtures.timeline_commits, 7)
-
-  local commits = {}
-  for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit' then
-      table.insert(commits, l)
-    end
-  end
-
-  assert_eq(3, #commits)
-  assert_eq('a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2', commits[1].data.sha)
-  assert_eq('adam', commits[1].data.author)
-  assert_eq('origin/main, main', commits[1].data.refs)
-  assert_truthy(commits[1].text:find('a1b2c3d'))
-  assert_truthy(commits[1].text:find('adam'))
-  assert_truthy(commits[1].text:find('Fix auth bug'))
-end)
-
-test('build_lines renders refs in commit text when present', function()
-  local buf = h.mock_buffer()
-  local lines = timeline.build_lines(buf, fixtures.timeline_commits, 7)
-
-  local first_commit
-  for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit' then
-      first_commit = l
-      break
-    end
-  end
-
-  assert_truthy(first_commit.text:find('main'))
-end)
-
-test('build_lines omits ref column when refs empty', function()
-  local buf = h.mock_buffer()
-  local lines = timeline.build_lines(buf, fixtures.timeline_commits, 7)
-
-  local third_commit
-  local count = 0
-  for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit' then
-      count = count + 1
-      if count == 3 then
-        third_commit = l
-        break
-      end
-    end
-  end
-
-  assert_eq('', third_commit.data.refs)
-end)
-
-test('build_lines handles empty commit list', function()
-  local buf = h.mock_buffer()
-  local lines = timeline.build_lines(buf, fixtures.timeline_commits_empty, 7)
-
-  assert_truthy(#lines >= 2)
-  local commits = {}
-  for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit' then
-      table.insert(commits, l)
-    end
-  end
-  assert_eq(0, #commits)
-end)
-
-test('build_lines renders body lines for expanded commit when _body cached', function()
-  local buf = h.mock_buffer()
-  local commits = {
-    {
-      sha = 'aa',
-      short_sha = 'aa',
-      author = 'x',
-      date = '2026-04-08',
-      refs = '',
-      message = 'subj',
-      _body = { 'first body line', 'second body line' },
-      _files = { { path = 'f.lua', status = 'M' } },
-    },
-  }
-  buf.fold_state['timeline:aa'] = false
-  local lines = timeline.build_lines(buf, commits, 7)
-  local body_count = 0
-  local file_count = 0
-  for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit_body' then
-      body_count = body_count + 1
-    end
-    if l.type == 'timeline_file' then
-      file_count = file_count + 1
-    end
-  end
-  assert_eq(2, body_count)
-  assert_eq(1, file_count)
-end)
-
-test('build_lines omits body when _body empty', function()
-  local buf = h.mock_buffer()
-  local commits = {
-    {
-      sha = 'bb',
-      short_sha = 'bb',
-      author = 'x',
-      date = '2026-04-08',
-      refs = '',
-      message = 'subj',
-      _body = {},
-      _files = { { path = 'f.lua', status = 'M' } },
-    },
-  }
-  buf.fold_state['timeline:bb'] = false
-  local lines = timeline.build_lines(buf, commits, 7)
-  for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit_body' then
-      error('unexpected body line')
-    end
-  end
-end)
-
-test('build_lines marks commits as foldable', function()
-  local buf = h.mock_buffer()
-  local lines = timeline.build_lines(buf, fixtures.timeline_commits, 7)
-
-  local commit
-  for _, l in ipairs(lines) do
-    if l.type == 'timeline_commit' then
-      commit = l
-      break
-    end
-  end
-
-  assert_truthy(commit.foldable)
-  assert_truthy(commit.folded, 'commits start folded')
+  assert_eq('15', captured[n_idx + 1], 'limit is passed to -n')
 end)

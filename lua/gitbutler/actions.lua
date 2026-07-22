@@ -39,7 +39,7 @@ end
 ---window on its first changed hunk. The status view stays open either way.
 function M.open_file(buf)
   local cursor = buf:get_cursor_line()
-  if cursor and cursor.type == 'commit' and cursor.data and cursor.data.sha then
+  if cursor and (cursor.type == 'commit' or cursor.type == 'base_commit') and cursor.data and cursor.data.sha then
     require('gitbutler.ui.commit_diff').open(cursor.data.sha)
     return
   end
@@ -383,7 +383,7 @@ function M._copy_text(line)
   if not line or not line.data then
     return nil
   end
-  if line.type == 'commit' then
+  if line.type == 'commit' or line.type == 'base_commit' then
     return line.data.sha
   elseif line.type == 'file' or line.type == 'committed_file' then
     return line.data.path
@@ -878,6 +878,16 @@ function M.toggle_fold(buf)
     return
   end
 
+  -- Landed-history rows: expand a commit's body/files, or load the next page.
+  if line.type == 'base_commit' then
+    require('gitbutler.ui.status').toggle_base_expand(line.data and line.data.sha or '')
+    return
+  end
+  if line.type == 'base_more' then
+    require('gitbutler.ui.status').load_more_base()
+    return
+  end
+
   -- File lines: show inline diff in a split below
   if line.type == 'file' or line.type == 'committed_file' then
     local cli_id = line.data and line.data.cli_id
@@ -1040,10 +1050,14 @@ function M.help(_buf)
     '  C        CI view',
     '  L        Land directly onto target',
     '  i        Pull / integrate upstream',
-    '  T        Timeline',
     '  H        Commit log',
     '  O        Operations log',
     '  B        Branch management',
+    '',
+    'Landed history (below the common base)',
+    '  <Tab>    Expand a commit (message + files) / load more',
+    '  o        Open the commit in the diff tool',
+    '  y        Copy the commit SHA',
     '',
     '  q  Close    ?  This help',
   }
@@ -1124,11 +1138,6 @@ end
 ---Open operations log.
 function M.oplog(_buf)
   require('gitbutler.ui.oplog').open()
-end
-
----Open commit timeline.
-function M.timeline(_buf)
-  require('gitbutler.ui.timeline').open()
 end
 
 ---Row types that can act as a rub source (they have a row in the verb matrix).

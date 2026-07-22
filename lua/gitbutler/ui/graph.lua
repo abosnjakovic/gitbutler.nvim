@@ -22,6 +22,14 @@ local change_display = {
   renamed = { prefix = 'R', hl = 'GitButlerFileRenamed' },
 }
 
+-- git diff-tree name-status letters -> highlight, for landed-history files.
+local BASE_FILE_HL = {
+  A = 'GitButlerFileAdd',
+  M = 'GitButlerFileMod',
+  D = 'GitButlerFileDel',
+  R = 'GitButlerFileRenamed',
+}
+
 ---`vim.json.decode` maps JSON null to `vim.NIL`, which is truthy, so a bare
 ---`x or {}` guard doesn't catch it. Use this at every list-iteration site.
 local function list(v)
@@ -129,7 +137,7 @@ end
 
 ---Build graph rows from decoded `but status --json -f -v` output.
 ---@param data table
----@param state? { selected?: table<string,boolean>, fold_state?: table<string,boolean>, file_lists?: table<string,boolean>, show_all_files?: boolean, branch_suffix?: fun(stack: table, branch: table): {[1]:string,[2]:string?}[] }
+---@param state? { selected?: table<string,boolean>, fold_state?: table<string,boolean>, file_lists?: table<string,boolean>, show_all_files?: boolean, branch_suffix?: fun(stack: table, branch: table): {[1]:string,[2]:string?}[], base_history?: table, base_expanded?: table<string,boolean>, base_more?: boolean, base_count?: integer }
 ---@return GraphRow[]
 function M.build(data, state)
   state = state or {}
@@ -313,6 +321,53 @@ function M.build(data, state)
     end
     add(r, ' ' .. subject(mb.message), HL.msg)
     push(r)
+  end
+
+  -- Landed trunk history below the common base. Read-only: these commits are
+  -- already merged, so they carry no cli_id and no mutation verbs apply. The
+  -- commit list is fed in via `state` from a git-log fetch so build() stays a
+  -- pure function of its inputs.
+  local base_hist = list(state.base_history)
+  local base_expanded = state.base_expanded or {}
+  for _, c in ipairs(base_hist) do
+    local sha = scalar(c.sha, '')
+    local short = scalar(c.short_sha, sha:sub(1, 7))
+    local expanded = base_expanded[sha] == true
+    local cr = row('base_commit', {
+      sha = sha,
+      short_sha = short,
+      message = scalar(c.message, ''),
+      fold_id = 'base:' .. sha,
+    }, true)
+    cr.foldable = true
+    add(cr, '  ' .. (expanded and '▾' or '▸') .. ' ', HL.connector)
+    add(cr, short, HL.sha)
+    add(cr, ' ' .. subject(scalar(c.message, '')), HL.dim)
+    push(cr)
+
+    if expanded then
+      for _, body_line in ipairs(list(c.body)) do
+        local br = row('base_body', { sha = sha }, false)
+        add(br, '      ' .. body_line, HL.msg)
+        push(br)
+      end
+      for _, f in ipairs(list(c.files)) do
+        local status = scalar(f.status, 'M')
+        local hl = BASE_FILE_HL[status] or HL.msg
+        local fr = row('base_file', { sha = sha, path = scalar(f.path, ''), status = status }, false)
+        add(fr, '      ' .. status .. ' ' .. scalar(f.path, ''), hl)
+        push(fr)
+      end
+    end
+  end
+
+  if state.base_more then
+    local mr = row('base_more', {}, true)
+    add(mr, '  ↓ load more', HL.dim)
+    if state.base_count then
+      add(mr, ' (' .. state.base_count .. ' shown)', HL.dim)
+    end
+    push(mr)
   end
 
   return rows

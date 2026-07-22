@@ -18,7 +18,6 @@ M.normal_items = {
   { 'v', 'pr' },
   { 'i', 'pull' },
   { 'L', 'land' },
-  { 'T', 'timeline' },
   { 'O', 'oplog' },
   { '?', 'help', keep = true },
   { 'q', 'quit', keep = true },

@@ -47,10 +47,10 @@ M.defaults = {
   --   a function(sha)    -> called with the full commit SHA
   commit_diff = nil,
 
-  -- Timeline view settings
-  timeline = {
-    days = 7,
-    limit = 200,
+  -- Landed-history section shown below the common base in the main view.
+  -- `count` is how many ancestors to load at a time (grows with "load more").
+  base_history = {
+    count = 15,
   },
 
   -- Keymaps for status buffer (set to false to disable)
@@ -112,7 +112,6 @@ M.defaults = {
       ['C'] = 'ci_open',
       ['L'] = 'direct_to_main',
       ['i'] = 'pull',
-      ['T'] = 'timeline',
       ['H'] = 'log',
       ['O'] = 'oplog',
       ['B'] = 'branches',

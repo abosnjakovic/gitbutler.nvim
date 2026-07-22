@@ -22,7 +22,7 @@ cleanup() { rm -f "$scratch"; }
 trap cleanup EXIT INT TERM
 printf '# Demo change\n\nA new file so the workspace has an uncommitted change to show.\nAssign it to a branch, commit it, or open it — from the graph.\n' >"$scratch"
 
-for tape in doc/demo/butler.tape doc/demo/rub.tape doc/demo/timeline.tape; do
+for tape in doc/demo/butler.tape doc/demo/rub.tape; do
   echo "=== $tape ==="
   vhs "$tape" || { echo "  -> FAILED"; exit 1; }
 done

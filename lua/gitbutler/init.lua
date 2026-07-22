@@ -95,10 +95,6 @@ function M.setup(opts)
     require('gitbutler.ui.oplog').open()
   end, { desc = 'GitButler operations log' })
 
-  vim.api.nvim_create_user_command('ButlerTimeline', function()
-    require('gitbutler.ui.timeline').open()
-  end, { desc = 'GitButler commit timeline' })
-
   vim.api.nvim_create_user_command('ButlerAutoMerge', function(cmd)
     require('gitbutler.actions').pr_auto_merge(cmd.args)
   end, { nargs = 1, desc = 'GitButler toggle PR auto-merge' })
