@@ -1,3 +1,18 @@
+## [2.0.0] - 2026-07-22
+
+### Features
+
+- feat(details): show commit meta header for workspace commits too
+- feat(details): d shows landed commits via git show; hint submit key
+- feat(graph)!: fold timeline into the main view as landed history
+- feat(land): L lands selected branches, not just files
+
+### Bug Fixes
+
+- fix(tui): warn instead of silent no-op on discard/describe off-target
+- fix(tui): guard push-all footgun; Enter saves in new-branch/snapshot inputs
+- fix(branch): Enter saves in rename popup
+
 ## [1.0.0] - 2026-07-22
 
 ### Features
