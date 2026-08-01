@@ -3,7 +3,7 @@
 -- `make smoke` rather than in the unit suite (`make test`).
 --
 -- Design rule: a check either PASSES against real CLI behaviour or SKIPS when
--- the workspace lacks the state it needs (e.g. no applied branch to rub onto).
+-- the workspace lacks the state it needs (e.g. no branch tip to amend into).
 -- It only FAILS on an actual regression. That keeps `make smoke` green on any
 -- valid GitButler workspace while still exercising the full path when the state
 -- is present.

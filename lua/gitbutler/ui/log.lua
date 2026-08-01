@@ -15,6 +15,25 @@ local function notify(action, err)
   end
 end
 
+---SHA of the commit directly below `sha` in a `but show` payload — its parent
+---in the branch's newest-first list. nil at the oldest commit, or when `sha`
+---is not in the payload.
+---@param data table show output
+---@param sha string
+---@return string?
+function M._parent_sha(data, sha)
+  local commits = type(data) == 'table' and data.commits or nil
+  if type(commits) ~= 'table' then
+    return nil
+  end
+  for i, c in ipairs(commits) do
+    if c.sha == sha then
+      return commits[i + 1] and commits[i + 1].sha or nil
+    end
+  end
+  return nil
+end
+
 ---Build lines from `but show <branch> --json` output.
 ---Shape: { branch, commits: [{ sha, short_sha, message, full_message, author_name, timestamp, files_changed, insertions, deletions, files }] }
 ---@param buf table GitButlerBuffer instance (for fold state)
@@ -235,7 +254,15 @@ function M.open(branch_name)
         return
       end
 
-      cli.squash(line.data.sha, function(squash_err, _)
+      -- `but squash` needs an explicit target: squash the cursor commit into
+      -- the one below it. Without a target but only accepts a single branch.
+      local parent = M._parent_sha(data, line.data.sha)
+      if not parent then
+        vim.notify('gitbutler: no commit below this one to squash into', vim.log.levels.WARN)
+        return
+      end
+
+      cli.squash({ line.data.sha }, parent, function(squash_err, _)
         notify('squash', squash_err)
         if not squash_err then
           M.refresh(branch_name)

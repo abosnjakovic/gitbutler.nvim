@@ -21,7 +21,7 @@ fi
 # This script only stages the uncommitted change; set up (and later tear down)
 # a demo branch by hand for the full hero — e.g.
 #   printf 'local M = {}\nreturn M\n' > .demo/auth.lua
-#   but commit demo/auth-endpoint -c -m "feat(auth): token verification" --changes <id>
+#   but commit --branch demo/auth-endpoint -m "feat(auth): token verification" <id>
 # The landed history below the common base is whatever `git log <base>` already
 # shows, so no setup is needed for the landed-history / details recordings.
 scratch="DEMO.md"

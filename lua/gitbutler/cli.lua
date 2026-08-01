@@ -2,18 +2,44 @@ local config = require('gitbutler.config')
 
 local M = {}
 
----The `but` CLI emits JSON via `--format=json`; older versions used a boolean
----`--json` flag. Callers throughout this module still pass the `--json` token,
----so normalise it to the current spelling in one place. If the CLI's flag
----changes again, this is the only line to update.
----@param args string[]
----@return string[]
-local function normalise_args(args)
-  local out = {}
-  for _, a in ipairs(args) do
-    out[#out + 1] = (a == '--json') and '--format=json' or a
+---Cached support verdict; set nil to force a re-probe (tests, cmd change).
+---@type boolean?
+M.supported = nil
+
+---Minimum `but` this plugin speaks, and the error shown when it is older.
+M.MIN_VERSION = '0.22.0'
+local UNSUPPORTED = 'gitbutler.nvim requires but ' .. M.MIN_VERSION .. ' or newer (this one is older)'
+
+---Whether the CLI speaks the 0.22 surface. 0.22 replaced `--format=json` with a
+---boolean `--json` in the same release that retired `but rub` and re-cut
+---commit/squash/move, so a CLI still advertising `--format` cannot run any of
+---our mutations. Probe the help text once — cheaper and steadier than parsing
+---version numbers — and say so plainly instead of letting every action fail on
+---retired syntax.
+---@return boolean
+local function supported()
+  if M.supported == nil then
+    local res = vim.system({ config.values.cmd, 'status', '--help' }, { text = true }):wait()
+    local help = (res.stdout or '') .. (res.stderr or '')
+    M.supported = not help:find('--format', 1, true)
   end
-  return out
+  return M.supported
+end
+
+---Append the single targeting flag for `target`. but accepts exactly one per
+---invocation, so the first field present wins.
+---@param args string[]
+---@param target { branch?: string, above?: string, below?: string, unstack?: boolean }
+local function append_target(args, target)
+  if target.unstack then
+    table.insert(args, '--unstack')
+  elseif target.branch then
+    vim.list_extend(args, { '--branch', target.branch })
+  elseif target.above then
+    vim.list_extend(args, { '--above', target.above })
+  elseif target.below then
+    vim.list_extend(args, { '--below', target.below })
+  end
 end
 
 ---Run a but CLI command asynchronously.
@@ -28,7 +54,12 @@ function M.run(args, opts, callback)
   end
   opts = opts or {}
 
-  local cmd = vim.list_extend({ config.values.cmd }, normalise_args(args))
+  if not supported() then
+    callback(UNSUPPORTED)
+    return
+  end
+
+  local cmd = vim.list_extend({ config.values.cmd }, args)
   local stdout_chunks = {}
   local stderr_chunks = {}
 
@@ -82,7 +113,10 @@ end
 ---@return any result
 function M.run_sync(args, opts)
   opts = opts or {}
-  local cmd = vim.list_extend({ config.values.cmd }, normalise_args(args))
+  if not supported() then
+    return UNSUPPORTED, nil
+  end
+  local cmd = vim.list_extend({ config.values.cmd }, args)
   local result = vim.system(cmd, { cwd = opts.cwd, text = true }):wait()
 
   if result.code ~= 0 then
@@ -103,28 +137,23 @@ function M.status(callback)
   M.run({ 'status', '--json', '-f', '-v' }, callback)
 end
 
----Convenience: but commit
----@param branch? string Branch name or CLI ID
----@param message? string Commit message
+---Convenience: but commit <target flag> [-m <message>] [<changes>...]
+---@param target { branch?: string, above?: string, below?: string } Where the
+---commit lands. A named branch is created if it does not exist; an empty table
+---lets but place the commit on the only applied stack.
+---@param message? string Commit message. Omitted means `--no-message`: never
+---leave it to the CLI, which would spawn $EDITOR inside the async job and hang.
 ---@param callback fun(err?: string, result?: any)
----@param file_ids? string[] Uncommitted file CLI IDs to include (omit for all)
----@param create? boolean Pass -c to create the branch if it does not exist
-function M.commit(branch, message, callback, file_ids, create)
+---@param change_ids? string[] Uncommitted file/hunk CLI IDs (omit for all changes)
+function M.commit(target, message, callback, change_ids)
   local args = { 'commit' }
-  if branch then
-    table.insert(args, branch)
-  end
-  if create then
-    table.insert(args, '-c')
-  end
+  append_target(args, target or {})
   if message then
     vim.list_extend(args, { '-m', message })
+  else
+    table.insert(args, '--no-message')
   end
-  if file_ids then
-    for _, id in ipairs(file_ids) do
-      vim.list_extend(args, { '-p', id })
-    end
-  end
+  vim.list_extend(args, change_ids or {})
   table.insert(args, '--json')
   M.run(args, callback)
 end
@@ -168,16 +197,18 @@ function M.reword(target, message, callback)
   M.run({ 'reword', target, '-m', message, '--json' }, callback)
 end
 
----Convenience: but squash (accepts single commit string or list of commit strings)
-function M.squash(commits, callback)
-  local args = { 'squash', '--json' }
-  if type(commits) == 'table' then
-    for _, c in ipairs(commits) do
-      table.insert(args, c)
-    end
-  elseif commits then
-    table.insert(args, commits)
-  end
+---Convenience: but squash -t <target> -u <sources>...
+---`-u` (--use-target-message) is not optional for us: squashing commits or
+---branches without a message flag makes but open an editor, which cannot work
+---inside an async job. Keeping the target's message is also what the old
+---`but rub` did implicitly.
+---@param sources string[] Commit, branch or committed-file CLI IDs
+---@param target string Commit or branch to squash into
+---@param callback fun(err?: string, result?: any)
+function M.squash(sources, target, callback)
+  local args = { 'squash', '-t', target, '-u' }
+  vim.list_extend(args, sources)
+  table.insert(args, '--json')
   M.run(args, callback)
 end
 
@@ -186,61 +217,47 @@ function M.pull(callback)
   M.run({ 'pull', '--json' }, callback)
 end
 
----Convenience: but pr
-function M.pr(callback)
-  M.run({ 'pr', '--json' }, callback)
-end
-
----Convenience: but move <source> <target> [--after]
----@param commit string Commit/branch identifier (comma-join for multi-commit moves)
----@param target_branch string Target commit/branch identifier, or 'zz' to unstack
+---Convenience: but move <sources>... --above/--below/--branch/--unstack
+---@param sources string[] Commit, committed-file or single-branch CLI IDs
+---@param target { above?: string, below?: string, branch?: string, unstack?: boolean }
 ---@param callback fun(err?: string, result?: any)
----@param opts? { after?: boolean } Place source after (above) the target; commit-to-commit only
-function M.move(commit, target_branch, callback, opts)
-  local args = { 'move', commit, target_branch }
-  if opts and opts.after then
-    table.insert(args, '--after')
-  end
+function M.move(sources, target, callback)
+  local args = { 'move' }
+  vim.list_extend(args, sources)
+  append_target(args, target)
   table.insert(args, '--json')
   M.run(args, callback)
 end
 
----Convenience: but commit <branch> -m <msg> --before/--after <id>
----@param branch string Branch name or CLI ID
----@param message string Commit message
----@param anchor { before?: string, after?: string } Commit/branch CLI ID to anchor on
+---Convenience: but commit --empty --no-message <target flag>
+---@param target { branch?: string, above?: string, below?: string } Where the commit lands
 ---@param callback fun(err?: string, result?: any)
-function M.commit_at(branch, message, anchor, callback)
-  local args = { 'commit', branch, '-m', message }
-  if anchor.before then
-    vim.list_extend(args, { '--before', anchor.before })
-  end
-  if anchor.after then
-    vim.list_extend(args, { '--after', anchor.after })
-  end
+function M.commit_empty(target, callback)
+  local args = { 'commit', '--empty', '--no-message' }
+  append_target(args, target)
   table.insert(args, '--json')
   M.run(args, callback)
 end
 
----Convenience: but commit empty --before/--after <target>
----@param anchor { before?: string, after?: string } Commit/branch CLI ID to anchor on
+---Convenience: but amend -t <target> [<sources>...]
+---@param target string Commit or branch to amend into (branch = its tip)
+---@param sources? string[] Uncommitted file/hunk CLI IDs; omit to amend all of zz
 ---@param callback fun(err?: string, result?: any)
-function M.commit_empty(anchor, callback)
-  local args = { 'commit', 'empty' }
-  if anchor.before then
-    vim.list_extend(args, { '--before', anchor.before })
-  end
-  if anchor.after then
-    vim.list_extend(args, { '--after', anchor.after })
-  end
+function M.amend(target, sources, callback)
+  local args = { 'amend', '-t', target }
+  vim.list_extend(args, sources or {})
   table.insert(args, '--json')
   M.run(args, callback)
 end
 
----Convenience: but rub <source> <target> — the CLI derives the operation
----(stage/amend/squash/move/…) from the source and target kinds.
-function M.rub(source, target, callback)
-  M.run({ 'rub', source, target, '--json' }, callback)
+---Convenience: but uncommit <sources>...
+---@param sources string[] Commit or committed-file CLI IDs
+---@param callback fun(err?: string, result?: any)
+function M.uncommit(sources, callback)
+  local args = { 'uncommit' }
+  vim.list_extend(args, sources)
+  table.insert(args, '--json')
+  M.run(args, callback)
 end
 
 ---Convenience: but diff [<cli_id>] --json. Omit the id for the whole worktree.
@@ -255,9 +272,15 @@ function M.diff_json(cli_id, callback)
   M.run(args, callback)
 end
 
----Convenience: but discard
-function M.discard(id, callback)
-  M.run({ 'discard', id, '--json' }, callback)
+---Convenience: but discard <changes>... — one call, so one undoable oplog
+---entry for the whole selection.
+---@param ids string[] Branch/commit/file/hunk CLI IDs, all of the same kind
+---@param callback fun(err?: string, result?: any)
+function M.discard(ids, callback)
+  local args = { 'discard' }
+  vim.list_extend(args, ids)
+  table.insert(args, '--json')
+  M.run(args, callback)
 end
 
 ---Convenience: but apply
@@ -267,7 +290,7 @@ end
 
 ---Convenience: but unapply
 function M.unapply(identifier, callback)
-  M.run({ 'unapply', identifier, '-f', '--json' }, callback)
+  M.run({ 'unapply', identifier, '--json' }, callback)
 end
 
 ---Convenience: but branch delete

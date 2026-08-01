@@ -562,24 +562,15 @@ function M._hunk_discard()
     end
 
     local cli = require('gitbutler.cli')
-    local i = 0
-    local function discard_next()
-      i = i + 1
-      if i > #ids then
-        vim.notify('gitbutler: discarded ' .. #ids .. ' hunk(s)', vim.log.levels.INFO)
-        finish(true)
+    cli.discard(ids, function(err)
+      if err then
+        vim.notify('gitbutler discard: ' .. err, vim.log.levels.ERROR)
+        finish(false)
         return
       end
-      cli.discard(ids[i], function(err)
-        if err then
-          vim.notify('gitbutler discard: ' .. err, vim.log.levels.ERROR)
-          finish(false)
-          return
-        end
-        discard_next()
-      end)
-    end
-    discard_next()
+      vim.notify('gitbutler: discarded ' .. #ids .. ' hunk(s)', vim.log.levels.INFO)
+      finish(true)
+    end)
   end)
 end
 
@@ -620,10 +611,10 @@ function M._hunk_copy()
   vim.notify('gitbutler: copied ' .. #text .. ' bytes of hunk', vim.log.levels.INFO)
 end
 
----`r` — enter rub mode on the status buffer with the hunks as source. `kind`
----is 'file': the rub verb matrix treats a hunk exactly like an uncommitted
----file, and the source rows live in the other window so `rows` stays empty.
-function M._hunk_rub()
+---`a` — enter amend mode on the status buffer with the hunks as source. `kind`
+---is 'file': amend treats a hunk exactly like an uncommitted file, and the
+---source rows live in the other window so `rows` stays empty.
+function M._hunk_amend()
   local st = M.win_state
   local ids, paths = M._targets()
   if #ids == 0 then
@@ -632,11 +623,11 @@ function M._hunk_rub()
   end
   local sb = st.status_buf
   if not sb or not (sb.win and vim.api.nvim_win_is_valid(sb.win)) then
-    vim.notify('gitbutler: no status window to rub onto', vim.log.levels.WARN)
+    vim.notify('gitbutler: no status window to amend into', vim.log.levels.WARN)
     return
   end
   M._focus_status()
-  require('gitbutler.ui.modes').enter_rub(sb, {
+  require('gitbutler.ui.modes').enter_verb(sb, 'amend', {
     kind = 'file',
     ids = ids,
     rows = {},
@@ -698,7 +689,7 @@ local function set_keymap(buf)
     ['<Space>'] = M._toggle_mark,
     ['x'] = M._hunk_discard,
     ['y'] = M._hunk_copy,
-    ['r'] = M._hunk_rub,
+    ['a'] = M._hunk_amend,
     ['h'] = M._focus_status,
     ['<Left>'] = M._focus_status,
     ['<Esc>'] = M._focus_status,

@@ -153,7 +153,7 @@ function M.insert_empty_commit(buf)
     return
   end
   notify_start('empty commit')
-  cli.commit_empty({ after = line.data.cli_id }, function(err, result)
+  cli.commit_empty({ above = line.data.cli_id }, function(err, result)
     notify_result('empty commit', err, result)
   end)
 end
@@ -452,17 +452,16 @@ local function surface_error(step, body)
   vim.api.nvim_echo({ { msg, 'ErrorMsg' } }, true, {})
 end
 
----Pull the new commit's SHA out of a `but commit --json` result. Current CLIs
----nest it as `{ result = { commit_id } }`; older ones returned a flat
----`{ commit_id }`. Tolerate both so the feature survives either shape.
+---Pull the new commit's SHA out of a `but commit --json` result. 0.22 returns a
+---flat `{ commitId = ... }` (verified against the CLI); older shapes nested it
+---under `result` in snake_case and are not supported.
 ---@param result any Decoded JSON from cli.commit
 ---@return string? sha
 function M.commit_id_of(result)
   if type(result) ~= 'table' then
     return nil
   end
-  local nested = type(result.result) == 'table' and result.result.commit_id or nil
-  local sha = nested or result.commit_id
+  local sha = result.commitId
   if type(sha) == 'string' and sha ~= '' then
     return sha
   end
@@ -575,7 +574,7 @@ function M.direct_to_main(buf)
       local ephemeral_name = M.ephemeral_branch_name(ts)
 
       local sp = spinner.start('committing ' .. #file_ids .. ' file(s)')
-      cli.commit(ephemeral_name, message, function(commit_err, commit_result)
+      cli.commit({ branch = ephemeral_name }, message, function(commit_err, commit_result)
         if commit_err then
           sp:stop()
           buf:clear_selection()
@@ -588,7 +587,7 @@ function M.direct_to_main(buf)
         if not ephemeral_sha then
           sp:stop()
           buf:clear_selection()
-          surface_error('commit', 'no commit_id in response from but commit')
+          surface_error('commit', 'no commitId in response from but commit')
           refresh()
           return
         end
@@ -608,7 +607,7 @@ function M.direct_to_main(buf)
           vim.notify('gitbutler: direct-to-main done (landed ' .. ephemeral_sha:sub(1, 7) .. ')', vim.log.levels.INFO)
           refresh()
         end)
-      end, file_ids, true)
+      end, file_ids)
     end,
   })
 end
@@ -620,12 +619,11 @@ end
 ---@param message string Commit message
 ---@return string? err
 function M.direct_to_main_test_harness(file_path, message)
-  local status_res = vim.system({ 'but', 'status', '--format=json' }, { text = true }):wait()
-  if status_res.code ~= 0 then
-    return 'but status: ' .. vim.trim(status_res.stderr or '')
+  local status_err, decoded = cli.run_sync({ 'status', '--json' })
+  if status_err then
+    return 'but status: ' .. status_err
   end
-  local ok, decoded = pcall(vim.json.decode, status_res.stdout or '')
-  if not ok or type(decoded) ~= 'table' then
+  if type(decoded) ~= 'table' then
     return 'but status: invalid JSON'
   end
 
@@ -643,23 +641,21 @@ function M.direct_to_main_test_harness(file_path, message)
   local ts = os.time()
   local ephemeral_name = M.ephemeral_branch_name(ts)
 
-  -- but commit -c <ephemeral> -m <msg> -p <cli_id> --json
-  local commit_res = vim
-    .system({ 'but', 'commit', ephemeral_name, '-c', '-m', message, '-p', cli_id, '--format=json' }, { text = true })
-    :wait()
-  if commit_res.code ~= 0 then
-    return 'commit: ' .. vim.trim(commit_res.stderr or '')
+  -- but commit --branch <ephemeral> -m <msg> <cli_id> --json
+  local commit_err, commit_decoded =
+    cli.run_sync({ 'commit', '--branch', ephemeral_name, '-m', message, cli_id, '--json' })
+  if commit_err then
+    return 'commit: ' .. commit_err
   end
-  local commit_ok, commit_decoded = pcall(vim.json.decode, commit_res.stdout or '')
-  local ephemeral_sha = commit_ok and commit_id_of(commit_decoded) or nil
+  local ephemeral_sha = type(commit_decoded) == 'table' and commit_id_of(commit_decoded) or nil
   if not ephemeral_sha then
-    return 'commit: no commit_id in response'
+    return 'commit: no commitId in response'
   end
 
   -- but land <ephemeral> --yes: fast-forward-or-merge the target, push, reconcile.
-  local land = vim.system({ 'but', 'land', ephemeral_name, '--yes', '--format=json' }, { text = true }):wait()
-  if land.code ~= 0 then
-    return 'land: ' .. vim.trim(land.stderr or '')
+  local land_err = cli.run_sync({ 'land', ephemeral_name, '--yes', '--json' })
+  if land_err then
+    return 'land: ' .. land_err
   end
 
   return nil
@@ -848,26 +844,19 @@ function M.discard(buf)
       return
     end
     notify_start('discard')
-    local i = 0
-    local function discard_next()
-      i = i + 1
-      if i > #targets then
-        buf:clear_selection()
-        vim.notify('gitbutler: discarded ' .. #targets .. ' file(s)', vim.log.levels.INFO)
-        refresh()
-        return
-      end
-      cli.discard(targets[i].data.cli_id, function(err, _)
-        if err then
-          buf:clear_selection()
-          vim.notify('gitbutler discard: ' .. err, vim.log.levels.ERROR)
-          refresh()
-          return
-        end
-        discard_next()
-      end)
+    local ids = {}
+    for _, t in ipairs(targets) do
+      table.insert(ids, t.data.cli_id)
     end
-    discard_next()
+    cli.discard(ids, function(err, _)
+      buf:clear_selection()
+      if err then
+        vim.notify('gitbutler discard: ' .. err, vim.log.levels.ERROR)
+      else
+        vim.notify('gitbutler: discarded ' .. #ids .. ' file(s)', vim.log.levels.INFO)
+      end
+      refresh()
+    end)
   end)
 end
 
@@ -1014,7 +1003,10 @@ function M.help(_buf)
     '  <Space>  Mark / unmark (homogeneous multi-select)',
     '',
     'Modes',
-    '  r/R      Rub source onto target (assign/amend/squash/move/…)',
+    '  a        Amend mode: uncommitted changes into a commit or branch',
+    '  R        Amend mode with every unassigned file as the source',
+    '  S        Squash mode: commits / branches / committed files into a target',
+    '  w        Uncommit the marked (or cursor) commits / committed files',
     '  c        Commit mode (pick where the commit lands)',
     '  m        Move mode (reorder / retarget commits)',
     '  s        Stack mode (apply / unapply / move)',
@@ -1038,8 +1030,8 @@ function M.help(_buf)
     '  +/-      Grow / shrink the pane',
     '  l        Focus the pane (h/<Esc> focuses back)',
     '  In the pane: j/k hunk, J/K scroll, <C-d>/<C-u> scroll 10, g/G first/last',
-    '  <CR>/o open file at the hunk line, <Space> mark, x discard, y copy, r rub',
-    '  q/d close pane. Committed diffs have no hunk ids: mark/discard/rub warn',
+    '  <CR>/o open file at the hunk line, <Space> mark, x discard, y copy, a amend',
+    '  q/d close pane. Committed diffs have no hunk ids: mark/discard/amend warn',
     '',
     'Extras',
     '  o        Open under cursor: file → jump to code; commit → diff tool',
@@ -1140,17 +1132,8 @@ function M.oplog(_buf)
   require('gitbutler.ui.oplog').open()
 end
 
----Row types that can act as a rub source (they have a row in the verb matrix).
-local RUB_SOURCE_TYPES = {
-  file = true,
-  committed_file = true,
-  commit = true,
-  branch = true,
-  uncommitted_header = true,
-}
-
----Short human label for a rub source row (path / sha7 / branch name).
-local function rub_label(line)
+---Short human label for a source row (path / sha7 / branch name).
+local function source_label(line)
   local d = line.data or {}
   if line.type == 'commit' then
     return (d.sha or d.cli_id or '?'):sub(1, 7)
@@ -1158,18 +1141,19 @@ local function rub_label(line)
   return d.path or d.name or d.cli_id or '?'
 end
 
----Enter rub mode with the marked lines (or the cursor line) as source.
-function M.rub_start(buf)
+---Capture the marked rows (else the cursor row) as a mode source. Every row
+---must carry a CLI id, and the kind is taken from the first row — marks are
+---homogeneous, so that speaks for the whole selection.
+---@param buf GitButlerBuffer
+---@return { kind: string, ids: string[], rows: integer[], label: string }?
+local function capture_source(buf)
   local sources = buf:get_selected_lines()
   if #sources == 0 then
     local line = buf:get_cursor_line()
     sources = line and { line } or {}
   end
-
-  local kind = sources[1] and sources[1].type or nil
-  if not kind or not RUB_SOURCE_TYPES[kind] then
-    vim.notify('gitbutler: nothing to rub here', vim.log.levels.WARN)
-    return
+  if #sources == 0 then
+    return nil
   end
 
   local ids, rows = {}, {}
@@ -1177,7 +1161,7 @@ function M.rub_start(buf)
     local id = src.data and src.data.cli_id
     if not id then
       vim.notify('gitbutler: row has no CLI id', vim.log.levels.WARN)
-      return
+      return nil
     end
     table.insert(ids, id)
     for row, l in ipairs(buf.lines or {}) do
@@ -1188,54 +1172,59 @@ function M.rub_start(buf)
     end
   end
 
-  local label = rub_label(sources[1]) .. (#sources > 1 and (' +' .. (#sources - 1)) or '')
+  return {
+    kind = sources[1].type,
+    ids = ids,
+    rows = rows,
+    label = source_label(sources[1]) .. (#sources > 1 and (' +' .. (#sources - 1)) or ''),
+  }
+end
+
+---Clear the marks and repaint before a mode's overlays go on. Marks only
+---affect glyphs, so the captured row indexes stay valid.
+---@param buf GitButlerBuffer
+local function clear_marks(buf)
   buf:clear_selection()
-  -- Repaint the cleared ● marks before the mode overlays go on. Marks only
-  -- affect glyphs, so the captured row indexes stay valid.
   require('gitbutler.ui.status').rerender()
-  require('gitbutler.ui.modes').enter_rub(buf, { kind = kind, ids = ids, rows = rows, label = label })
+end
+
+---Enter a verb mode ('amend' or 'squash') with the marked (or cursor) rows as
+---source. modes.enter_verb rejects source kinds the verb cannot take.
+---@param buf GitButlerBuffer
+---@param verb 'amend'|'squash'
+local function verb_start(buf, verb)
+  local source = capture_source(buf)
+  if not source then
+    vim.notify('gitbutler: nothing to ' .. verb .. ' here', vim.log.levels.WARN)
+    return
+  end
+  clear_marks(buf)
+  require('gitbutler.ui.modes').enter_verb(buf, verb, source)
+end
+
+---Enter amend mode: uncommitted files or hunks amend into a commit or branch.
+function M.amend_start(buf)
+  verb_start(buf, 'amend')
+end
+
+---Enter squash mode: commits, branches or committed files squash into a target.
+function M.squash_start(buf)
+  verb_start(buf, 'squash')
 end
 
 ---Enter move mode with the marked commits (or the cursor commit/branch) as source.
 function M.move_start(buf)
-  local sources = buf:get_selected_lines()
-  if #sources == 0 then
-    local line = buf:get_cursor_line()
-    sources = line and { line } or {}
-  end
-
-  local kind = sources[1] and sources[1].type or nil
-  if kind ~= 'commit' and kind ~= 'branch' then
+  local source = capture_source(buf)
+  if not source or (source.kind ~= 'commit' and source.kind ~= 'branch') then
     vim.notify('gitbutler: nothing to move here', vim.log.levels.WARN)
     return
   end
-
-  local ids, rows = {}, {}
-  for _, src in ipairs(sources) do
-    local id = src.data and src.data.cli_id
-    if not id then
-      vim.notify('gitbutler: row has no CLI id', vim.log.levels.WARN)
-      return
-    end
-    table.insert(ids, id)
-    for row, l in ipairs(buf.lines or {}) do
-      if l == src then
-        table.insert(rows, row)
-        break
-      end
-    end
-  end
-
-  local label = rub_label(sources[1]) .. (#sources > 1 and (' +' .. (#sources - 1)) or '')
-  buf:clear_selection()
-  require('gitbutler.ui.status').rerender()
-  require('gitbutler.ui.modes').enter(buf, 'move', { kind = kind, ids = ids, rows = rows, label = label }, {
-    above = false,
-  })
+  clear_marks(buf)
+  require('gitbutler.ui.modes').enter(buf, 'move', source, { above = false })
 end
 
----Enter rub mode with every unassigned file as source (reverse rub).
-function M.rub_reverse(buf)
+---Enter amend mode with every unassigned file as the source.
+function M.amend_all(buf)
   local ids, rows = {}, {}
   for row, line in ipairs(buf.lines or {}) do
     if line.type == 'file' and line.data and line.data.unassigned and line.data.cli_id then
@@ -1248,7 +1237,27 @@ function M.rub_reverse(buf)
     return
   end
   local label = #ids .. ' unassigned file' .. (#ids > 1 and 's' or '')
-  require('gitbutler.ui.modes').enter_rub(buf, { kind = 'file', ids = ids, rows = rows, label = label })
+  require('gitbutler.ui.modes').enter_verb(buf, 'amend', {
+    kind = 'file',
+    ids = ids,
+    rows = rows,
+    label = label,
+  })
+end
+
+---Uncommit the marked (or cursor) commits / committed files back to the
+---uncommitted area. No target, so no mode: one call, undoable with `u`.
+function M.uncommit(buf)
+  local source = capture_source(buf)
+  if not source or (source.kind ~= 'commit' and source.kind ~= 'committed_file') then
+    vim.notify('gitbutler: place the cursor on a commit or a file in a commit', vim.log.levels.WARN)
+    return
+  end
+  clear_marks(buf)
+  notify_start('uncommit')
+  cli.uncommit(source.ids, function(err, result)
+    notify_result('uncommit ' .. source.label, err, result)
+  end)
 end
 
 ---Pure scanner: from row `from`, move `count` selectable rows in `dir` (1/-1).

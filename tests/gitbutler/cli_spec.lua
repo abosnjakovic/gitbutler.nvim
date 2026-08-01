@@ -6,9 +6,9 @@ local test, assert_eq, assert_truthy, assert_falsy = h.test, h.assert_eq, h.asse
 print('\n=== cli argument-construction tests ===')
 
 -- The convenience wrappers are the churny surface: a wrong flag, a dropped
--- positional, or a mis-ordered `-p` loop silently issues the wrong `but`
--- command. These stub M.run and assert the exact arg list each wrapper builds
--- (the literal `--json` token, before normalise_args rewrites it).
+-- positional, or a mis-built target flag silently issues the wrong `but`
+-- command. These stub M.run and assert the exact arg list each wrapper builds,
+-- which is also exactly what reaches the process.
 
 ---Capture the args a wrapper passes to M.run. Restores M.run after.
 ---@param invoke fun() calls the wrapper under test
@@ -54,90 +54,127 @@ test('status: status --json -f -v', function()
   )
 end)
 
-test('commit: branch + create + message + per-file ids in order, --json last', function()
+test('commit: --branch target + message + per-file ids in order, --json last', function()
   local args = capture(function()
-    cli.commit('feat', 'msg', noop, { 'aa', 'bb' }, true)
+    cli.commit({ branch = 'feat' }, 'msg', noop, { 'aa', 'bb' })
   end)
-  assert_eq('commit feat -c -m msg -p aa -p bb --json', table.concat(args, ' '))
+  assert_eq('commit --branch feat -m msg aa bb --json', table.concat(args, ' '))
 end)
 
-test('commit: omits branch, -c, and -p when not given', function()
+test('commit: omits the target flag and change ids when not given', function()
   local args = capture(function()
     cli.commit(nil, 'just a message', noop)
   end)
   assert_eq('commit -m just a message --json', table.concat(args, ' '))
-  assert_falsy(contains_seq(args, { '-c' }), 'no -c without create')
-  assert_falsy(contains_seq(args, { '-p' }), 'no -p without file ids')
+  assert_falsy(contains_seq(args, { '--branch' }), 'no --branch without a target')
+  assert_falsy(contains_seq(args, { '--unstack' }), 'no --unstack without a target')
 end)
 
-test('commit_at: --after anchor (above = newer in display)', function()
+-- Load-bearing: without -m, but opens $EDITOR — inside the async job that is a
+-- hung process with no terminal to type into.
+test('commit: a nil message becomes --no-message, never left to the CLI', function()
   local args = capture(function()
-    cli.commit_at('feat', 'msg', { after = 'c3' }, noop)
+    cli.commit({ branch = 'feat' }, nil, noop)
   end)
-  assert_eq('commit feat -m msg --after c3 --json', table.concat(args, ' '))
+  assert_eq('commit --branch feat --no-message --json', table.concat(args, ' '))
+  assert_falsy(contains_seq(args, { '-m' }), 'no -m without a message')
 end)
 
-test('commit_at: --before anchor (below)', function()
+test('commit: --above anchor (above = newer in display)', function()
   local args = capture(function()
-    cli.commit_at('feat', 'msg', { before = 'c3' }, noop)
+    cli.commit({ above = 'c3' }, 'msg', noop)
   end)
-  assert_eq('commit feat -m msg --before c3 --json', table.concat(args, ' '))
+  assert_eq('commit --above c3 -m msg --json', table.concat(args, ' '))
 end)
 
-test('commit_empty: anchors on --after', function()
+test('commit: --below anchor (below = older in display)', function()
+  local args = capture(function()
+    cli.commit({ below = 'c3' }, 'msg', noop)
+  end)
+  assert_eq('commit --below c3 -m msg --json', table.concat(args, ' '))
+end)
+
+test('commit_empty: anchors on --above', function()
   assert_eq(
-    'commit empty --after br --json',
+    'commit --empty --no-message --above br --json',
     table.concat(
       capture(function()
-        cli.commit_empty({ after = 'br' }, noop)
+        cli.commit_empty({ above = 'br' }, noop)
       end),
       ' '
     )
   )
 end)
 
-test('move: bare (no --after) is the default before/below placement', function()
+test('move: --above places the source newer than the anchor', function()
+  local args = capture(function()
+    cli.move({ 'c1' }, { above = 'c2' }, noop)
+  end)
+  assert_eq('move c1 --above c2 --json', table.concat(args, ' '))
+end)
+
+test('move: --below places the source older than the anchor', function()
+  local args = capture(function()
+    cli.move({ 'c1' }, { below = 'c2' }, noop)
+  end)
+  assert_eq('move c1 --below c2 --json', table.concat(args, ' '))
+end)
+
+test('move: --branch targets a branch by name', function()
+  local args = capture(function()
+    cli.move({ 'c1' }, { branch = 'feat' }, noop)
+  end)
+  assert_eq('move c1 --branch feat --json', table.concat(args, ' '))
+end)
+
+test('move: --unstack takes no value', function()
+  local args = capture(function()
+    cli.move({ 'c1' }, { unstack = true }, noop)
+  end)
+  assert_eq('move c1 --unstack --json', table.concat(args, ' '))
+end)
+
+test('move: multiple sources are separate argv items, not comma-joined', function()
+  local args = capture(function()
+    cli.move({ 'c1', 'c2' }, { branch = 'br' }, noop)
+  end)
+  assert_eq('move c1 c2 --branch br --json', table.concat(args, ' '))
+  assert_falsy(contains_seq(args, { 'c1,c2' }), 'sources must not be comma-joined')
+end)
+
+test('amend: -t target then the source ids', function()
+  local args = capture(function()
+    cli.amend('c1', { 'aa', 'bb' }, noop)
+  end)
+  assert_eq('amend -t c1 aa bb --json', table.concat(args, ' '))
+end)
+
+test('amend: no sources means all of zz', function()
+  local args = capture(function()
+    cli.amend('c1', nil, noop)
+  end)
+  assert_eq('amend -t c1 --json', table.concat(args, ' '))
+end)
+
+test('uncommit: every source in one call', function()
   assert_eq(
-    'move c1 c2 --json',
+    'uncommit c1 c2 --json',
     table.concat(
       capture(function()
-        cli.move('c1', 'c2', noop)
+        cli.uncommit({ 'c1', 'c2' }, noop)
       end),
       ' '
     )
   )
 end)
 
-test('move: opts.after appends --after before --json', function()
+-- One call for the whole selection, so one undoable oplog entry.
+test('discard: every id in one call', function()
   assert_eq(
-    'move c1 c2 --after --json',
+    'discard xw:1 xw:2 --json',
     table.concat(
       capture(function()
-        cli.move('c1', 'c2', noop, { after = true })
-      end),
-      ' '
-    )
-  )
-end)
-
-test('move: comma-joined multi-source is passed through verbatim', function()
-  assert_eq(
-    'move c1,c2 br --json',
-    table.concat(
-      capture(function()
-        cli.move('c1,c2', 'br', noop)
-      end),
-      ' '
-    )
-  )
-end)
-
-test('rub: source then target', function()
-  assert_eq(
-    'rub up br --json',
-    table.concat(
-      capture(function()
-        cli.rub('up', 'br', noop)
+        cli.discard({ 'xw:1', 'xw:2' }, noop)
       end),
       ' '
     )
@@ -192,40 +229,29 @@ test('push: includes the branch when given', function()
   )
 end)
 
-test('squash: a single commit id', function()
-  assert_eq(
-    'squash --json c1',
-    table.concat(
-      capture(function()
-        cli.squash('c1', noop)
-      end),
-      ' '
-    )
-  )
+-- `-u` is mandatory, not cosmetic: without a message flag but opens an editor,
+-- which inside the async job hangs with nothing to type into.
+test('squash: a single source into -t target, keeping the target message', function()
+  local args = capture(function()
+    cli.squash({ 'c1' }, 'c2', noop)
+  end)
+  assert_eq('squash -t c2 -u c1 --json', table.concat(args, ' '))
 end)
 
-test('squash: a list of commit ids', function()
-  assert_eq(
-    'squash --json c1 c2 c3',
-    table.concat(
-      capture(function()
-        cli.squash({ 'c1', 'c2', 'c3' }, noop)
-      end),
-      ' '
-    )
-  )
+test('squash: a list of sources into -t target', function()
+  local args = capture(function()
+    cli.squash({ 'c1', 'c2', 'c3' }, 'br', noop)
+  end)
+  assert_eq('squash -t br -u c1 c2 c3 --json', table.concat(args, ' '))
+  assert_truthy(contains_seq(args, { '-u' }), 'never leaves the message to an editor')
 end)
 
-test('unapply: forces with -f', function()
-  assert_eq(
-    'unapply br -f --json',
-    table.concat(
-      capture(function()
-        cli.unapply('br', noop)
-      end),
-      ' '
-    )
-  )
+test('unapply: no -f (the flag is gone in 0.22)', function()
+  local args = capture(function()
+    cli.unapply('br', noop)
+  end)
+  assert_eq('unapply br --json', table.concat(args, ' '))
+  assert_falsy(contains_seq(args, { '-f' }), '-f is not a but 0.22 unapply flag')
 end)
 
 test('land: passes --yes so it never blocks on a prompt', function()
@@ -285,35 +311,50 @@ test('oplog_snapshot: -m only when a message is given', function()
   )
 end)
 
--- The --json → --format=json translation is load-bearing (the module comment
--- calls it "the only line to update" if the CLI flag changes again). It's a
--- local function, so exercise it through run_sync by stubbing vim.system and
--- inspecting the command that actually reaches the process.
+-- The 0.22 cutover is load-bearing: a CLI still advertising `--format` predates
+-- the surface this plugin speaks, so cli.lua probes `status --help` once and
+-- refuses outright rather than issuing retired syntax. Exercise both verdicts
+-- through run_sync by stubbing vim.system and inspecting what reaches it.
 
----Stub vim.system for a synchronous run. Returns the captured cmd.
-local function with_system(exit, invoke)
+---Stub vim.system for a synchronous run. Returns the last captured non-probe
+---cmd (nil when nothing was spawned); the `status --help` capability probe is
+---answered from `help`.
+local function with_system(exit, invoke, help)
   local captured_cmd
   local orig = vim.system
   vim.system = function(cmd, _opts)
-    captured_cmd = cmd
+    local is_probe = cmd[#cmd] == '--help'
+    if not is_probe then
+      captured_cmd = cmd
+    end
     return {
       wait = function()
-        return exit
+        return is_probe and { code = 0, stdout = help or '' } or exit
       end,
     }
   end
+  cli.supported = nil
   local err, res = invoke()
   vim.system = orig
+  cli.supported = nil
   return captured_cmd, err, res
 end
 
-test('run_sync: normalises --json to --format=json and prepends the cmd', function()
+test('run_sync: passes --json through on 0.22 CLIs and prepends the cmd', function()
   local cmd = with_system({ code = 0, stdout = '{}' }, function()
     return cli.run_sync({ 'status', '--json' })
-  end)
+  end, '      --json\n          Output detailed information as JSON')
   assert_eq(config.values.cmd, cmd[1])
-  assert_truthy(contains_seq(cmd, { '--format=json' }), 'json flag translated')
-  assert_falsy(contains_seq(cmd, { '--json' }), 'literal --json must not survive')
+  assert_truthy(contains_seq(cmd, { '--json' }), 'boolean json flag kept')
+  assert_falsy(contains_seq(cmd, { '--format=json' }), 'args must reach but verbatim')
+end)
+
+test('run_sync: refuses a pre-0.22 CLI without spawning the command', function()
+  local cmd, err = with_system({ code = 0, stdout = '{}' }, function()
+    return cli.run_sync({ 'status', '--json' })
+  end, '      --format <FORMAT>  Output format')
+  assert_eq(nil, cmd)
+  assert_truthy(err and err:find(cli.MIN_VERSION, 1, true), 'error names the minimum version')
 end)
 
 test('run_sync: decodes JSON stdout on success', function()
@@ -349,6 +390,7 @@ end)
 -- M.run is the async production path. Simulate vim.system's streaming stdout +
 -- on_exit contract, then drain the vim.schedule the callback runs inside.
 local function run_async(exit, chunks, args)
+  cli.supported = true -- pre-seed so no synchronous capability probe runs
   local orig = vim.system
   vim.system = function(_cmd, opts, on_exit)
     for _, c in ipairs(chunks or {}) do
@@ -376,6 +418,7 @@ test('run: async success decodes the streamed JSON chunks', function()
 end)
 
 test('run: async failure surfaces streamed stderr', function()
+  cli.supported = true -- pre-seed so no synchronous capability probe runs
   local orig = vim.system
   vim.system = function(_cmd, opts, on_exit)
     opts.stderr(nil, 'boom')
@@ -392,4 +435,23 @@ test('run: async failure surfaces streamed stderr', function()
   vim.system = orig
   assert_truthy(done)
   assert_eq('boom', err)
+end)
+
+test('run: refuses a pre-0.22 CLI without spawning the command', function()
+  cli.supported = false
+  local orig = vim.system
+  local spawned = false
+  vim.system = function()
+    spawned = true
+    return { wait = function() end }
+  end
+  local done, err
+  cli.run({ 'status', '--json' }, function(e)
+    done, err = true, e
+  end)
+  vim.system = orig
+  cli.supported = nil
+  assert_falsy(spawned, 'nothing spawned on an unsupported CLI')
+  assert_truthy(done, 'callback fired')
+  assert_truthy(err and err:find(cli.MIN_VERSION, 1, true), 'callback got the unsupported error')
 end)

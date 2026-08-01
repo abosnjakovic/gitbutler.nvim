@@ -1,7 +1,7 @@
 local M = {}
 
 ---@class ModeState
----@field mode 'rub'|'commit'|'move'|'stack'
+---@field mode 'amend'|'squash'|'commit'|'move'|'stack'
 ---@field source? { kind: string, ids: string[], rows: integer[], label: string }
 ---@field opts table  -- e.g. { above = false }
 M.state = nil -- nil == normal mode
@@ -10,36 +10,27 @@ function M.current()
   return M.state and M.state.mode or 'normal'
 end
 
----Verb label for rubbing `source_kind` onto `target_kind`; nil = invalid target.
-local VERBS = {
-  file = { zz = 'unassign', commit = 'amend', branch = 'assign' },
-  cfile = { zz = 'uncommit', commit = 'move file', branch = 'uncommit to' },
-  commit = { zz = 'undo commit', commit = 'squash', branch = 'move commit' },
-  branch = { zz = 'unassign all', commit = 'amend all', branch = 'reassign' },
-  zz = { commit = 'amend all', branch = 'assign all' },
+---Verb modes: a source set is captured in normal mode, then dropped on a
+---commit or branch row. `sources` gates which row types may act as a source
+---for each verb; the valid targets are the same for both.
+local VERB_SPECS = {
+  amend = { sources = { file = true, uncommitted_header = true }, pill = 'amend into' },
+  squash = { sources = { commit = true, branch = true, committed_file = true }, pill = 'squash into' },
 }
+M.verb_specs = VERB_SPECS
 
-local KIND = {
-  file = 'file',
-  committed_file = 'cfile',
-  commit = 'commit',
-  branch = 'branch',
-  uncommitted_header = 'zz',
-}
-
----Verb label for rubbing a `source_type` row onto a `target_type` row; nil = invalid target.
+---Whether `verb` accepts `source_type` rows as its source.
+---@param verb string
 ---@param source_type string
----@param target_type string
----@return string?
-function M.rub_verb(source_type, target_type)
-  local s, t = KIND[source_type], KIND[target_type]
-  return s and t and VERBS[s] and VERBS[s][t] or nil
+---@return boolean
+function M.accepts_source(verb, source_type)
+  local spec = VERB_SPECS[verb]
+  return (spec and spec.sources[source_type]) == true
 end
 
 ---Keys owned by the mode layer. On every transition ALL of these plus the
 ---normal-map keys are deleted, then the target mode's set is bound.
----Filled in by later tasks (rub/commit/move/stack).
-local MODE_KEYS = { rub = {}, commit = {}, move = {}, stack = {} }
+local MODE_KEYS = { amend = {}, squash = {}, commit = {}, move = {}, stack = {} }
 M._mode_keys = MODE_KEYS
 
 local NAV_ACTIONS = {
@@ -125,12 +116,13 @@ end
 ---Extmark namespace for mode overlays (source tags, verb pills, dimming).
 M.ns = vim.api.nvim_create_namespace('gitbutler-mode')
 
----A row is a valid rub target iff the verb table has an entry and it is not a source row.
+---A row is a valid verb-mode target iff it is a commit or branch row that is
+---not itself one of the sources.
 ---@param state ModeState
 ---@param line GitButlerLine
 ---@param row integer
 ---@return boolean
-function M.is_rub_target(state, line, row)
+function M.is_verb_target(state, line, row)
   if not line.selectable then
     return false
   end
@@ -139,7 +131,7 @@ function M.is_rub_target(state, line, row)
       return false
     end
   end
-  return M.rub_verb(state.source.kind, line.type) ~= nil
+  return line.type == 'commit' or line.type == 'branch'
 end
 
 ---A row is a valid commit-mode target iff it is a branch or commit row.
@@ -175,34 +167,34 @@ function M.is_move_target(state, line, row)
   return line.type == 'commit' or line.type == 'branch'
 end
 
----Anchor table for `but commit --before/--after`. In but's display, --after
----lands above the target and --before lands below it, so the marker position
----(opts.above) maps to --after and the default (below) to --before.
+---Targeting table for `but commit`. `--above` places the new commit above the
+---target in but's display, which is where the insert marker sits when
+---`opts.above` is set; the default is `--below`.
 ---@param opts { above?: boolean }
 ---@param cli_id string
----@return { before?: string, after?: string }
+---@return { above?: string, below?: string }
 function M._commit_anchor(opts, cli_id)
   if opts.above then
-    return { after = cli_id }
+    return { above = cli_id }
   end
-  return { before = cli_id }
+  return { below = cli_id }
 end
 
----`but move` argument tuple for the current source and a target row.
+---`but move` sources and targeting table for the current source and a target row.
 ---@param state ModeState
 ---@param line GitButlerLine
----@return string src, string target, { after: boolean }? opts
+---@return string[] sources, { above?: string, below?: string, branch?: string, unstack?: boolean } target
 function M._move_args(state, line)
-  local src = table.concat(state.source.ids, ',')
+  local sources = state.source.ids
   if line.type == 'merge_base' then
-    return src, 'zz', nil
+    return sources, { unstack = true }
   end
-  if line.type == 'commit' and state.source.kind == 'commit' then
-    -- but's --after lands the source above the target in the display and the
-    -- default (--before) below it, so opts.above maps straight to --after.
-    return src, line.data.cli_id, { after = state.opts.above }
+  if line.type == 'branch' then
+    -- `--branch` creates the branch when it does not exist, so it takes the
+    -- name rather than the row's cli id.
+    return sources, { branch = line.data.name or line.data.cli_id }
   end
-  return src, line.data.cli_id, nil
+  return sources, M._commit_anchor(state.opts, line.data.cli_id)
 end
 
 ---Move-mode pill label for a target row.
@@ -217,17 +209,6 @@ function M._move_pill(state, line)
     return '<< move to top >>'
   end
   return state.opts.above and '<< move above >>' or '<< move below >>'
-end
-
----`but rub` target id for a row: literal 'zz' for the uncommitted header,
----else the row's cli id.
----@param line GitButlerLine
----@return string?
-function M._rub_target_id(line)
-  if line.type == 'uncommitted_header' then
-    return 'zz'
-  end
-  return line.data and line.data.cli_id or nil
 end
 
 ---CursorMoved hook for the active mode: redraw the verb pill (and, in commit
@@ -259,11 +240,12 @@ function M._on_cursor_moved(buf)
   end
 
   local pill
-  if state.mode == 'rub' then
-    if not M.is_rub_target(state, line, row) then
+  local spec = VERB_SPECS[state.mode]
+  if spec then
+    if not M.is_verb_target(state, line, row) then
       return
     end
-    pill = '<< ' .. M.rub_verb(state.source.kind, line.type) .. ' >>'
+    pill = '<< ' .. spec.pill .. ' >>'
   elseif state.mode == 'commit' then
     if not M.is_commit_target(line) then
       return
@@ -332,13 +314,17 @@ local function setup_mode(buf, is_target, source_rows)
   return true
 end
 
+---Verb modes share one entry hook: both filter to commit and branch targets.
+local function verb_setup(buf)
+  return setup_mode(buf, function(line, row)
+    return M.is_verb_target(M.state, line, row)
+  end, M.state.source.rows)
+end
+
 ---Per-mode entry hooks run by M.enter after state/keymap/augroup are in place.
 local SETUP = {
-  rub = function(buf)
-    return setup_mode(buf, function(line, row)
-      return M.is_rub_target(M.state, line, row)
-    end, M.state.source.rows)
-  end,
+  amend = verb_setup,
+  squash = verb_setup,
   commit = function(buf)
     return setup_mode(buf, function(line)
       return M.is_commit_target(line)
@@ -351,63 +337,19 @@ local SETUP = {
   end,
 }
 
----Enter rub mode with a captured source.
+---Enter a verb mode with a captured source, rejecting source kinds the verb
+---cannot take.
 ---@param buf GitButlerBuffer
+---@param verb 'amend'|'squash'
 ---@param source { kind: string, ids: string[], rows: integer[], label: string }
 ---@return boolean entered
-function M.enter_rub(buf, source)
-  return M.enter(buf, 'rub', source)
+function M.enter_verb(buf, verb, source)
+  if not M.accepts_source(verb, source.kind) then
+    vim.notify('gitbutler: cannot ' .. verb .. ' a ' .. tostring(source.kind), vim.log.levels.WARN)
+    return false
+  end
+  return M.enter(buf, verb, source)
 end
-
----Confirm the rub: target = cursor row; rub each source id onto it in
----sequence. The mode is exited BEFORE the CLI chain runs so the refresh
----always re-renders normal mode.
----@param buf GitButlerBuffer
-function M._rub_confirm(buf)
-  local state = M.state
-  if not state or state.busy then
-    return
-  end
-  if not (buf.win and vim.api.nvim_win_is_valid(buf.win)) then
-    return
-  end
-  local row = vim.api.nvim_win_get_cursor(buf.win)[1]
-  local line = buf.lines and buf.lines[row]
-  if not line or not M.is_rub_target(state, line, row) then
-    return
-  end
-  local target_id = M._rub_target_id(line)
-  if not target_id then
-    vim.notify('gitbutler: target row has no CLI id', vim.log.levels.WARN)
-    return
-  end
-
-  state.busy = true
-  local ids = state.source.ids
-  M.exit(buf)
-
-  local cli = require('gitbutler.cli')
-  local status = require('gitbutler.ui.status')
-  local i = 0
-  local function rub_next()
-    i = i + 1
-    if i > #ids then
-      status.refresh()
-      return
-    end
-    cli.rub(ids[i], target_id, function(err)
-      if err then
-        vim.notify('gitbutler rub: ' .. err, vim.log.levels.ERROR)
-        status.refresh()
-        return
-      end
-      rub_next()
-    end)
-  end
-  rub_next()
-end
-
-MODE_KEYS.rub['<CR>'] = M._rub_confirm
 
 ---Cursor line when it passes `is_target`; nil (and no-op) otherwise.
 ---@param buf GitButlerBuffer
@@ -423,6 +365,49 @@ local function target_under_cursor(buf, is_target)
   end
   return line, row
 end
+
+---Confirm a verb mode: the cursor row is the target and every source goes in
+---one CLI call, so the whole drop is a single undoable operation. The mode is
+---exited BEFORE the call so the refresh always re-renders normal mode.
+---@param buf GitButlerBuffer
+function M._verb_confirm(buf)
+  local state = M.state
+  if not state or state.busy then
+    return
+  end
+  local line = target_under_cursor(buf, function(l, r)
+    return M.is_verb_target(state, l, r)
+  end)
+  if not line then
+    return
+  end
+  local target_id = line.data and line.data.cli_id
+  if not target_id then
+    vim.notify('gitbutler: target row has no CLI id', vim.log.levels.WARN)
+    return
+  end
+
+  state.busy = true
+  local verb, ids = state.mode, state.source.ids
+  M.exit(buf)
+
+  local cli = require('gitbutler.cli')
+  local status = require('gitbutler.ui.status')
+  local function done(err)
+    if err then
+      vim.notify('gitbutler ' .. verb .. ': ' .. err, vim.log.levels.ERROR)
+    end
+    status.refresh()
+  end
+  if verb == 'amend' then
+    cli.amend(target_id, ids, done)
+  else
+    cli.squash(ids, target_id, done)
+  end
+end
+
+MODE_KEYS.amend['<CR>'] = M._verb_confirm
+MODE_KEYS.squash['<CR>'] = M._verb_confirm
 
 ---Confirm a commit-mode target: exit the mode, collect the message (input
 ---float, skipped for empty commits), then run the CLI call and refresh.
@@ -443,32 +428,25 @@ function M._commit_confirm(buf)
 
   local cli = require('gitbutler.cli')
   local status = require('gitbutler.ui.status')
-  local function do_commit(message)
-    local function done(err)
-      if err then
-        vim.notify('gitbutler commit: ' .. err, vim.log.levels.ERROR)
-      end
-      status.refresh()
+  local target = line.type == 'branch' and { branch = line.data.name } or M._commit_anchor(opts, line.data.cli_id)
+  local function done(err)
+    if err then
+      vim.notify('gitbutler commit: ' .. err, vim.log.levels.ERROR)
     end
-    if line.type == 'branch' then
-      cli.commit(line.data.name, message, done)
-    else
-      cli.commit_at(line.data.branch_name, message, M._commit_anchor(opts, line.data.cli_id), done)
-    end
+    status.refresh()
   end
 
   if opts.empty then
-    -- ponytail: `but commit` rejects a missing -m by opening an editor and
-    -- `-m ''` acceptance is unverified; a single-space message is the plan's
-    -- documented fallback. Swap to '' if the CLI is confirmed to take it.
-    do_commit(' ')
+    cli.commit_empty(target, done)
     return
   end
 
   local branch_name = line.type == 'branch' and line.data.name or line.data.branch_name
   require('gitbutler.ui.float').input({
     title = 'Commit to ' .. (branch_name or '?'),
-    on_submit = do_commit,
+    on_submit = function(message)
+      cli.commit(target, message, done)
+    end,
   })
 end
 
@@ -487,7 +465,7 @@ MODE_KEYS.commit['e'] = function(buf)
 end
 
 ---Confirm a move-mode target: exit the mode, then one `but move` call with
----comma-joined sources and refresh.
+---every source and refresh.
 ---@param buf GitButlerBuffer
 function M._move_confirm(buf)
   local state = M.state
@@ -502,16 +480,16 @@ function M._move_confirm(buf)
   end
 
   state.busy = true
-  local src, target, move_opts = M._move_args(state, line)
+  local sources, target = M._move_args(state, line)
   M.exit(buf)
 
   local status = require('gitbutler.ui.status')
-  require('gitbutler.cli').move(src, target, function(err)
+  require('gitbutler.cli').move(sources, target, function(err)
     if err then
       vim.notify('gitbutler move: ' .. err, vim.log.levels.ERROR)
     end
     status.refresh()
-  end, move_opts)
+  end)
 end
 
 ---Stack mode `a` — apply: fuzzy-pick an unapplied branch, apply it, refresh.

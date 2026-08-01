@@ -1,3 +1,23 @@
+## [3.0.0] - 2026-08-01
+
+### Features
+
+- feat(cli)!: migrate to the but 0.22 command surface; requires but 0.22.0+
+- feat(cli)!: refuse pre-0.22 CLIs instead of adapting the JSON flag
+- feat(cli)!: replace rub with explicit amend, squash and uncommit verbs
+- feat(cli)!: target commit and move with --branch/--above/--below/--unstack
+- feat(cli)!: drop CLI assignments — no assign, unassign or reassign verb
+- feat(cli): batch discard into a single call, so one undoable oplog entry
+- feat(tui)!: keymap a amend, R amend-all, S squash, w uncommit; r unbound
+- feat(details)!: a amends the marked hunks; the pane's r binding is gone
+- feat(log): S squashes a commit into the one below it, its parent
+- feat(cli): squash with -u, keeping the target's message, so no editor opens
+
+### Bug Fixes
+
+- fix(cli): unapply no longer passes the removed -f flag
+- fix(actions): read the commitId that but 0.22 returns from commit --json
+
 ## [2.0.0] - 2026-07-22
 
 ### Features

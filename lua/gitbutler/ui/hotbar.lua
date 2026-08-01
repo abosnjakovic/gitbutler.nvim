@@ -6,7 +6,8 @@ M.normal_items = {
   { 'j', 'down' },
   { 'k', 'up' },
   { 'space', 'mark' },
-  { 'r', 'rub' },
+  { 'a', 'amend' },
+  { 'S', 'squash' },
   { 'c', 'commit' },
   { 'm', 'move' },
   { 's', 'stack' },
@@ -25,7 +26,13 @@ M.normal_items = {
 
 ---Hotbar items for the operation modes.
 local MODE_ITEMS = {
-  rub = {
+  amend = {
+    { 'j', 'target' },
+    { 'k', 'target' },
+    { '<cr>', 'confirm' },
+    { 'esc', 'cancel' },
+  },
+  squash = {
     { 'j', 'target' },
     { 'k', 'target' },
     { '<cr>', 'confirm' },
@@ -50,7 +57,7 @@ local MODE_ITEMS = {
   },
 }
 
----Hotbar items for a mode ('normal', 'rub', 'commit', 'move', 'stack').
+---Hotbar items for a mode ('normal', 'amend', 'squash', 'commit', 'move', 'stack').
 ---@param mode string
 ---@return {[1]:string,[2]:string,keep?:boolean}[]
 function M.items_for(mode)
@@ -58,7 +65,8 @@ function M.items_for(mode)
 end
 
 local PILL_HL = {
-  rub = 'GitButlerModeRub',
+  amend = 'GitButlerModeAmend',
+  squash = 'GitButlerModeSquash',
   commit = 'GitButlerModeCommit',
   move = 'GitButlerModeMove',
   stack = 'GitButlerModeStack',
@@ -74,7 +82,7 @@ end
 local SEP = ' • '
 
 ---Build the hotbar line for a window width.
----@param mode string mode pill label ('normal', 'rub', …)
+---@param mode string mode pill label ('normal', 'amend', …)
 ---@param items {[1]:string,[2]:string,keep?:boolean}[]
 ---@param width integer window display width
 ---@param pill_hl? string highlight group for the mode pill (default GitButlerModeNormal)

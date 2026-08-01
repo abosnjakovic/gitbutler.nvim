@@ -89,3 +89,22 @@ test('build_lines emits blank separator only when body and files both present', 
   end
   assert_eq(1, indented_blanks, 'one indented separator (commit 1 only; commit 2 has no body)')
 end)
+
+-- `S` in the log view squashes the cursor commit into the one below it, because
+-- `but squash` now needs an explicit target. Getting the direction wrong here
+-- would squash into the wrong commit, so the lookup is pinned to the fixture.
+test('_parent_sha returns the next commit down the newest-first list', function()
+  local data = fixtures.show_branch
+  assert_eq(data.commits[2].sha, log._parent_sha(data, data.commits[1].sha))
+end)
+
+test('_parent_sha returns nil at the oldest commit', function()
+  local data = fixtures.show_branch
+  assert_eq(nil, log._parent_sha(data, data.commits[#data.commits].sha))
+end)
+
+test('_parent_sha returns nil for an unknown sha or a payload without commits', function()
+  assert_eq(nil, log._parent_sha(fixtures.show_branch, 'deadbeef'))
+  assert_eq(nil, log._parent_sha({}, 'deadbeef'))
+  assert_eq(nil, log._parent_sha('nope', 'deadbeef'))
+end)

@@ -21,19 +21,21 @@ test('format_step_error handles empty body', function()
   assert_eq('[gitbutler preflight] ', actions.format_step_error('preflight', ''))
 end)
 
--- The CLI moved the commit SHA from a flat {commit_id} to a nested
--- {result={commit_id}} shape; commit_id_of must read both so `M` survives either.
-test('commit_id_of reads the nested {result={commit_id}} shape', function()
-  assert_eq('abc123', actions.commit_id_of({ result = { commit_id = 'abc123' }, status = {} }))
+-- `but commit --json` on 0.22 returns a flat camelCase {commitId}; the earlier
+-- snake_case and nested {result={commit_id}} shapes are not supported, and
+-- reading them again would silently resurrect the pre-0.22 surface.
+test('commit_id_of reads the flat {commitId} shape', function()
+  assert_eq('def456', actions.commit_id_of({ commitId = 'def456', changeId = 'x', branch = 'feat' }))
 end)
 
-test('commit_id_of falls back to the flat {commit_id} shape', function()
-  assert_eq('def456', actions.commit_id_of({ commit_id = 'def456' }))
+test('commit_id_of returns nil on the retired snake_case and nested shapes', function()
+  assert_eq(nil, actions.commit_id_of({ commit_id = 'abc123' }))
+  assert_eq(nil, actions.commit_id_of({ result = { commit_id = 'abc123' }, status = {} }))
 end)
 
 test('commit_id_of returns nil on missing/empty/non-table input', function()
-  assert_eq(nil, actions.commit_id_of({ result = {} }))
-  assert_eq(nil, actions.commit_id_of({ commit_id = '' }))
+  assert_eq(nil, actions.commit_id_of({}))
+  assert_eq(nil, actions.commit_id_of({ commitId = '' }))
   assert_eq(nil, actions.commit_id_of('nope'))
 end)
 

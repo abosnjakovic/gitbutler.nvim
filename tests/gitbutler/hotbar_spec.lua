@@ -32,15 +32,15 @@ h.test('hotbar: normal_items exist and end with help/quit', function()
   h.assert_eq('q', items[#items][1])
 end)
 
-h.test('hotbar: items_for returns non-empty items for all five modes', function()
-  for _, mode in ipairs({ 'normal', 'rub', 'commit', 'move', 'stack' }) do
+h.test('hotbar: items_for returns non-empty items for all six modes', function()
+  for _, mode in ipairs({ 'normal', 'amend', 'squash', 'commit', 'move', 'stack' }) do
     local items = hotbar.items_for(mode)
     h.assert_truthy(#items > 0, mode .. ' has no items')
   end
   -- keep-flagged ?/q live in normal mode only
   local last = hotbar.items_for('normal')
   h.assert_truthy(last[#last].keep)
-  for _, mode in ipairs({ 'rub', 'commit', 'move', 'stack' }) do
+  for _, mode in ipairs({ 'amend', 'squash', 'commit', 'move', 'stack' }) do
     for _, it in ipairs(hotbar.items_for(mode)) do
       h.assert_falsy(it.keep, mode .. ' should not keep-flag items')
     end
@@ -48,8 +48,10 @@ h.test('hotbar: items_for returns non-empty items for all five modes', function(
 end)
 
 h.test('hotbar: build honours the pill_hl argument', function()
-  local built = hotbar.build('rub', hotbar.items_for('rub'), 200, hotbar.pill_hl('rub'))
-  h.assert_eq('GitButlerModeRub', built.spans[1][3])
+  local built = hotbar.build('amend', hotbar.items_for('amend'), 200, hotbar.pill_hl('amend'))
+  h.assert_eq('GitButlerModeAmend', built.spans[1][3])
+  local squash = hotbar.build('squash', hotbar.items_for('squash'), 200, hotbar.pill_hl('squash'))
+  h.assert_eq('GitButlerModeSquash', squash.spans[1][3])
   local default = hotbar.build('normal', hotbar.normal_items, 200)
   h.assert_eq('GitButlerModeNormal', default.spans[1][3])
 end)

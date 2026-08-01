@@ -73,8 +73,10 @@ M.defaults = {
       -- marks
       ['<Space>'] = 'toggle_select',
       -- modes
-      ['r'] = 'rub_start',
-      ['R'] = 'rub_reverse',
+      ['a'] = 'amend_start',
+      ['R'] = 'amend_all',
+      ['S'] = 'squash_start',
+      ['w'] = 'uncommit',
       ['c'] = 'commit_mode_start',
       ['m'] = 'move_start',
       ['s'] = 'stack_start',

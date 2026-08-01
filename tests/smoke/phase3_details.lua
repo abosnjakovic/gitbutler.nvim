@@ -1,5 +1,5 @@
 -- Phase 3: details pane — open, follow-the-cursor diff, hunk cursor, mark,
--- copy, rub-from-hunk, committed-diff safety, pane-only close.
+-- copy, amend-from-hunk, committed-diff safety, pane-only close.
 -- SKIPs cleanly when the workspace has no scratch file / commit to inspect.
 local H = require('tests.smoke.harness')
 require('gitbutler').setup({ kind = 'current' })
@@ -107,27 +107,34 @@ end
 H.ok('jump-to-code: <CR> opened ' .. scratch .. ' at line ' .. hunk.line .. ', pane still open')
 vim.api.nvim_set_current_win(details.win_state.win)
 
--- Rub from the hunk -> status-side rub mode with the hunk id.
-H.press(dbuf, '<Space>') -- unmark so the source is the selected hunk
-local hunk_id = details.win_state.hunks[details.win_state.selected].id
-H.press(dbuf, 'r')
-if modes.current() ~= 'rub' then
-  H.fail('r did not enter rub mode')
-end
-if modes.state.source.kind ~= 'file' or modes.state.source.ids[1] ~= hunk_id then
-  H.fail('rub source is not the hunk id as kind=file')
-end
-if vim.api.nvim_get_current_win() ~= buf.win then
-  H.fail('rub from hunk did not focus the status window')
-end
-H.ok('rub from hunk: kind=file id=' .. hunk_id)
+-- Amend from the hunk -> status-side amend mode with the hunk id. `but amend`
+-- lands on a commit or a branch tip, so the mode needs one of those rows to
+-- target; a workspace with no applied stack has neither.
+local verb_target = H.find_row(buf, 'commit') or H.find_row(buf, 'branch')
+if verb_target then
+  H.press(dbuf, '<Space>') -- unmark so the source is the selected hunk
+  local hunk_id = details.win_state.hunks[details.win_state.selected].id
+  H.press(dbuf, 'a')
+  if modes.current() ~= 'amend' then
+    H.fail('a did not enter amend mode')
+  end
+  if modes.state.source.kind ~= 'file' or modes.state.source.ids[1] ~= hunk_id then
+    H.fail('amend source is not the hunk id as kind=file')
+  end
+  if vim.api.nvim_get_current_win() ~= buf.win then
+    H.fail('amend from hunk did not focus the status window')
+  end
+  H.ok('amend from hunk: kind=file id=' .. hunk_id)
 
--- Esc unwinds the mode; the pane survives.
-modes.back(buf)
-if modes.current() ~= 'normal' or not details.is_open() then
-  H.fail('Esc did not leave the mode with the pane still open')
+  -- Esc unwinds the mode; the pane survives.
+  modes.back(buf)
+  if modes.current() ~= 'normal' or not details.is_open() then
+    H.fail('Esc did not leave the mode with the pane still open')
+  end
+  H.ok('esc: mode exits, pane survives')
+else
+  H.skip('no commit or branch row to amend into; amend-from-hunk needs a target')
 end
-H.ok('esc: mode exits, pane survives')
 
 -- Committed diff: navigation works, ops are a safe no-op (no crash).
 local commit_row = H.find_row(buf, 'commit')

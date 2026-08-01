@@ -140,7 +140,7 @@ end)
 
 -- ── Empty commit insertion (`n`) ───────────────
 
-test('insert_empty_commit anchors after the cursor commit or branch', function()
+test('insert_empty_commit anchors above the cursor commit or branch', function()
   local captured
   local original_commit_empty = cli.commit_empty
   local original_notify = vim.notify
@@ -162,11 +162,11 @@ test('insert_empty_commit anchors after the cursor commit or branch', function()
   end
 
   actions.insert_empty_commit(buf)
-  assert_eq('cd', captured.after, 'commit row anchors after its cli id')
+  assert_eq('cd', captured.above, 'commit row anchors above its cli id')
 
   cursor_row = 2
   actions.insert_empty_commit(buf)
-  assert_eq('bb', captured.after, 'branch row anchors after the branch cli id')
+  assert_eq('bb', captured.above, 'branch row anchors above the branch cli id')
 
   captured = nil
   cursor_row = 3
@@ -296,16 +296,15 @@ test('actions.but_command aborts on empty input without calling cli.run', functi
   cli.run, vim.fn.input = original_run, original_input
 end)
 
-test('rub_start captures only the marked files as source (assignment via rub)', function()
-  -- Assignment is now done by rubbing files onto a branch; the invariant the
-  -- old assign_to_branch test protected — only the marked files get operated
-  -- on — must hold for the rub source capture.
+test('amend_start captures only the marked files as source', function()
+  -- The invariant is inherited from the old assign_to_branch test: only the
+  -- MARKED rows become the operation's source, never every row in the section.
   local modes = require('gitbutler.ui.modes')
-  local captured
-  local original_enter_rub = modes.enter_rub
+  local captured_verb, captured
+  local original_enter_verb = modes.enter_verb
   local original_notify = vim.notify
-  modes.enter_rub = function(_, source)
-    captured = source
+  modes.enter_verb = function(_, verb, source)
+    captured_verb, captured = verb, source
   end
   vim.notify = function() end
 
@@ -317,8 +316,9 @@ test('rub_start captures only the marked files as source (assignment via rub)', 
   }
   buf.selected = { f1 = true, f3 = true }
 
-  actions.rub_start(buf)
+  actions.amend_start(buf)
 
+  assert_eq('amend', captured_verb, 'amend_start must enter the amend verb')
   assert_eq('file', captured.kind)
   assert_eq(2, #captured.ids, 'only the 2 marked files become sources')
   assert_eq('f1', captured.ids[1])
@@ -326,8 +326,75 @@ test('rub_start captures only the marked files as source (assignment via rub)', 
   assert_eq(1, captured.rows[1])
   assert_eq(3, captured.rows[2])
 
-  modes.enter_rub = original_enter_rub
+  modes.enter_verb = original_enter_verb
   vim.notify = original_notify
+end)
+
+-- ── Uncommit (`w`) ───────────────
+
+test('actions.uncommit rejects rows that are neither commits nor committed files', function()
+  local called = false
+  local warned
+  local original_uncommit, original_notify = cli.uncommit, vim.notify
+  cli.uncommit = function()
+    called = true
+  end
+  vim.notify = function(msg, level)
+    warned = { msg = msg, level = level }
+  end
+
+  local buf = h.mock_buffer()
+  buf.lines = {
+    { type = 'file', selectable = true, data = { cli_id = 'f1', path = 'a.lua' } },
+  }
+  buf.get_cursor_line = function(self)
+    return self.lines[1]
+  end
+
+  actions.uncommit(buf)
+
+  assert_eq(false, called, 'an uncommitted file row must not reach cli.uncommit')
+  assert_truthy(warned, 'a rejected row must warn instead of silently doing nothing')
+  assert_eq(vim.log.levels.WARN, warned.level)
+
+  cli.uncommit, vim.notify = original_uncommit, original_notify
+end)
+
+test('actions.uncommit makes one call with the marked ids and enters no mode', function()
+  local modes = require('gitbutler.ui.modes')
+  local calls, entered = {}, 0
+  local original_uncommit, original_notify = cli.uncommit, vim.notify
+  local original_enter, original_enter_verb = modes.enter, modes.enter_verb
+  cli.uncommit = function(ids, cb)
+    table.insert(calls, ids)
+    cb(nil, 'ok')
+  end
+  modes.enter = function()
+    entered = entered + 1
+  end
+  modes.enter_verb = function()
+    entered = entered + 1
+  end
+  vim.notify = function() end
+
+  local buf = h.mock_buffer()
+  buf.lines = {
+    { type = 'committed_file', data = { cli_id = 'k1', path = 'a.lua' } },
+    { type = 'committed_file', data = { cli_id = 'k2', path = 'b.lua' } },
+    { type = 'committed_file', data = { cli_id = 'k3', path = 'c.lua' } },
+  }
+  buf.selected = { k1 = true, k3 = true }
+
+  actions.uncommit(buf)
+
+  assert_eq(1, #calls, 'uncommit must be a single batched call, not a per-id chain')
+  assert_eq(2, #calls[1], 'only the marked rows are uncommitted')
+  assert_eq('k1', calls[1][1])
+  assert_eq('k3', calls[1][2])
+  assert_eq(0, entered, 'uncommit acts immediately: it has no target mode')
+
+  cli.uncommit, vim.notify = original_uncommit, original_notify
+  modes.enter, modes.enter_verb = original_enter, original_enter_verb
 end)
 
 h.test('toggle_fold parks the cursor back on the fold header after rerender', function()

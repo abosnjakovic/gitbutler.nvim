@@ -1,4 +1,4 @@
--- Phase 2: rub mode round-trip, jump, Esc chain, undo gating, commit mode.
+-- Phase 2: amend mode round-trip, jump, Esc chain, undo gating, commit mode.
 -- Branch-dependent steps SKIP when the workspace has no applied branch.
 local H = require('tests.smoke.harness')
 require('gitbutler').setup({ kind = 'current' })
@@ -24,67 +24,77 @@ local file_row = H.find_row(buf, 'file', function(l)
 end)
 local branch_row = H.find_row(buf, 'branch')
 
--- Rub assign round-trip: rub the scratch file onto a branch, verify via status.
-if file_row and branch_row then
+-- Amend round-trip: amend the scratch file into a branch tip, then verify via
+-- `but status` that it left the uncommitted area. `but amend -t <branch>` needs
+-- a tip to amend into, and it refuses to rewrite history that has landed
+-- upstream (the plugin never passes --allow-merged), so the target has to be a
+-- non-integrated branch that already carries a commit.
+local amend_row = H.find_row(buf, 'branch', function(l)
+  local b = l.data.branch or {}
+  return b.branchStatus ~= 'integrated' and #(b.commits or {}) > 0
+end)
+if file_row and amend_row then
   vim.api.nvim_win_set_cursor(buf.win, { file_row, 0 })
-  actions.rub_start(buf)
-  if modes.current() ~= 'rub' then
-    H.fail('rub mode not entered')
+  actions.amend_start(buf)
+  if modes.current() ~= 'amend' then
+    H.fail('amend mode not entered')
   end
   if #vim.api.nvim_buf_get_extmarks(buf.buf, modes.ns, 0, -1, {}) == 0 then
-    H.fail('rub mode drew no overlay extmarks')
+    H.fail('amend mode drew no overlay extmarks')
   end
   local hint = vim.api.nvim_buf_get_lines(buf.hint_buf, 0, 1, false)[1] or ''
-  if not hint:match('rub') then
-    H.fail('hotbar pill is not rub: ' .. hint)
+  if not hint:match('amend') then
+    H.fail('hotbar pill is not amend: ' .. hint)
   end
-  H.ok('rub mode: overlays + pill')
+  H.ok('amend mode: overlays + pill')
 
-  vim.api.nvim_win_set_cursor(buf.win, { branch_row, 0 })
-  modes._mode_keys.rub['<CR>'](buf)
+  vim.api.nvim_win_set_cursor(buf.win, { amend_row, 0 })
+  modes._mode_keys.amend['<CR>'](buf)
   if modes.current() ~= 'normal' then
-    H.fail('rub did not exit after confirm')
+    H.fail('amend did not exit after confirm')
   end
-  local assigned = vim.wait(15000, function()
-    for _, stack in ipairs((status.data or {}).stacks or {}) do
-      for _, ch in ipairs(stack.assignedChanges or {}) do
-        if ch.filePath == scratch then
-          return true
-        end
-      end
-    end
-    return false
-  end, 100)
-  if not assigned then
-    H.fail('rub assign did not land in but status')
-  end
-  H.ok('rub confirm: file assigned to a branch via but rub')
-
-  -- Reverse: rub it back to zz.
-  H.wait_status(status)
-  local arow = H.find_row(buf, 'file', function(l)
-    return l.data.path == scratch and l.data.branch_name
-  end)
-  if arow then
-    vim.api.nvim_win_set_cursor(buf.win, { arow, 0 })
-    actions.rub_start(buf)
-    vim.api.nvim_win_set_cursor(buf.win, { 1, 0 })
-    modes._mode_keys.rub['<CR>'](buf)
-    local back = vim.wait(15000, function()
-      for _, ch in ipairs((status.data or {}).uncommittedChanges or {}) do
-        if ch.filePath == scratch then
-          return true
-        end
-      end
+  -- The file was uncommitted a moment ago, so the amend landing means `but
+  -- status` no longer lists it as an uncommitted change.
+  local landed = vim.wait(15000, function()
+    if not status.data then
       return false
-    end, 100)
-    if not back then
-      H.fail('unassign rub did not land')
     end
-    H.ok('rub reverse: file unassigned back to zz')
+    for _, ch in ipairs(status.data.uncommittedChanges or {}) do
+      if ch.filePath == scratch then
+        return false
+      end
+    end
+    return true
+  end, 100)
+  if not landed then
+    H.fail('amend did not take ' .. scratch .. ' out of the uncommitted area')
   end
+  H.ok('amend confirm: file amended into the branch tip via but amend')
+
+  -- Put the workspace back. Amending rewrites a real commit, so unlike the old
+  -- assign/unassign round-trip this leaves a trace; `but undo` reverses exactly
+  -- the operation we just made and returns the file to `zz`.
+  local undo_err, undone
+  cli.undo(function(err)
+    undo_err, undone = err, true
+  end)
+  vim.wait(15000, function()
+    return undone
+  end, 50)
+  H.wait_status(status)
+  local back = false
+  for _, ch in ipairs((status.data or {}).uncommittedChanges or {}) do
+    if ch.filePath == scratch then
+      back = true
+    end
+  end
+  if not back then
+    local why = undo_err and (': ' .. undo_err) or ''
+    H.fail('but undo did not put ' .. scratch .. ' back in zz' .. why .. ' — the smoke amend is still committed')
+  end
+  H.ok('undo: the smoke amend is reverted, file back in zz')
 else
-  H.skip('no scratch file + branch pair for the rub round-trip')
+  H.skip('no scratch file + non-integrated branch with commits for the amend round-trip')
 end
 
 -- Jump mode to a real cli_id.

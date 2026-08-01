@@ -1,16 +1,16 @@
 # gitbutler.nvim
 
-A Neovim interface for [Git Butler](https://gitbutler.com) virtual branches, modelled on the official `but tui`. A scrollable commit graph is the workspace: navigate branches and commits, assign and commit changes through modal rub / commit / move / stack operations, inspect diffs in a details pane, and jump straight from a hunk into the file to edit it — all without leaving your editor. Push, open pull requests, land, and inspect CI from the same buffer.
+A Neovim interface for [Git Butler](https://gitbutler.com) virtual branches, modelled on the official `but tui`. A scrollable commit graph is the workspace: navigate branches and commits, reshape history through modal amend / squash / commit / move / stack operations, inspect diffs in a details pane, and jump straight from a hunk into the file to edit it — all without leaving your editor. Push, open pull requests, land, and inspect CI from the same buffer.
 
-Requires neovim 0.10+ and the [`but` CLI](https://docs.gitbutler.com/cli-overview). The CI view also uses the [`gh` CLI](https://cli.github.com) when available; everything else has zero runtime dependencies.
+Requires neovim 0.10+ and the [`but` CLI](https://docs.gitbutler.com/cli-overview) 0.22.0 or newer; older releases are detected and refused rather than driven with retired syntax. The CI view also uses the [`gh` CLI](https://cli.github.com) when available; everything else has zero runtime dependencies.
 
-One flow through the workspace: navigate the commit graph, rub a change onto a target (the pill names the verb), inspect the diff in the details pane, and jump straight into the file to edit it:
+One flow through the workspace: navigate the commit graph, pick up a source and amend or squash it onto a target (the pill names the verb), inspect the diff in the details pane, and jump straight into the file to edit it:
 
-![The graph, rub mode, the details pane, and jump-to-code](doc/demo/butler.gif)
+![The graph, amend mode, the details pane, and jump-to-code](doc/demo/butler.gif)
 
-Modal operations mirror `but rub`: pick a source, move to a target, and the pill names the verb (`assign`, `amend`, `squash`, `move`…) before you confirm:
+The verb modes mirror `but amend` and `but squash`: pick a source, move to a target, and the pill names the verb (`amend into`, `squash into`) before you confirm:
 
-![Rub mode showing verb pills per target](doc/demo/rub.gif)
+![Verb mode showing the pill on a valid target](doc/demo/rub.gif)
 
 The graph continues below the common base into the trunk's already-landed history. Those read-only commits expand (`<Tab>`) to show their message and files, or open in the details pane / diff tool:
 
@@ -19,6 +19,8 @@ The graph continues below the common base into the trunk's already-landed histor
 The details pane shows a commit's diff under its `commit / Author / Date / message` header, with per-hunk navigation and jump-to-file:
 
 ![Details pane with the commit header and hunk navigation](doc/demo/details.gif)
+
+The first two recordings predate the `but` 0.22 cutover and still show the retired `r` rub mode; regenerate them with `make demo`.
 
 
 
@@ -91,7 +93,11 @@ Open the status buffer with `:Butler` or bind it to a key:
 vim.keymap.set('n', '<leader>bb', ':Butler<CR>', { desc = 'gitbutler' })
 ```
 
-The status view mirrors the graph layout and modal interaction of the official `but tui`: rub, commit, move, and stack modes replace the old direct-action keys. If you used the previous keymap, note: `s` (assign) and `S` (squash) are now rub-mode operations (`r`, then pick a target — squash is rub commit onto commit), `m` enters move mode, `U` is redo (uncommit is a rub verb), `d` moved to `<CR>` (describe/reword), and committed-file lists are hidden by default — press `f` (one commit) or `F` (all). New keys: `t` go to branch, `/` jump to id, `:`/`!` command modes, `y` copy, `n` empty commit, `M` editor reword, `<Esc>` back, and `d`/`D`/`+`/`-`/`l` for the details pane (see below) — note `d` is the pane toggle now, not describe. `g`/`G` are bound in the view, so `gg`/`gt` don't work inside it; all keys are remappable via `setup` keymaps.
+The status view mirrors the graph layout and modal interaction of the official `but tui`: amend, squash, commit, move, and stack modes replace the old direct-action keys.
+
+**Upgrading to 0.22.** The plugin now requires `but` 0.22.0 or newer, which retired `but rub` and `but stage` in favour of explicit verbs. Rub mode went with them: `r` is unbound in the status view and `R` no longer starts a reverse rub. In its place, `a` enters amend mode (uncommitted files or hunks into a commit or branch), `R` enters amend mode with every unassigned file as the source, `S` enters squash mode (commits, branches or committed files into a commit or branch), and `w` uncommits the cursor commit or committed file straight away — uncommit needs no target, so it has no mode. CLI assignments are gone too: there is no longer an `assign`, `unassign` or `reassign` verb. On an older `but` every command fails immediately with a version error; earlier releases of this plugin instead adapted their JSON flag to 0.20.x–0.21.x, and that shim is gone.
+
+If you used the keymap before that: `s` is stack mode, `m` enters move mode, `U` is redo, `d` moved to `<CR>` (describe/reword), and committed-file lists are hidden by default — press `f` (one commit) or `F` (all). Also `t` go to branch, `/` jump to id, `:`/`!` command modes, `y` copy, `n` empty commit, `M` editor reword, `<Esc>` back, and `d`/`D`/`+`/`-`/`l` for the details pane (see below) — note `d` is the pane toggle now, not describe. `g`/`G` are bound in the view, so `gg`/`gt` don't work inside it; all keys are remappable via `setup` keymaps.
 
 ### Commands
 
@@ -101,7 +107,7 @@ The status view mirrors the graph layout and modal interaction of the official `
 
 Press `<Space>` on any file or commit line to toggle its selection. Selected items are highlighted and marked with `✔︎`. Once you have a selection, the next action you trigger applies to all selected items rather than just the cursor line. Selection is homogeneous — files and commits can't be mixed in the same selection; selecting a line of the other category is rejected. Selection clears automatically after an action completes but persists across refreshes.
 
-Actions that support multi-select: rub (`r` — the whole selection becomes the mode's source), move (`m`), discard (`x`), and open file (`o`). Rub sources run one CLI call per item against the chosen target; move passes all sources in a single `but move` call. Selecting items across different branches is allowed — the CLI determines validity per item.
+Actions that support multi-select: amend (`a`), squash (`S`), uncommit (`w`), move (`m`), discard (`x`), and open file (`o`) — for the modes, the whole selection becomes the source. Amend, squash and discard each pass the entire selection to a single CLI call, so the whole batch is one undoable oplog entry; earlier versions ran one call per item. Selecting items across different branches is allowed — the CLI determines validity per item.
 
 ### Status buffer keybindings
 
@@ -127,8 +133,10 @@ Marks:
 Modes (official but-tui keys):
 
 ```
-r        Rub mode: cursor/marked rows become the source
-R        Reverse rub: all unassigned files become the source
+a        Amend mode: cursor/marked uncommitted files become the source
+R        Amend all: every unassigned file becomes the source
+S        Squash mode: cursor/marked commits, branches or committed files
+         become the source
 c        Commit mode: pick where the new commit lands
 m        Move mode: reorder / retarget commits, unstack branches
 s        Stack mode: apply / unapply / move stacks
@@ -137,6 +145,7 @@ s        Stack mode: apply / unapply / move stacks
 Operations (official but-tui keys):
 
 ```
+w        Uncommit the cursor/marked commits or committed files
 n        Insert an empty commit after the cursor commit/branch
 b        Create a new branch
 x        Discard file changes (with confirmation)
@@ -186,17 +195,13 @@ On a landed-history row (below the common base): `<Tab>` expands the commit's me
 
 ### Modes
 
-Rub (`r`) is the universal "pick this up and drop it there" operation, mirroring `but rub <source> <target>`: enter the mode on a source row (or a marked selection), move to a valid target — invalid rows are dimmed and skipped — and confirm with `<CR>`. A pill next to the target names the verb that will run:
+There are two verb modes, and both work the same way: enter the mode on a source row (or a marked selection), move to a valid target — invalid rows are dimmed and skipped — and confirm with `<CR>`. Valid targets are commit and branch rows; a branch means its newest commit (its tip). A pill next to the target names the verb before you confirm.
 
-| source \ target      | uncommitted (zz) | commit    | branch      |
-| -------------------- | ---------------- | --------- | ----------- |
-| uncommitted file     | unassign         | amend     | assign      |
-| file in a commit     | uncommit         | move file | uncommit to |
-| commit               | undo commit      | squash    | move commit |
-| branch               | unassign all     | amend all | reassign    |
-| uncommitted area (zz)| —                | amend all | assign all  |
+Amend (`a`) mirrors `but amend`: the source is uncommitted files or hunks, or the uncommitted area (`zz`), and the pill reads `amend into`. `R` enters the same mode with every unassigned file as the source. `a` inside the details pane starts an amend with the marked (or selected) hunks as the source — amend treats a hunk exactly like an uncommitted file.
 
-`R` (reverse rub) enters the same mode with every unassigned file as the source. `r` inside the details pane starts a rub with the marked (or selected) hunks as the source — hunks behave as the "uncommitted file" row of the table above, so they can be assigned to a branch, amended into a commit, or unassigned onto `zz`.
+Squash (`S`) mirrors `but squash`: the source is commits, branches or committed files, and the pill reads `squash into`. Squashing a branch folds its commits into the target and removes the branch. The result always keeps the target's commit message (`but squash -u`); without that, `but` would open an editor to compose a new message, which cannot work from inside the plugin's async job. Reword afterwards with `<CR>` or `M` if you want a different message.
+
+Uncommit (`w`) mirrors `but uncommit`: it sends the cursor (or marked) commits and committed files back to the uncommitted area. There is no target to pick, so there is no mode — the call runs immediately and `u` undoes it.
 
 Commit mode (`c`) picks where a new commit lands: move to a branch or commit row, `a` toggles inserting above/below the marker, `e` toggles an empty-message commit, `<CR>` confirms and prompts for the message.
 
@@ -224,7 +229,7 @@ g/G      First / last hunk
 <Space>  Mark / unmark the hunk (✔︎)
 x        Discard marked hunks, else the selected one (with confirmation)
 y        Copy the selected hunk's body to the clipboard
-r        Rub the marked (or selected) hunks onto a target
+a        Amend the marked (or selected) hunks into a target
 h/<Left>/<Esc>  Focus the status window
 D        Toggle fullscreen
 +/-      Grow / shrink the pane
@@ -236,7 +241,7 @@ Note that `q` here closes the *pane*, not the whole view — deliberately differ
 
 **Jump to code.** `<CR>` or `o` on a hunk opens its file in an editor window beside the pane, cursor on the hunk's line, so you can edit the change in place — the TUI stays open, and your edits flow straight back into the next `but` diff or commit. From the status view, `o` on a file row does the same, landing on the file's first changed hunk. The editor window is reused across jumps rather than stacking new splits.
 
-**Committed diffs are read-only in the pane.** `but diff` returns no hunk ids for committed entities (a commit, a file inside a commit, or a branch), so navigation, scrolling, and `y` work there, but `<Space>`, `x`, and `r` have nothing to address and warn instead. Hunk operations are available on uncommitted changes only.
+**Committed diffs are read-only in the pane.** `but diff` returns no hunk ids for committed entities (a commit, a file inside a commit, or a branch), so navigation, scrolling, and `y` work there, but `<Space>`, `x`, and `a` have nothing to address and warn instead. Hunk operations are available on uncommitted changes only.
 
 ### Open a commit in a diff tool (o)
 
@@ -275,10 +280,12 @@ Shows commit history with per-file stats. Commits are foldable to reveal the ful
 ```
 <Tab>    Toggle file list / inline diff on files
 d        Reword commit message
-S        Squash commit into parent
+S        Squash the commit into the one below it (its parent)
 <CR>     Open file
 q        Close
 ```
+
+`but squash` requires an explicit target, so `S` here resolves the commit directly below the cursor commit in the log and squashes into that, keeping that commit's message. On the oldest commit shown there is no parent, and the key warns instead.
 
 ### Landed history (below the common base)
 
@@ -290,7 +297,7 @@ o        Open the commit in the diff tool
 y        Copy the commit SHA
 ```
 
-These rows are read-only — rub, commit, move, and the other mutation keys don't act on landed commits. The section loads 15 commits at a time; configure with `base_history = { count = 15 }` in your setup.
+These rows are read-only — amend, squash, uncommit, commit, move, and the other mutation keys don't act on landed commits. The section loads 15 commits at a time; configure with `base_history = { count = 15 }` in your setup.
 
 ### Operations log (O)
 
@@ -364,11 +371,11 @@ require('gitbutler').setup({
 
 The plugin talks to the `but` CLI exclusively through `but <command> --json`, which returns structured data. There is no git output parsing. The architecture has three layers:
 
-`cli.lua` wraps every `but` subcommand with `vim.system()` for async execution and `vim.json.decode()` for parsing. All other modules go through this layer.
+`cli.lua` wraps every `but` subcommand with `vim.system()` for async execution and `vim.json.decode()` for parsing. All other modules go through this layer. It also probes `but status --help` once per session: a CLI still advertising `--format` predates 0.22, so every call fails fast with a version error instead of spawning a command whose syntax no longer exists.
 
-`ui/` modules handle rendering. `graph.lua` is a pure renderer that turns `but status` JSON into the commit-graph rows — glyphs, highlight spans, and a line-to-entity map — with no Neovim calls, so it is tested directly on fixtures. `buffer.lua` is the managed scratch buffer that draws those rows and tracks marks and folds. `modes.lua` is the modal state machine (rub / commit / move / stack) with its verb table; `details.lua` renders diffs in the side pane and owns its window; `editor.lua` handles jump-to-code (the reusable file window); `commit_diff.lua` adapts a commit SHA to a diff tool (built-in `git show`, a preset, a template, or a function). `hotbar.lua` draws the mode pill and key hints, and `float.lua` provides input floats and the fuzzy picker. `status.lua`, `log.lua`, `timeline.lua`, `branch.lua`, and `oplog.lua` build the specific views.
+`ui/` modules handle rendering. `graph.lua` is a pure renderer that turns `but status` JSON into the commit-graph rows — glyphs, highlight spans, and a line-to-entity map — with no Neovim calls, so it is tested directly on fixtures. `buffer.lua` is the managed scratch buffer that draws those rows and tracks marks and folds. `modes.lua` is the modal state machine (amend / squash / commit / move / stack) with its per-verb source specs; `details.lua` renders diffs in the side pane and owns its window; `editor.lua` handles jump-to-code (the reusable file window); `commit_diff.lua` adapts a commit SHA to a diff tool (built-in `git show`, a preset, a template, or a function). `hotbar.lua` draws the mode pill and key hints, and `float.lua` provides input floats and the fuzzy picker. `status.lua`, `log.lua`, `timeline.lua`, `branch.lua`, and `oplog.lua` build the specific views.
 
-`actions.lua` connects keybindings to CLI operations and manages the interaction flow (mode entry, input floats, confirmations, refresh cycles). Keeping the load-bearing logic (graph rendering, the verb table, navigation, diff parsing) in pure functions is what lets the suite catch regressions without driving a live UI.
+`actions.lua` connects keybindings to CLI operations and manages the interaction flow (mode entry, input floats, confirmations, refresh cycles). Keeping the load-bearing logic (graph rendering, the verb source specs and target predicates, navigation, diff parsing) in pure functions is what lets the suite catch regressions without driving a live UI.
 
 ## Running tests
 
