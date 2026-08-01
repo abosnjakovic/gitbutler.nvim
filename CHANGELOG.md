@@ -2,6 +2,13 @@
 
 ### Features
 
+- feat: add quit_neovim_on_quit config
+- feat(cli)!: cut over to the but 0.22 command surface
+
+## [3.0.0] - 2026-08-01
+
+### Features
+
 - feat(cli)!: migrate to the but 0.22 command surface; requires but 0.22.0+
 - feat(cli)!: refuse pre-0.22 CLIs instead of adapting the JSON flag
 - feat(cli)!: replace rub with explicit amend, squash and uncommit verbs
