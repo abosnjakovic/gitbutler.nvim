@@ -496,3 +496,38 @@ test('every status keymap action has a registered handler', function()
   table.sort(missing)
   h.assert_eq('', table.concat(missing, ', '), 'keymap actions without handlers')
 end)
+
+test('actions.close quits neovim if config.quit_neovim_on_quit is true', function()
+  local config = require('gitbutler.config')
+  local status = require('gitbutler.ui.status')
+  
+  local original_cmd = vim.cmd
+  local original_close = status.close
+  
+  local cmd_called = false
+  vim.cmd = function(cmd)
+    if cmd == 'qa' then cmd_called = true else original_cmd(cmd) end
+  end
+  
+  local close_called = false
+  status.close = function() close_called = true end
+
+  local original_val = config.values.quit_neovim_on_quit
+
+  config.values.quit_neovim_on_quit = true
+  actions.close({})
+  
+  assert_truthy(cmd_called, 'should have called vim.cmd("qa")')
+  assert_truthy(not close_called, 'should not have called status.close')
+
+  config.values.quit_neovim_on_quit = false
+  cmd_called, close_called = false, false
+  actions.close({})
+  
+  assert_truthy(not cmd_called, 'should not have called vim.cmd("qa")')
+  assert_truthy(close_called, 'should have called status.close')
+
+  config.values.quit_neovim_on_quit = original_val
+  vim.cmd = original_cmd
+  status.close = original_close
+end)

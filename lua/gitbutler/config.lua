@@ -9,6 +9,8 @@ M.defaults = {
   kind = 'tab',
 
   -- Floating window dimensions (used when kind = 'float' or for popups)
+  -- When true, pressing 'q' (actions.close) quits Neovim instead of just closing the buffer
+  quit_neovim_on_quit = false,
   float = {
     relative = 'editor',
     width = 0.8,

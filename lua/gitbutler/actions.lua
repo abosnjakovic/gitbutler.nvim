@@ -800,6 +800,11 @@ end
 
 ---Close the status buffer.
 function M.close(_buf)
+  local config = require('gitbutler.config')
+  if config.values.quit_neovim_on_quit then
+    vim.cmd('qa')
+    return
+  end
   local status = require('gitbutler.ui.status')
   status.close()
 end

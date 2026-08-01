@@ -347,6 +347,9 @@ require('gitbutler').setup({
   --   a 'Cmd %s^ %s' template · or a function(sha)
   commit_diff = nil,
 
+  -- When true, pressing 'q' (actions.close) quits Neovim instead of just closing the buffer
+  quit_neovim_on_quit = false,
+
   float = {
     relative = 'editor',
     width = 0.8,
