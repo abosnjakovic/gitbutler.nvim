@@ -97,6 +97,8 @@ jobs:
             features=$(git log "${PREV_TAG}..HEAD" --no-merges --pretty=format:"- %s" | grep -E '^- feat(\(.+\))?!?: ' || true)
             fixes=$(git log "${PREV_TAG}..HEAD" --no-merges --pretty=format:"- %s" | grep -E '^- fix(\(.+\))?!?: ' || true)
             perf=$(git log "${PREV_TAG}..HEAD" --no-merges --pretty=format:"- %s" | grep -E '^- perf(\(.+\))?!?: ' || true)
+            # Everything else (test/style/docs/refactor/chore/...), minus the release commits themselves.
+            other=$(git log "${PREV_TAG}..HEAD" --no-merges --pretty=format:"- %s" | grep -vE '^- (feat|fix|perf)(\(.+\))?!?: |^- chore\(release\): ' || true)
 
             if [ -n "$features" ]; then
               echo "### Features"
@@ -114,6 +116,12 @@ jobs:
               echo "### Performance"
               echo
               echo "$perf"
+              echo
+            fi
+            if [ -n "$other" ]; then
+              echo "### Other"
+              echo
+              echo "$other"
               echo
             fi
           } > "$section"
