@@ -24,6 +24,7 @@ require('tests.gitbutler.details_spec')
 require('tests.gitbutler.cli_spec')
 require('tests.gitbutler.editor_spec')
 require('tests.gitbutler.commit_diff_spec')
+require('tests.gitbutler.keymap_spec')
 
 -- Summary
 local h = require('tests.gitbutler.helpers')
