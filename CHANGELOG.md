@@ -1,5 +1,10 @@
 ## [3.0.1] - 2026-08-08
 
+### Other
+
+- style: format action_spec quit_neovim_on_quit test
+- test: assert default keymaps resolve to registered handlers
+
 ## [3.0.0] - 2026-08-01
 
 ### Features
