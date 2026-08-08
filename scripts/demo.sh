@@ -29,7 +29,7 @@ cleanup() { rm -f "$scratch"; }
 trap cleanup EXIT INT TERM
 printf '# Release notes\n\n- Token verification on the login route\n- Inline landed history in the graph\n' >"$scratch"
 
-for tape in doc/demo/butler.tape doc/demo/rub.tape doc/demo/landed-history.tape doc/demo/details.tape; do
+for tape in doc/demo/butler.tape doc/demo/amend.tape doc/demo/landed-history.tape doc/demo/details.tape; do
   echo "=== $tape ==="
   vhs "$tape" || { echo "  -> FAILED"; exit 1; }
 done

@@ -10,7 +10,7 @@ One flow through the workspace: navigate the commit graph, pick up a source and 
 
 The verb modes mirror `but amend` and `but squash`: pick a source, move to a target, and the pill names the verb (`amend into`, `squash into`) before you confirm:
 
-![Verb mode showing the pill on a valid target](doc/demo/rub.gif)
+![Amend mode showing the pill on a valid target](doc/demo/amend.gif)
 
 The graph continues below the common base into the trunk's already-landed history. Those read-only commits expand (`<Tab>`) to show their message and files, or open in the details pane / diff tool:
 
@@ -20,7 +20,7 @@ The details pane shows a commit's diff under its `commit / Author / Date / messa
 
 ![Details pane with the commit header and hunk navigation](doc/demo/details.gif)
 
-The first two recordings predate the `but` 0.22 cutover and still show the retired `r` rub mode; regenerate them with `make demo`.
+Regenerate the recordings with `make demo` (needs [vhs](https://github.com/charmbracelet/vhs) and a GitButler workspace).
 
 
 

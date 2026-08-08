@@ -18,7 +18,17 @@ Sleep 2400ms
 Show
 
 Sleep 1200ms
-# Move to a commit and open the details pane.
+# Move to a commit and open the details pane. The row count assumes the demo
+# scenario in scripts/demo.sh — seven rows lands on the two-file commit, so the
+# pane has more than one hunk to step through.
+Type "j"
+Sleep 300ms
+Type "j"
+Sleep 300ms
+Type "j"
+Sleep 300ms
+Type "j"
+Sleep 300ms
 Type "j"
 Sleep 300ms
 Type "j"

@@ -19,17 +19,25 @@ Sleep 2400ms
 Show
 
 Sleep 1400ms
-# Descend past the common base into the landed history.
+# Descend past the common base into the landed history. The row count assumes
+# the demo scenario in scripts/demo.sh — nine rows from the top clears the two
+# applied branches and the base line.
 Type "j"
-Sleep 300ms
+Sleep 250ms
 Type "j"
-Sleep 300ms
+Sleep 250ms
 Type "j"
-Sleep 300ms
+Sleep 250ms
 Type "j"
-Sleep 300ms
+Sleep 250ms
 Type "j"
-Sleep 300ms
+Sleep 250ms
+Type "j"
+Sleep 250ms
+Type "j"
+Sleep 250ms
+Type "j"
+Sleep 250ms
 Type "j"
 Sleep 1200ms
 # Expand a landed commit: full message + files, inline.

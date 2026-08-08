@@ -1,5 +1,5 @@
 # Hero: one flow through the main features — the commit graph (uncommitted,
-# an applied branch, and landed history below the base), rub mode (source ->
+# an applied branch, and landed history below the base), amend mode (source ->
 # target verb pills), the details pane with the commit header, and jump-to-code.
 # Records against the demo scenario in scripts/demo.sh. Regenerate with `make demo`.
 Output "doc/demo/butler.gif"
@@ -20,10 +20,10 @@ Sleep 2400ms
 Show
 
 Sleep 1600ms
-# Rub mode: pick the uncommitted file, watch the verb pill name each target.
+# Amend mode: pick the uncommitted file, watch the verb pill name each target.
 Type "j"
 Sleep 1000ms
-Type "r"
+Type "a"
 Sleep 1900ms
 Type "j"
 Sleep 1900ms
@@ -32,8 +32,16 @@ Sleep 1900ms
 Escape
 Sleep 1200ms
 # Details pane on a commit: the commit / Author / Date / message header + diff.
+# The row counts below assume the demo scenario in scripts/demo.sh — six rows
+# from the top lands on the newest commit of the demo/auth-endpoint branch.
 Type "g"
 Sleep 400ms
+Type "j"
+Sleep 300ms
+Type "j"
+Sleep 300ms
+Type "j"
+Sleep 300ms
 Type "j"
 Sleep 300ms
 Type "j"
