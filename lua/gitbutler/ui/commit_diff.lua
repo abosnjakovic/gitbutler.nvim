@@ -42,7 +42,8 @@ end
 ---Built-in fallback: a read-only `git show` patch in the editor window.
 ---@param sha string
 function M._builtin(sha)
-  local res = vim.system({ 'git', 'show', '--stat', '--patch', sha }, { text = true }):wait()
+  -- 10s cap: a hung git must not freeze the editor (timeout surfaces as code 124)
+  local res = vim.system({ 'git', 'show', '--stat', '--patch', sha }, { text = true }):wait(10000)
   if res.code ~= 0 then
     vim.notify('gitbutler: git show failed: ' .. vim.trim(res.stderr or ''), vim.log.levels.ERROR)
     return

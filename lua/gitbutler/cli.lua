@@ -10,6 +10,16 @@ M.supported = nil
 M.MIN_VERSION = '0.22.0'
 local UNSUPPORTED = 'gitbutler.nvim requires but ' .. M.MIN_VERSION .. ' or newer (this one is older)'
 
+---Why the CLI is unusable, when the reason is not the version (missing binary,
+---probe timeout). Maintained by the probe; nil means the version message.
+---@type string?
+M.unusable = nil
+
+---Blocking-call ceilings: a hung probe or sync command must not freeze the
+---editor forever. wait(timeout) SIGKILLs the process and returns code 124.
+local PROBE_TIMEOUT_MS = 5000
+local SYNC_TIMEOUT_MS = 30000
+
 ---Whether the CLI speaks the 0.22 surface. 0.22 replaced `--format=json` with a
 ---boolean `--json` in the same release that retired `but rub` and re-cut
 ---commit/squash/move, so a CLI still advertising `--format` cannot run any of
@@ -19,9 +29,28 @@ local UNSUPPORTED = 'gitbutler.nvim requires but ' .. M.MIN_VERSION .. ' or newe
 ---@return boolean
 local function supported()
   if M.supported == nil then
-    local res = vim.system({ config.values.cmd, 'status', '--help' }, { text = true }):wait()
-    local help = (res.stdout or '') .. (res.stderr or '')
-    M.supported = not help:find('--format', 1, true)
+    -- vim.system throws on a missing/non-executable cmd instead of returning a
+    -- code; catch it so :Butler* commands report via vim.notify, not a stacktrace.
+    local ok, res = pcall(function()
+      return vim.system({ config.values.cmd, 'status', '--help' }, { text = true }):wait(PROBE_TIMEOUT_MS)
+    end)
+    if not ok then
+      M.unusable = ("gitbutler.nvim cannot run '%s' (%s) — install but or point config cmd at it"):format(
+        config.values.cmd,
+        res
+      )
+      M.supported = false
+    elseif res.code == 124 and res.signal == 9 then
+      M.unusable = ("gitbutler.nvim: '%s status --help' timed out after %dms"):format(
+        config.values.cmd,
+        PROBE_TIMEOUT_MS
+      )
+      M.supported = false
+    else
+      local help = (res.stdout or '') .. (res.stderr or '')
+      M.supported = not help:find('--format', 1, true)
+      M.unusable = nil
+    end
   end
   return M.supported
 end
@@ -55,7 +84,7 @@ function M.run(args, opts, callback)
   opts = opts or {}
 
   if not supported() then
-    callback(UNSUPPORTED)
+    callback(M.unusable or UNSUPPORTED)
     return
   end
 
@@ -63,7 +92,9 @@ function M.run(args, opts, callback)
   local stdout_chunks = {}
   local stderr_chunks = {}
 
-  vim.system(cmd, {
+  -- Spawn can still throw (binary removed after the cached probe, bad cwd) —
+  -- route it into the callback like every other failure.
+  local spawn_ok, spawn_err = pcall(vim.system, cmd, {
     cwd = opts.cwd,
     stdout = function(_, data)
       if data then
@@ -104,6 +135,9 @@ function M.run(args, opts, callback)
       end
     end)
   end)
+  if not spawn_ok then
+    callback(("cannot run '%s' (%s)"):format(config.values.cmd, spawn_err))
+  end
 end
 
 ---Run a but CLI command synchronously (blocking). Use sparingly.
@@ -114,10 +148,18 @@ end
 function M.run_sync(args, opts)
   opts = opts or {}
   if not supported() then
-    return UNSUPPORTED, nil
+    return M.unusable or UNSUPPORTED, nil
   end
   local cmd = vim.list_extend({ config.values.cmd }, args)
-  local result = vim.system(cmd, { cwd = opts.cwd, text = true }):wait()
+  local spawned, result = pcall(function()
+    return vim.system(cmd, { cwd = opts.cwd, text = true }):wait(SYNC_TIMEOUT_MS)
+  end)
+  if not spawned then
+    return ("cannot run '%s' (%s)"):format(config.values.cmd, result), nil
+  end
+  if result.code == 124 and result.signal == 9 then
+    return ('but timed out after %dms'):format(SYNC_TIMEOUT_MS), nil
+  end
 
   if result.code ~= 0 then
     local msg = (result.stderr and result.stderr ~= '') and result.stderr or ('but exited with code ' .. result.code)
