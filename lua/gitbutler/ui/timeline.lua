@@ -80,9 +80,10 @@ end
 ---@param sha string Full commit SHA
 ---@return table[] files Array of {path, status}
 function M.fetch_files(sha)
+  -- 10s cap: a hung git must not freeze the editor (timeout surfaces as code 124)
   local result = vim
     .system({ 'git', 'diff-tree', '--no-commit-id', '-r', '--name-status', sha }, { text = true })
-    :wait()
+    :wait(10000)
   if result.code ~= 0 or not result.stdout then
     return {}
   end
@@ -94,7 +95,7 @@ end
 ---@param sha string Full commit SHA
 ---@return string[] body_lines
 function M.fetch_body(sha)
-  local result = vim.system({ 'git', 'log', '-1', '--format=%B', sha }, { text = true }):wait()
+  local result = vim.system({ 'git', 'log', '-1', '--format=%B', sha }, { text = true }):wait(10000)
   if result.code ~= 0 or not result.stdout then
     return {}
   end

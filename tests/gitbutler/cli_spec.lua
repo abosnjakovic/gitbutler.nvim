@@ -437,6 +437,40 @@ test('run: async failure surfaces streamed stderr', function()
   assert_eq('boom', err)
 end)
 
+test('missing binary routes error through the callback, not a throw', function()
+  local old_cmd = config.values.cmd
+  config.values.cmd = 'definitely-not-but-9000'
+  cli.supported = nil
+  local got_err
+  local ok = pcall(cli.status, function(err)
+    got_err = err
+  end)
+  assert_truthy(ok, 'cli.status must not throw on a missing binary')
+  assert_truthy(got_err and got_err:find('cannot run', 1, true), 'callback got the cannot-run error')
+
+  cli.supported = nil
+  local sync_err = cli.run_sync({ 'status', '--json' })
+  assert_truthy(sync_err and sync_err:find('cannot run', 1, true), 'run_sync returned the cannot-run error')
+
+  config.values.cmd = old_cmd
+  cli.supported = nil
+  cli.unusable = nil
+end)
+
+test('run: spawn failure after a cached probe reaches the callback', function()
+  local old_cmd = config.values.cmd
+  cli.supported = true -- pretend the probe passed, then the binary vanished
+  config.values.cmd = 'definitely-not-but-9000'
+  local got_err
+  local ok = pcall(cli.run, { 'status', '--json' }, function(err)
+    got_err = err
+  end)
+  assert_truthy(ok, 'cli.run must not throw when the spawn fails')
+  assert_truthy(got_err and got_err:find('cannot run', 1, true), 'callback got the spawn error')
+  config.values.cmd = old_cmd
+  cli.supported = nil
+end)
+
 test('run: refuses a pre-0.22 CLI without spawning the command', function()
   cli.supported = false
   local orig = vim.system
