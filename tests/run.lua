@@ -27,6 +27,7 @@ require('tests.gitbutler.commit_diff_spec')
 require('tests.gitbutler.keymap_spec')
 require('tests.gitbutler.cursor_restore_spec')
 require('tests.gitbutler.refresh_opts_spec')
+require('tests.gitbutler.watch_spec')
 
 -- Summary
 local h = require('tests.gitbutler.helpers')
