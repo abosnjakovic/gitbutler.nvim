@@ -36,9 +36,11 @@ M.defaults = {
     style = 'minimal',
   },
 
-  -- Auto-refresh status buffer on .git/ filesystem changes
+  -- Auto-refresh the open views when the repository changes underneath them:
+  -- filesystem events under .git/ plus focus autocmds. The debounce is in ms —
+  -- the minimum gap between two automatic refreshes.
   watch = true,
-  watch_interval = 1000,
+  watch_debounce = 1000,
 
   -- What `o` on a commit row opens. One of:
   --   nil / false        -> built-in read-only `git show <sha>` split (default)

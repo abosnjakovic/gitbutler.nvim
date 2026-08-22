@@ -350,6 +350,13 @@ require('gitbutler').setup({
   -- When true, pressing 'q' (actions.close) quits Neovim instead of just closing the buffer
   quit_neovim_on_quit = false,
 
+  -- Refresh the open views when the repository changes underneath them —
+  -- commits made in another terminal, by the GitButler desktop app, or by a
+  -- concurrent agent. Suppressed while a mode is active; the change is held
+  -- and applied when you return to normal mode.
+  watch = true,
+  watch_debounce = 1000,     -- ms between automatic refreshes
+
   float = {
     relative = 'editor',
     width = 0.8,
@@ -379,6 +386,8 @@ The plugin talks to the `but` CLI exclusively through `but <command> --json`, wh
 `ui/` modules handle rendering. `graph.lua` is a pure renderer that turns `but status` JSON into the commit-graph rows — glyphs, highlight spans, and a line-to-entity map — with no Neovim calls, so it is tested directly on fixtures. `buffer.lua` is the managed scratch buffer that draws those rows and tracks marks and folds. `modes.lua` is the modal state machine (amend / squash / commit / move / stack) with its per-verb source specs; `details.lua` renders diffs in the side pane and owns its window; `editor.lua` handles jump-to-code (the reusable file window); `commit_diff.lua` adapts a commit SHA to a diff tool (built-in `git show`, a preset, a template, or a function). `hotbar.lua` draws the mode pill and key hints, and `float.lua` provides input floats and the fuzzy picker. `status.lua`, `log.lua`, `timeline.lua`, `branch.lua`, and `oplog.lua` build the specific views.
 
 `actions.lua` connects keybindings to CLI operations and manages the interaction flow (mode entry, input floats, confirmations, refresh cycles). Keeping the load-bearing logic (graph rendering, the verb source specs and target predicates, navigation, diff parsing) in pure functions is what lets the suite catch regressions without driving a live UI.
+
+`watch.lua` observes the repository so the views do not go stale. It owns two trigger sources — `vim.uv.new_fs_event` on `.git/` and `.git/gitbutler/`, plus `FocusGained`/`BufEnter` autocmds — and funnels both into one debounced tick. The tick refuses to fire while a mode is active or a refresh is in flight, re-arming instead, which is what makes a change made mid-amend land the moment you leave the mode rather than being lost or applied underneath you. The CI view is refreshed only from the autocmd path, because its data lives on GitHub's clock and a local commit is the wrong reason to spend a `gh` request.
 
 ## Running tests
 

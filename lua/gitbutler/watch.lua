@@ -34,7 +34,7 @@ function M._arm()
   end
   M._timer = timer
   timer:start(
-    config.values.watch_interval,
+    config.values.watch_debounce,
     0,
     vim.schedule_wrap(function()
       M._disarm()
