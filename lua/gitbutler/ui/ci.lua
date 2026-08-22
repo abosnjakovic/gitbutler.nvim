@@ -83,6 +83,9 @@ function M.open(branch, injected_adapter)
   local buf = buffer_mod.Buffer.new()
   buf.view = 'ci'
   M.instance = buf
+  -- Same reason as log: the watcher calls refresh from outside this closure.
+  buf.branch = branch
+  buf.adapter = adapter
 
   buf:on('open_log', function(b)
     local line = b:get_cursor_line()
@@ -165,8 +168,19 @@ function M.open(branch, injected_adapter)
   M.refresh(branch, adapter)
 end
 
-function M.refresh(branch, adapter)
+---@param branch string
+---@param adapter table
+---@param opts? { done?: fun(), quiet?: boolean }
+function M.refresh(branch, adapter, opts)
+  opts = opts or {}
+  local function finish()
+    if opts.done then
+      opts.done()
+    end
+  end
+
   if not M.instance then
+    finish()
     return
   end
   local buf = M.instance
@@ -174,10 +188,13 @@ function M.refresh(branch, adapter)
   adapter.list_checks(branch, function(err, checks)
     sp:stop()
     if err then
-      vim.notify('gh list checks: ' .. err, vim.log.levels.ERROR)
-      return
+      if not opts.quiet then
+        vim.notify('gh list checks: ' .. err, vim.log.levels.ERROR)
+      end
+      return finish()
     end
     buf:render(M.build_lines(branch, checks or {}))
+    finish()
   end)
 end
 

@@ -165,6 +165,9 @@ function M.open(branch_name)
     local buf = buffer_mod.Buffer.new()
     buf.view = 'log'
     M.instance = buf
+    -- The watcher refreshes this view from outside the closure, so the branch
+    -- it was opened for has to live on the instance.
+    buf.branch_name = branch_name
 
     -- Actions
     buf:on('close', function()
@@ -312,22 +315,35 @@ function M.open(branch_name)
 end
 
 ---Refresh the log view.
-function M.refresh(branch_name)
+---@param branch_name string
+---@param opts? { done?: fun(), quiet?: boolean }
+function M.refresh(branch_name, opts)
+  opts = opts or {}
+  local function finish()
+    if opts.done then
+      opts.done()
+    end
+  end
+
   if not M.instance then
+    finish()
     return
   end
   local buf = M.instance
 
   cli.show(branch_name, function(err, data)
     if err then
-      vim.notify('gitbutler log: ' .. err, vim.log.levels.ERROR)
-      return
+      if not opts.quiet then
+        vim.notify('gitbutler log: ' .. err, vim.log.levels.ERROR)
+      end
+      return finish()
     end
     if type(data) ~= 'table' then
-      return
+      return finish()
     end
     local lines = M.build_lines(buf, data)
     buf:render(lines)
+    finish()
   end)
 end
 

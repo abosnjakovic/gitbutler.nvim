@@ -329,22 +329,38 @@ function M.open()
 end
 
 ---Refresh the status buffer with fresh data from `but status`.
-function M.refresh()
+---@param opts? { done?: fun(), quiet?: boolean }
+---  done  called exactly once, on every exit path, when this refresh settles
+---  quiet suppress error reporting — set by the watcher, whose refreshes the
+---        user did not ask for and must not be toasted about
+function M.refresh(opts)
+  opts = opts or {}
+  local function finish()
+    if opts.done then
+      opts.done()
+    end
+  end
+
   if not M.instance then
+    finish()
     return
   end
   cli.status(function(err, data)
     if err then
-      vim.notify('gitbutler: ' .. err, vim.log.levels.ERROR)
-      return
+      if not opts.quiet then
+        vim.notify('gitbutler: ' .. err, vim.log.levels.ERROR)
+      end
+      return finish()
     end
     -- The view may have been closed while the fetch was in flight.
     if not M.instance then
-      return
+      return finish()
     end
     if type(data) ~= 'table' then
-      vim.notify('gitbutler: unexpected status output', vim.log.levels.WARN)
-      return
+      if not opts.quiet then
+        vim.notify('gitbutler: unexpected status output', vim.log.levels.WARN)
+      end
+      return finish()
     end
     M.data = data
     M.rerender()
@@ -361,6 +377,10 @@ function M.refresh()
     -- The callback will trigger another refresh when results arrive; the
     -- cache prevents refetch loops.
     kick_off_ci_fetches(data)
+    -- Settles on the main render, not on fetch_base_history: that re-renders on
+    -- its own, and holding the in-flight flag for it would let one slow
+    -- paginated fetch stall every subsequent watch tick.
+    finish()
   end)
 end
 

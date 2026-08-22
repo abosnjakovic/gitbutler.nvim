@@ -32,6 +32,9 @@ local MARK_CATS = { change = true, commit = true, cfile = true }
 ---@field hint_buf? number Pinned hint/hotbar buffer
 ---@field hint_win? number Pinned hint/hotbar float
 ---@field hint_augroup? number Augroup owning the hint autocmds
+---@field branch_name? string Log view: the branch it was opened for
+---@field branch? string CI view: the branch it was opened for
+---@field adapter? table CI view: the forge adapter it was opened with
 local Buffer = {}
 Buffer.__index = Buffer
 
