@@ -196,3 +196,107 @@ test('with every view closed the tick clears without deadlocking', function()
     assert_falsy(watch._inflight, 'nothing is in flight, so nothing is held')
   end)
 end)
+
+local config = require('gitbutler.config')
+
+---Run `fn` with every view closed and the watcher stopped, then stop it again.
+---@param fn fun()
+local function with_lifecycle(fn)
+  local saved = {
+    watch = config.values.watch,
+    status_instance = status.instance,
+    log_instance = log.instance,
+    ci_instance = ci.instance,
+  }
+  status.instance, log.instance, ci.instance = nil, nil, nil
+  watch.stop()
+
+  local ok, err = pcall(fn)
+
+  watch.stop()
+  config.values.watch = saved.watch
+  status.instance = saved.status_instance
+  log.instance = saved.log_instance
+  ci.instance = saved.ci_instance
+  if not ok then
+    error(err, 0)
+  end
+end
+
+test('watch = false starts nothing', function()
+  with_lifecycle(function()
+    config.values.watch = false
+    status.instance = { buf = vim.api.nvim_create_buf(false, true) }
+    watch.sync()
+    assert_falsy(watch._augroup, 'no augroup')
+    assert_eq(0, #watch._handles, 'no filesystem handles')
+    assert_falsy(watch._timer, 'no timer')
+    vim.api.nvim_buf_delete(status.instance.buf, { force = true })
+  end)
+end)
+
+test('sync starts the autocmds when a view is open', function()
+  with_lifecycle(function()
+    config.values.watch = true
+    status.instance = { buf = vim.api.nvim_create_buf(false, true) }
+    watch.sync()
+    assert_truthy(watch._augroup, 'the augroup owns the focus autocmds')
+    vim.api.nvim_buf_delete(status.instance.buf, { force = true })
+  end)
+end)
+
+test('sync is idempotent — a second call does not double the handles', function()
+  with_lifecycle(function()
+    config.values.watch = true
+    status.instance = { buf = vim.api.nvim_create_buf(false, true) }
+    watch.sync()
+    local first = #watch._handles
+    watch.sync()
+    assert_eq(first, #watch._handles)
+    vim.api.nvim_buf_delete(status.instance.buf, { force = true })
+  end)
+end)
+
+test('sync stops the watcher when the last view closes', function()
+  with_lifecycle(function()
+    config.values.watch = true
+    local buf = vim.api.nvim_create_buf(false, true)
+    status.instance = { buf = buf }
+    watch.sync()
+    assert_truthy(watch._augroup)
+
+    status.instance = nil
+    watch.sync()
+    assert_falsy(watch._augroup, 'nothing left to refresh, so nothing left running')
+    assert_eq(0, #watch._handles)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+end)
+
+test('a stale instance whose buffer is gone does not keep the watcher alive', function()
+  with_lifecycle(function()
+    config.values.watch = true
+    local buf = vim.api.nvim_create_buf(false, true)
+    status.instance = { buf = buf }
+    watch.sync()
+    -- Buffer:close deletes the buffer before the view clears its instance;
+    -- sync must not be fooled by the window between the two.
+    vim.api.nvim_buf_delete(buf, { force = true })
+    watch.sync()
+    assert_falsy(watch._augroup)
+  end)
+end)
+
+test('stop leaves no live handle behind', function()
+  with_lifecycle(function()
+    config.values.watch = true
+    local buf = vim.api.nvim_create_buf(false, true)
+    status.instance = { buf = buf }
+    watch.sync()
+    watch.stop()
+    assert_eq(0, #watch._handles)
+    assert_falsy(watch._timer)
+    assert_falsy(watch._augroup)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+end)

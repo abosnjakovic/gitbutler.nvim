@@ -221,6 +221,8 @@ function Buffer:open()
       self:_close_hint_window()
     end,
   })
+
+  require('gitbutler.watch').sync()
 end
 
 ---Close the buffer and window.
@@ -234,6 +236,7 @@ function Buffer:close()
   end
   self.buf = nil
   self.win = nil
+  require('gitbutler.watch').sync()
 end
 
 ---Move the cursor to `row`, clamped to the buffer. The single window-mutating
