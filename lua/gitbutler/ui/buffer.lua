@@ -233,11 +233,60 @@ function Buffer:close()
   self.win = nil
 end
 
+---Move the cursor to `row`, clamped to the buffer. The single window-mutating
+---call in the restore path, so tests can override it without a real window.
+---@param row integer
+function Buffer:_move_cursor(row)
+  if not self.win or not vim.api.nvim_win_is_valid(self.win) then
+    return
+  end
+  if not self.buf or not vim.api.nvim_buf_is_valid(self.buf) then
+    return
+  end
+  local last = vim.api.nvim_buf_line_count(self.buf)
+  vim.api.nvim_win_set_cursor(self.win, { math.min(row, last), 0 })
+end
+
+---Stable identity of the row under the cursor, or nil when that row has none
+---(blanks, headers, connectors). Reuses the multi-select key so a row is
+---identified the same way everywhere.
+---@return string?
+function Buffer:_cursor_key()
+  local row = self._cursor_row
+  if not row then
+    if not self.win or not vim.api.nvim_win_is_valid(self.win) then
+      return nil
+    end
+    row = vim.api.nvim_win_get_cursor(self.win)[1]
+  end
+  return self:select_key(self.lines[row])
+end
+
+---Park the cursor back on `key` after a re-render. Silent no-op when the key
+---is nil or the row it named no longer exists — a squashed commit must not
+---throw or send the cursor somewhere arbitrary.
+---@param key string?
+function Buffer:_seek_key(key)
+  if not key then
+    return
+  end
+  for i, line in ipairs(self.lines) do
+    if self:select_key(line) == key then
+      self:_move_cursor(i)
+      return
+    end
+  end
+end
+
 ---Render lines into the buffer. Clears existing content, writes text, applies highlights.
 ---@param lines GitButlerLine[]
 function Buffer:render(lines)
+  -- Captured BEFORE the assignment: after it, the row number under the cursor
+  -- names whichever entity slid into that position, not the one the user was on.
+  local prev_key = self:_cursor_key()
   self.lines = lines
   if not self.buf or not vim.api.nvim_buf_is_valid(self.buf) then
+    self:_seek_key(prev_key)
     return
   end
 
@@ -279,6 +328,7 @@ function Buffer:render(lines)
 
   vim.bo[self.buf].modifiable = false
 
+  self:_seek_key(prev_key)
   self:update_hint()
 end
 
