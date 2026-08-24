@@ -137,7 +137,7 @@ end
 
 ---Build graph rows from decoded `but status --json -f -v` output.
 ---@param data table
----@param state? { selected?: table<string,boolean>, fold_state?: table<string,boolean>, file_lists?: table<string,boolean>, show_all_files?: boolean, branch_suffix?: fun(stack: table, branch: table): {[1]:string,[2]:string?}[], base_history?: table, base_expanded?: table<string,boolean>, base_more?: boolean, base_count?: integer }
+---@param state? { selected?: table<string,boolean>, fold_state?: table<string,boolean>, file_lists?: table<string,boolean>, show_all_files?: boolean, branch_suffix?: fun(stack: table, branch: table): {[1]:string,[2]:string?}[], base_history?: table, base_expanded?: table<string,boolean>, base_detail?: table<string,{ body?: string[], files?: table[] }>, base_more?: boolean, base_count?: integer }
 ---@return GraphRow[]
 function M.build(data, state)
   state = state or {}
@@ -306,13 +306,35 @@ function M.build(data, state)
     push(r)
   end
 
+  -- Expansion rows (message body + file list) for landed commits. The common
+  -- base row and every commit below it share them, so <Tab> opens the same
+  -- shape wherever the cursor sits in the landed section.
+  local base_expanded = state.base_expanded or {}
+  local base_detail = state.base_detail or {}
+  local function push_base_detail(sha, body, files)
+    for _, body_line in ipairs(list(body)) do
+      local br = row('base_body', { sha = sha }, false)
+      add(br, '      ' .. body_line, HL.msg)
+      push(br)
+    end
+    for _, f in ipairs(list(files)) do
+      local status = scalar(f.status, 'M')
+      local hl = BASE_FILE_HL[status] or HL.msg
+      local fr = row('base_file', { sha = sha, path = scalar(f.path, ''), status = status }, false)
+      add(fr, '      ' .. status .. ' ' .. scalar(f.path, ''), hl)
+      push(fr)
+    end
+  end
+
   -- Merge base
   local mb = data.mergeBase
   local mb_sha = type(mb) == 'table' and scalar(mb.commitId, '') or ''
   if mb_sha ~= '' then
+    local expanded = base_expanded[mb_sha] == true
     local r = row('merge_base', { sha = mb_sha }, true)
     -- No stacks above means no lane to join back into: cap the trunk instead.
     add(r, #list(data.stacks) > 0 and '├╯ ' or '┴ ', HL.connector)
+    add(r, (expanded and '▾' or '▸') .. ' ', HL.connector)
     add(r, mb_sha:sub(1, 7), HL.sha)
     add(r, ' (common base)', HL.dim)
     local date = scalar(mb.createdAt, ''):sub(1, 10)
@@ -321,6 +343,11 @@ function M.build(data, state)
     end
     add(r, ' ' .. subject(mb.message), HL.msg)
     push(r)
+
+    if expanded then
+      local d = base_detail[mb_sha] or {}
+      push_base_detail(mb_sha, d.body, d.files)
+    end
   end
 
   -- Landed trunk history below the common base. Read-only: these commits are
@@ -328,7 +355,6 @@ function M.build(data, state)
   -- commit list is fed in via `state` from a git-log fetch so build() stays a
   -- pure function of its inputs.
   local base_hist = list(state.base_history)
-  local base_expanded = state.base_expanded or {}
   for _, c in ipairs(base_hist) do
     local sha = scalar(c.sha, '')
     local short = scalar(c.short_sha, sha:sub(1, 7))
@@ -346,18 +372,7 @@ function M.build(data, state)
     push(cr)
 
     if expanded then
-      for _, body_line in ipairs(list(c.body)) do
-        local br = row('base_body', { sha = sha }, false)
-        add(br, '      ' .. body_line, HL.msg)
-        push(br)
-      end
-      for _, f in ipairs(list(c.files)) do
-        local status = scalar(f.status, 'M')
-        local hl = BASE_FILE_HL[status] or HL.msg
-        local fr = row('base_file', { sha = sha, path = scalar(f.path, ''), status = status }, false)
-        add(fr, '      ' .. status .. ' ' .. scalar(f.path, ''), hl)
-        push(fr)
-      end
+      push_base_detail(sha, c.body, c.files)
     end
   end
 

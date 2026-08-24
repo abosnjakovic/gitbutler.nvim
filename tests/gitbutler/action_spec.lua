@@ -537,3 +537,47 @@ test('actions.close quits neovim if config.quit_neovim_on_quit is true', functio
   vim.cmd = original_cmd
   status.close = original_close
 end)
+
+-- <Tab> means "show me what this row holds" everywhere in the graph. It used
+-- to fall through to the fold walker on lane commits and the common base,
+-- which folded whichever lane sat above the cursor instead.
+test('actions.toggle_fold expands a lane commit into its file list', function()
+  local status = require('gitbutler.ui.status')
+  local buf = h.mock_buffer()
+  buf.get_cursor_line = function()
+    return { type = 'commit', data = { sha = 'c1', cli_id = 'ab' } }
+  end
+
+  local original_rerender = status.rerender
+  local rerendered = 0
+  status.rerender = function()
+    rerendered = rerendered + 1
+  end
+
+  actions.toggle_fold(buf)
+  assert_truthy(buf.file_lists['c1'], 'first <Tab> opens the file list')
+  actions.toggle_fold(buf)
+  assert_truthy(not buf.file_lists['c1'], 'second <Tab> closes it')
+  assert_eq(2, rerendered)
+
+  status.rerender = original_rerender
+end)
+
+test('actions.toggle_fold expands the common base like a landed commit', function()
+  local status = require('gitbutler.ui.status')
+  local buf = h.mock_buffer()
+  buf.get_cursor_line = function()
+    return { type = 'merge_base', data = { sha = 'mb1' } }
+  end
+
+  local original_toggle = status.toggle_base_expand
+  local seen
+  status.toggle_base_expand = function(sha)
+    seen = sha
+  end
+
+  actions.toggle_fold(buf)
+  assert_eq('mb1', seen)
+
+  status.toggle_base_expand = original_toggle
+end)

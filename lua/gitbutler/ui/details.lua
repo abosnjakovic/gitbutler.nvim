@@ -650,28 +650,18 @@ end
 ---the status window's `q`, which closes the whole view. Matches upstream.
 ---@param buf integer
 local function set_keymap(buf)
-  local function step(dir)
+  -- j/k/g/G stay native so every pane scrolls line by line, whether it holds a
+  -- structured `but diff` or a plain `git show`. Hunk selection is not lost:
+  -- the CursorMoved hook snaps it to whichever hunk the cursor lands in, so
+  -- <Space>/x/a still act on the right one. ]c/[c jump hunk to hunk.
+  local function hunk_step(dir)
     return function()
-      -- A plain commit view (git show) has no hunks; let j/k move the cursor
-      -- normally so the message and patch are scrollable.
-      if #M.win_state.hunks == 0 then
-        vim.cmd('normal! ' .. (dir > 0 and 'j' or 'k'))
-        return
-      end
       M._select_hunk(M._next_hunk(M.win_state.hunks, M.win_state.selected, dir))
     end
   end
   local keys = {
-    ['j'] = step(1),
-    ['k'] = step(-1),
-    ['<Down>'] = step(1),
-    ['<Up>'] = step(-1),
-    ['g'] = function()
-      M._select_hunk(1)
-    end,
-    ['G'] = function()
-      M._select_hunk(#M.win_state.hunks)
-    end,
+    [']c'] = hunk_step(1),
+    ['[c'] = hunk_step(-1),
     ['J'] = function()
       scroll(1, '\5')
     end,
@@ -974,7 +964,8 @@ function M.show_for_line(line)
     return
   end
   -- Landed-history commits carry a sha but no cli_id; show them via `git show`.
-  if line.type == 'base_commit' then
+  -- The common base is one of them, so `d` works there too.
+  if line.type == 'base_commit' or line.type == 'merge_base' then
     M.show_commit(line.data and line.data.sha or '')
     return
   end

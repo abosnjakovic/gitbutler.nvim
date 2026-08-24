@@ -303,7 +303,7 @@ h.test('details: show_for_line maps entity rows and ignores the rest', function(
   details.show_for_line({ type = 'uncommitted_header', data = { cli_id = 'zz' } })
   details.win_state.entity = nil
   details.show_for_line({ type = 'blank' })
-  details.show_for_line({ type = 'merge_base', data = { cli_id = 'mb' } })
+  details.show_for_line({ type = 'connector' })
   details.show_for_line(nil)
   cli.diff_json = orig
 
@@ -311,6 +311,25 @@ h.test('details: show_for_line maps entity rows and ignores the rest', function(
   h.assert_eq('file1', seen[1])
   h.assert_eq('zz', seen[5])
   h.assert_falsy(details.win_state.entity, 'ignored rows changed the pane')
+end)
+
+-- The common base carries a sha but no cli_id, so `but diff` can't address it.
+-- It used to fall through and leave the pane on whatever was there before.
+h.test('details: the common base opens through git show, like landed history', function()
+  reset()
+  local seen = {}
+  local orig = details.show_commit
+  ---@diagnostic disable-next-line: duplicate-set-field
+  details.show_commit = function(sha)
+    table.insert(seen, sha)
+  end
+  details.show_for_line({ type = 'merge_base', data = { sha = 'mb1' } })
+  details.show_for_line({ type = 'base_commit', data = { sha = 'bc1' } })
+  details.show_commit = orig
+
+  h.assert_eq(2, #seen)
+  h.assert_eq('mb1', seen[1])
+  h.assert_eq('bc1', seen[2])
 end)
 
 h.test('details: a diff in flight across a close/reopen is still dropped', function()

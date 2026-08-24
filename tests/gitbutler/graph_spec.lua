@@ -90,7 +90,7 @@ h.test('graph: stack closes with join, merge base last', function()
   local rows = graph.build(fixtures.status_full, {})
   local last = rows[#rows]
   h.assert_eq('merge_base', last.type)
-  h.assert_eq('├╯ a89ff8c (common base) 2026-03-24 Initial empty commit', last.text)
+  h.assert_eq('├╯ ▸ a89ff8c (common base) 2026-03-24 Initial empty commit', last.text)
   h.assert_truthy(last.selectable)
   local join_found = false
   for _, r in ipairs(rows) do
@@ -159,6 +159,39 @@ h.test('graph: an expanded base commit shows its body and files', function()
   h.assert_eq('open', marker)
   h.assert_eq('      first body line', body)
   h.assert_eq('      M a.lua', files)
+end)
+
+-- The common base reads as the first landed commit, so it has to expand like
+-- one. Before this, <Tab> there folded whichever lane sat above it.
+h.test('graph: the common base expands into the same body and file rows', function()
+  local mb_sha = fixtures.status_full.mergeBase.commitId
+  local rows = graph.build(fixtures.status_full, {
+    base_expanded = { [mb_sha] = true },
+    base_detail = {
+      [mb_sha] = { body = { 'base body line' }, files = { { path = 'base.lua', status = 'D' } } },
+    },
+  })
+  local marker, body, file
+  for _, r in ipairs(rows) do
+    if r.type == 'merge_base' then
+      marker = r.text:match('▾') and 'open' or 'closed'
+    elseif r.type == 'base_body' then
+      body = r.text
+    elseif r.type == 'base_file' then
+      file = r.text
+    end
+  end
+  h.assert_eq('open', marker)
+  h.assert_eq('      base body line', body)
+  h.assert_eq('      D base.lua', file)
+end)
+
+h.test('graph: the common base stays collapsed and childless when not expanded', function()
+  local rows = graph.build(fixtures.status_full, {})
+  for _, r in ipairs(rows) do
+    h.assert_truthy(r.type ~= 'base_body' and r.type ~= 'base_file', 'no detail rows while collapsed')
+  end
+  h.assert_truthy(rows[#rows].text:match('▸'), 'collapsed common base shows the closed marker')
 end)
 
 h.test('graph: base_more row appears only when state.base_more is set', function()
@@ -256,7 +289,7 @@ h.test('graph: vim.NIL scalars (behind, createdAt, message) render sanely', func
   for _, r in ipairs(rows) do
     h.assert_truthy(r.type ~= 'upstream', 'behind=NIL suppresses the upstream row')
   end
-  h.assert_eq('├╯ a89ff8c (common base) Initial empty commit', rows[#rows].text)
+  h.assert_eq('├╯ ▸ a89ff8c (common base) Initial empty commit', rows[#rows].text)
   for _, r in ipairs(rows) do
     if r.type == 'commit' then
       h.assert_eq('┊● c4d75df ', r.text)

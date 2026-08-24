@@ -156,7 +156,7 @@ f/F      Toggle committed-file list (cursor commit / all commits)
 y        Copy sha / path / branch name to the clipboard
 :        Run an arbitrary but command
 !        Run an arbitrary shell command
-<Tab>    Inline diff on files, fold toggle on branch headers
+<Tab>    File list on commits, inline diff on files, fold toggle on branch headers
 <C-r>    Refresh
 q        Close
 ?        Help
@@ -191,7 +191,7 @@ O        Operations log
 B        Branch management popup
 ```
 
-On a landed-history row (below the common base): `<Tab>` expands the commit's message and files (or loads more history on the `↓ load more` row), `o` opens it in the diff tool, and `y` copies its SHA. These commits are read-only — the mutation keys don't apply.
+On a landed-history row — the common base itself, or anything below it: `<Tab>` expands the commit's message and files (or loads more history on the `↓ load more` row), and `d` opens it in the details pane. Below the base, `o` opens it in the diff tool and `y` copies its SHA. These commits are read-only — the mutation keys don't apply.
 
 ### Modes
 
@@ -220,11 +220,10 @@ The pane follows the status cursor: whatever the cursor sits on — an uncommitt
 Inside the pane:
 
 ```
-j/k      Next / previous hunk (the ▌ bar marks the selected hunk)
-<Down>/<Up>  Next / previous hunk
+j/k/g/G  Move the cursor (native; the ▌ bar follows the hunk it lands in)
+]c/[c    Next / previous hunk
 J/K      Scroll one line
 <C-d>/<C-u>  Scroll 10 lines
-g/G      First / last hunk
 <CR>/o   Open the file at this hunk's line (jump to code)
 <Space>  Mark / unmark the hunk (✔︎)
 x        Discard marked hunks, else the selected one (with confirmation)
@@ -287,14 +286,17 @@ q        Close
 
 `but squash` requires an explicit target, so `S` here resolves the commit directly below the cursor commit in the log and squashes into that, keeping that commit's message. On the oldest commit shown there is no parent, and the key warns instead.
 
-### Landed history (below the common base)
+### Landed history (the common base and below)
 
 The commit graph continues past the common base into the trunk's already-landed history — the linear ancestry of the base, newest first. This replaces the old standalone timeline view: the history now lives inline in the main graph instead of a separate window.
 
+The common base row is the first of these commits, so it carries the same `▸` / `▾` marker and expands the same way.
+
 ```
 <Tab>    Expand a commit (message + files), or load more on the ↓ row
-o        Open the commit in the diff tool
-y        Copy the commit SHA
+d        Open the commit in the details pane
+o        Open the commit in the diff tool (below the base only)
+y        Copy the commit SHA (below the base only)
 ```
 
 These rows are read-only — amend, squash, uncommit, commit, move, and the other mutation keys don't act on landed commits. The section loads 15 commits at a time; configure with `base_history = { count = 15 }` in your setup.
