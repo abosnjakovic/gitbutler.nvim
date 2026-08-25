@@ -1052,6 +1052,13 @@ function M.close()
     M._restore_status()
   end
   local focus = st.status_buf and st.status_buf.win
+  -- Hand-rolled teardown, not `Buffer:close()` — but the hint float is still
+  -- the Buffer's to close. Today `BufWinLeave` closes it anyway when the
+  -- window goes down below, so this is only reachable under `eventignore` or
+  -- a `noautocmd` close, but leaving it to chance leaks an orphan float.
+  if st.buffer then
+    st.buffer:_close_hint_window()
+  end
   if st.win and vim.api.nvim_win_is_valid(st.win) then
     pcall(vim.api.nvim_win_close, st.win, true)
   end

@@ -59,6 +59,15 @@ local SOURCES = {
   details = 'lua/gitbutler/ui/details.lua',
 }
 
+-- For `status` and `ci` this guards the live bindings directly: both bind
+-- through `Buffer:_set_keymaps`, which dispatches from the same `buf.keymaps`
+-- table `registered()` greps for here. `details` is the exception — the pane
+-- calls `buf:attach(win)` rather than `Buffer:open()`, so `_set_keymaps` never
+-- runs and nothing dispatches from `buf.keymaps`. This still catches a
+-- registry action with no `M._register_handlers` entry, which the eventual
+-- binding rewrite needs, but it does NOT prove the pane's live keys match the
+-- registry — that guard is `details_spec.lua`'s "the pane's live keymaps
+-- match the registry" test, which inspects `nvim_buf_get_keymap` directly.
 for view, path in pairs(SOURCES) do
   test('every ' .. view .. ' registry action has a handler', function()
     local handlers = registered(path)

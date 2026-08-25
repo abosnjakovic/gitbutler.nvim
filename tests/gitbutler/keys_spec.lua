@@ -25,8 +25,8 @@ h.test('keys: every entry in every context is complete', function()
   end
 end)
 
-h.test('keys: the four contexts exist', function()
-  for _, context in ipairs({ 'status', 'log', 'ci', 'details' }) do
+h.test('keys: the three contexts exist', function()
+  for _, context in ipairs({ 'status', 'ci', 'details' }) do
     h.assert_truthy(keys.contexts[context], context .. ' is a context')
   end
 end)

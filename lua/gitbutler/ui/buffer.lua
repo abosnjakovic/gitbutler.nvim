@@ -181,7 +181,10 @@ function Buffer:open()
 end
 
 ---Take ownership of a window the caller already created: window options, the
----pinned hint window, the cursor and resize autocmds, and the keymaps.
+---pinned hint window, and the cursor and resize autocmds. Not the keymaps —
+---`_set_keymaps` runs inside `open()`, gated on new-buffer creation, so a
+---caller that reaches a window through `attach` alone (the details pane)
+---has to bind its own keys through a second path.
 ---
 ---Split out of `open` so the details pane can reuse all of it. That pane makes
 ---its own window — a vsplit beside the status view, with a width percentage and
@@ -372,16 +375,17 @@ end
 ---budget twice for the same thing.
 ---
 ---Everything else competes for the width-budgeted portion, in priority
----order: an entry with its own `help` string first — that field already
----marks "the one-word desc doesn't cover this" (`comment`, `yank review` in
----the details pane), which is exactly what a clipped line must not drop
----first — then other bound actions, then native entries (no `action`, e.g.
----details' `j`/`k`/`g`/`G`) last, since vim-standard motions are the least
----surprising thing to lose to truncation.
+---order: an entry curated with `hotbar = true` first — the same curation
+---the status hotbar already uses to pick its core verbs, so the pane's core
+---verbs (`mark`, `discard`, `copy hunk`, `amend`, … in the details pane)
+---survive a clipped line instead of losing to whichever entry happens to
+---carry a `help` string — then other bound actions, then native entries (no
+---`action`, e.g. details' `j`/`k`/`g`/`G`) last, since vim-standard motions
+---are the least surprising thing to lose to truncation.
 ---@param view string
 ---@return table[]
 local function registry_hotbar_items(view)
-  local kept_actions, kept, helpful, rest, native = {}, {}, {}, {}, {}
+  local kept_actions, kept, curated, rest, native = {}, {}, {}, {}, {}
   for _, spec in ipairs(require('gitbutler.keys').resolved(view)) do
     local is_close = spec.action ~= nil and spec.action:find('close', 1, true) ~= nil
     local keep = (spec.action == 'help' or is_close) and not kept_actions[spec.action]
@@ -389,8 +393,8 @@ local function registry_hotbar_items(view)
     if keep then
       kept_actions[spec.action] = true
       table.insert(kept, it)
-    elseif spec.help then
-      table.insert(helpful, it)
+    elseif spec.hotbar then
+      table.insert(curated, it)
     elseif spec.action then
       table.insert(rest, it)
     else
@@ -399,7 +403,7 @@ local function registry_hotbar_items(view)
   end
   local items = {}
   vim.list_extend(items, kept)
-  vim.list_extend(items, helpful)
+  vim.list_extend(items, curated)
   vim.list_extend(items, rest)
   vim.list_extend(items, native)
   return items

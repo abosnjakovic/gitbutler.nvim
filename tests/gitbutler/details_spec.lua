@@ -1586,6 +1586,14 @@ end)
 -- and the help float describe a different set of keys from the ones that work.
 -- Native entries (j/k/g/G) carry no action and are deliberately unbound, so
 -- they are skipped here rather than asserted on.
+--
+-- This is NOT the live-bindings guard, despite the name: it only checks that
+-- `M._register_handlers` populated `buf.keymaps` with a function for each
+-- registry action. Nothing in the pane ever dispatches from `buf.keymaps` —
+-- `buf:attach(win)` skips `Buffer:_set_keymaps` entirely — so this would stay
+-- green even if `set_keymap`'s own table below drifted from the registry
+-- completely. Still worth keeping: the eventual binding rewrite needs
+-- `_register_handlers` correct. The real guard is the next test.
 h.test('details: every registry action for the pane has a handler', function()
   reset()
   local sb = mock_status_buf()
@@ -1597,6 +1605,56 @@ h.test('details: every registry action for the pane has a handler', function()
       h.assert_truthy(type(buf.keymaps[spec.action]) == 'function', 'details action has a handler: ' .. spec.action)
     end
   end
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- The actual drift guard. The pane's live keys come from `set_keymap`'s own
+-- table in details.lua (buf:attach skips Buffer:_set_keymaps, so buf.keymaps
+-- is never dispatched from — see the test above), which nothing previously
+-- checked against the registry. This inspects the real vim keymaps the pane
+-- installed and compares them against `keys.resolved('details')` in both
+-- directions: every non-native registry entry must be live, and every live
+-- mapping must be documented. Natives (j/k/g/G) must have no live mapping at
+-- all, since binding them would take back the pane's line-by-line scroll.
+h.test("details: the pane's live keymaps match the registry, in both directions", function()
+  reset()
+  local sb = mock_status_buf()
+  details.open(sb)
+  local keys = require('gitbutler.keys')
+  local buf = details._buffer()
+
+  -- Neovim reports `<Space>` as a literal space in `nvim_buf_get_keymap`, and
+  -- upper-cases control-key notation (`<C-u>` -> `<C-U>`), so both sides need
+  -- the same normalisation before comparing.
+  local function normalize(key)
+    if key == ' ' then
+      return '<Space>'
+    end
+    return (key:gsub('<[Cc]%-(%a)>', function(letter)
+      return '<C-' .. letter:upper() .. '>'
+    end))
+  end
+
+  local live = {}
+  for _, map in ipairs(vim.api.nvim_buf_get_keymap(buf.buf, 'n')) do
+    live[normalize(map.lhs)] = true
+  end
+
+  local documented = {}
+  for _, spec in ipairs(keys.resolved('details')) do
+    local key = normalize(spec.key)
+    documented[key] = true
+    if spec.native then
+      h.assert_falsy(live[key], 'native key has no live mapping: ' .. spec.key)
+    else
+      h.assert_truthy(live[key], 'registry key is actually bound: ' .. spec.key)
+    end
+  end
+  for key in pairs(live) do
+    h.assert_truthy(documented[key], 'live mapping is documented in the registry: ' .. key)
+  end
+
   details.close()
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
 end)
@@ -1629,10 +1687,11 @@ end)
 -- naive cut left only navigation keys visible and dropped `?` and every verb
 -- past the first few, which defeats the point of this whole fix. So
 -- `update_hint` routes a registry-derived line through the same width-aware
--- hotbar `status` already uses, with `?` and the pane's own less-obvious
--- verbs (registry entries carrying their own `help` string) prioritised to
--- survive truncation. This asserts the outcome at a realistic pane width,
--- not just that the underlying text contains the word somewhere.
+-- hotbar `status` already uses, with `?` and the pane's core verbs (registry
+-- entries curated with `hotbar = true`, the same curation `status` already
+-- uses to pick its own) prioritised to survive truncation. This asserts the
+-- outcome at a realistic pane width, not just that the underlying text
+-- contains the word somewhere.
 h.test('details: at a pane-typical width the hint line keeps ? and a verb', function()
   reset()
   local buffer_mod = require('gitbutler.ui.buffer')
@@ -1665,15 +1724,25 @@ h.test('details: at a pane-typical width the hint line keeps ? and a verb', func
   local untruncated = require('gitbutler.ui.hints').for_context('details', nil, false)
   h.assert_truthy(#text < #untruncated / 2, 'the line is data-truncated, not just visually clipped: ' .. text)
   h.assert_truthy(text:match('%?'), 'help survives truncation: ' .. text)
-  h.assert_truthy(text:match('comment') or text:match('yank'), 'a pane verb survives truncation: ' .. text)
+  h.assert_truthy(
+    text:match('next hunk')
+      or text:match('mark hunk')
+      or text:match('discard')
+      or text:match('copy hunk')
+      or text:match('comment')
+      or text:match('yank')
+      or text:match('amend'),
+    'a pane verb survives truncation: ' .. text
+  )
 end)
 
 -- The routing decision must not change what `status` renders. It already
 -- used the mode hotbar unconditionally, on every row type, both before and
--- after this change — `hints.status`'s curated per-row-type table (`commit`,
--- `merge_base`, …) is for other `hints.for_context` callers, not the live
--- status buffer. This pins that the refactor did not quietly move status
--- onto the registry-hotbar path or the plain-text path.
+-- after this change — `update_hint` returns for the status view before ever
+-- consulting `hints`, which is why `hints.status` (a curated per-row-type
+-- table, same shape as `hints.log`) was dead code and has since been deleted.
+-- This pins that the refactor did not quietly move status onto the
+-- registry-hotbar path or the plain-text path.
 h.test('status: the hint line is still exactly the mode hotbar, unaffected by the routing change', function()
   reset()
   local buffer_mod = require('gitbutler.ui.buffer')
@@ -1682,7 +1751,7 @@ h.test('status: the hint line is still exactly the mode hotbar, unaffected by th
   local buf = buffer_mod.Buffer.new()
   buf.view = 'status'
   buf.buf = vim.api.nvim_create_buf(false, true)
-  buf.lines = { { type = 'commit', text = 'commit row' } } -- a row hints.status.commit has a curated entry for
+  buf.lines = { { type = 'commit', text = 'commit row' } } -- row type is irrelevant: status never reaches `hints`
   vim.cmd('vsplit')
   local win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(win, buf.buf)

@@ -244,15 +244,12 @@ M.contexts = {
     { key = 'q', action = 'close', desc = 'quit', hotbar = true, section = 'Operations' },
   },
 
-  log = {
-    { key = 'q', action = 'close', desc = 'close' },
-    { key = '<C-r>', action = 'refresh', desc = 'refresh' },
-    { key = 'r', action = 'refresh', desc = 'refresh' }, -- undocumented alias; advertised binding is <C-r>
-    { key = '<Tab>', action = 'toggle_fold', desc = 'expand' },
-    { key = 'd', action = 'describe', desc = 'describe' },
-    { key = 'S', action = 'squash', desc = 'squash' },
-    { key = '<CR>', action = 'open_file', desc = 'open' },
-  },
+  -- No `log` context here yet: the log view still binds its keys from its own
+  -- `log_keymaps` literal in `log.lua` and describes itself from `hints.log`,
+  -- neither of which reads this registry. Wiring it up means deleting
+  -- `hints.log`'s per-row entries first — those carry information a flat
+  -- registry entry can't (what `<Tab>` means *on this row*) — so it's left
+  -- for that work rather than added here unread.
 
   ci = {
     { key = '<CR>', action = 'open_log', desc = 'open log' },
@@ -271,7 +268,7 @@ M.contexts = {
     { key = 'k', native = true, desc = 'line up' },
     { key = 'g', native = true, desc = 'top' },
     { key = 'G', native = true, desc = 'bottom' },
-    { key = ']c', action = 'hunk_next', desc = 'next hunk' },
+    { key = ']c', action = 'hunk_next', desc = 'next hunk', hotbar = true },
     { key = '[c', action = 'hunk_prev', desc = 'prev hunk' },
     { key = 'J', action = 'scroll_down', desc = 'scroll' },
     { key = 'K', action = 'scroll_up', desc = 'scroll' },
@@ -279,22 +276,24 @@ M.contexts = {
     { key = '<C-u>', action = 'scroll_page_up', desc = 'scroll 10' },
     { key = '<CR>', action = 'open_hunk', desc = 'open file' },
     { key = 'o', action = 'open_hunk', desc = 'open file' },
-    { key = '<Space>', action = 'toggle_mark', desc = 'mark hunk' },
-    { key = 'x', action = 'hunk_discard', desc = 'discard' },
-    { key = 'y', action = 'hunk_copy', desc = 'copy hunk' },
+    { key = '<Space>', action = 'toggle_mark', desc = 'mark hunk', hotbar = true },
+    { key = 'x', action = 'hunk_discard', desc = 'discard', hotbar = true },
+    { key = 'y', action = 'hunk_copy', desc = 'copy hunk', hotbar = true },
     {
       key = 'C',
       action = 'comment_line',
       desc = 'comment',
+      hotbar = true,
       help = 'Comment the line under the cursor (empty submit deletes)',
     },
     {
       key = 'Y',
       action = 'yank_comments',
       desc = 'yank review',
+      hotbar = true,
       help = 'Yank every comment as a review blob, then clear them',
     },
-    { key = 'a', action = 'hunk_amend', desc = 'amend' },
+    { key = 'a', action = 'hunk_amend', desc = 'amend', hotbar = true },
     { key = 'h', action = 'focus_status', desc = 'back' },
     { key = '<Left>', action = 'focus_status', desc = 'back' },
     { key = '<Esc>', action = 'focus_status', desc = 'back' },

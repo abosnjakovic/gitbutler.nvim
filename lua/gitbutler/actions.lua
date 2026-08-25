@@ -1020,11 +1020,18 @@ local function help_lines_for(context)
 end
 
 -- Prose that describes pane/mode behaviour rather than a single key, so it
--- has no home in the registry. Copied verbatim from the table below; appended
+-- has no home in the registry. NOT copied verbatim from the old hand-written
+-- table below (`M.help`'s `help_lines`): the old `C  Comment the line…` and
+-- `Y  Yank every comment…` lines are gone here, since the details pane now
+-- generates its own float for those from its own registry entries. Appended
 -- after the generated sections, for the status context only.
 local STATUS_HELP_PROSE = {
   '',
-  'Details pane',
+  -- Named "Inside the details pane" rather than "Details pane" — the
+  -- generated sections above already print a "Details pane" header for the
+  -- toggle keys (`d`/`D`/`+`/`-`/`l`), and reusing that title here read as a
+  -- duplicate section.
+  'Inside the details pane',
   '  In the pane: j/k/g/G line, ]c/[c hunk, J/K scroll, <C-d>/<C-u> scroll 10',
   '  <CR>/o open file at the hunk line, <Space> mark, x discard, y copy, a amend',
   '  q/d close pane. Committed diffs have no hunk ids: mark/discard/amend warn',
@@ -1043,7 +1050,9 @@ local STATUS_HELP_PROSE = {
 ---@return string[] lines
 function M._help_content(buf)
   local context = buf and buf.view or 'status'
-  local lines = help_lines_for(context)
+  local title = context:sub(1, 1):upper() .. context:sub(2)
+  local lines = { ('GitButler %s — Keybindings'):format(title), '' }
+  vim.list_extend(lines, help_lines_for(context))
   if context == 'status' then
     vim.list_extend(lines, STATUS_HELP_PROSE)
   end
