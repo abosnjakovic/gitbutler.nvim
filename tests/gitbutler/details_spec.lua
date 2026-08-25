@@ -913,3 +913,51 @@ h.test('details: details_focus focuses the pane, warns when closed', function()
   details.close()
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
 end)
+
+-- The gutter has always computed these numbers and thrown them away. A comment
+-- needs to name the line it is attached to, so the row keeps them.
+h.test('details: a diff line records its side, line number and raw text', function()
+  local rows = details.build(fixtures.diff_json, {})
+  local first_added, first_removed, first_context
+  for _, r in ipairs(rows) do
+    if r.type == 'detail_line' then
+      local marker = (r.data.raw or ''):sub(1, 1)
+      if marker == '+' and not first_added then
+        first_added = r
+      elseif marker == '-' and not first_removed then
+        first_removed = r
+      elseif marker ~= '+' and marker ~= '-' and not first_context then
+        first_context = r
+      end
+    end
+  end
+
+  -- Hunk 1 is `@@ -1,2 +1,4 @@`: context ` local M = {}` at 1/1, then the two
+  -- additions at new 2 and 3.
+  h.assert_eq('new', first_added.data.side)
+  h.assert_eq(2, first_added.data.line)
+  h.assert_eq("+local jwt = require('jwt')", first_added.data.raw)
+  h.assert_eq('src/auth.lua', first_added.data.path)
+
+  h.assert_eq('new', first_context.data.side)
+  h.assert_eq(1, first_context.data.line)
+
+  -- Hunk 2 removes ` return false` at old line 21.
+  h.assert_eq('old', first_removed.data.side)
+  h.assert_eq(21, first_removed.data.line)
+  h.assert_eq('-  return false', first_removed.data.raw)
+end)
+
+-- Each line owns its data now. Sharing one table across a hunk would give every
+-- line the same line number.
+h.test('details: diff lines do not share one data table', function()
+  local rows = details.build(fixtures.diff_json, {})
+  local lines = {}
+  for _, r in ipairs(rows) do
+    if r.type == 'detail_line' then
+      table.insert(lines, r)
+    end
+  end
+  h.assert_truthy(#lines > 1, 'fixture has several diff lines')
+  h.assert_truthy(lines[1].data ~= lines[2].data, 'each row carries its own data table')
+end)

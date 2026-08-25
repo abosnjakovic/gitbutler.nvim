@@ -196,17 +196,25 @@ function M.build(data, state)
           local end_row = head_row
           for _, line in ipairs(body) do
             local marker = line:sub(1, 1)
-            local r = row('detail_line', entity, false)
+            -- A fresh table per row: `side` and `line` differ line by line, so
+            -- the hunk-wide `entity` can no longer be shared down here.
+            local row_data = { cli_id = id, path = path, raw = line }
+            local r = row('detail_line', row_data, false)
             lead(r, false, is_selected)
             if marker == '+' then
+              row_data.side, row_data.line = 'new', new
               add(r, gutter(nil, new), HL.gutter)
               add(r, line, HL.add)
               new = new + 1
             elseif marker == '-' then
+              row_data.side, row_data.line = 'old', old
               add(r, gutter(old, nil), HL.gutter)
               add(r, line, HL.del)
               old = old + 1
             else
+              -- A context line exists on both sides; it anchors to the new one,
+              -- which is the file as it stands after the change.
+              row_data.side, row_data.line = 'new', new
               add(r, gutter(old, new), HL.gutter)
               add(r, line)
               old, new = old + 1, new + 1
