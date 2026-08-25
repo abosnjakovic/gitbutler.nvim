@@ -124,4 +124,72 @@ function M.clear()
   M.comments = {}
 end
 
+---How the note's line reads in the diff, derived rather than stored: a context
+---line anchors to the new side like an addition, so `side` alone cannot tell
+---them apart.
+---@param captured string
+---@return string
+local function side_word(captured)
+  local marker = (captured or ''):sub(1, 1)
+  if marker == '+' then
+    return 'added'
+  elseif marker == '-' then
+    return 'removed'
+  end
+  return 'context'
+end
+
+---What the comment is anchored to, in the shortest form that stays unambiguous.
+---@param c ReviewComment
+---@return string
+local function ref_label(c)
+  if c.scope == 'commit' then
+    return (c.ref or ''):sub(1, 7)
+  elseif c.scope == 'branch' then
+    return c.ref or 'branch'
+  end
+  return 'uncommitted'
+end
+
+---The clipboard blob. `path:line` leads every block because a terminal makes it
+---clickable and an agent resolves it natively, so a note lands on the code
+---without a round trip about where it points.
+---@param branch? string label for the header; omitted when nil
+---@return string
+function M.format(branch)
+  if #M.comments == 0 then
+    return ''
+  end
+
+  local blocks = {
+    'Review — '
+      .. #M.comments
+      .. ' comment'
+      .. (#M.comments == 1 and '' or 's')
+      .. (branch and (' on ' .. branch) or ''),
+  }
+
+  for _, c in ipairs(M.comments) do
+    local meta = { ref_label(c) }
+    if c.subject and c.subject ~= '' then
+      table.insert(meta, c.subject)
+    end
+    table.insert(meta, side_word(c.captured))
+    if c.stale then
+      table.insert(meta, 'stale')
+    end
+
+    local lines = {
+      c.path .. ':' .. c.line .. '  (' .. table.concat(meta, ' · ') .. ')',
+      '  ' .. (c.captured or ''),
+    }
+    for i, body in ipairs(vim.split(c.text or '', '\n', { plain = true })) do
+      table.insert(lines, (i == 1 and '  > ' or '    ') .. body)
+    end
+    table.insert(blocks, table.concat(lines, '\n'))
+  end
+
+  return table.concat(blocks, '\n\n')
+end
+
 return M

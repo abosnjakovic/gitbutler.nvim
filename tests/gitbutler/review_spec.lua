@@ -115,3 +115,69 @@ h.test('review: clear empties the store', function()
   h.assert_eq(0, total)
   h.assert_eq(0, stale)
 end)
+
+-- This string is the contract. It is what gets pasted into an agent, so it is
+-- asserted whole rather than probed field by field — a formatting change that
+-- breaks an agent's ability to locate the line should fail here.
+h.test('review: format renders the blob that gets pasted', function()
+  review.clear()
+  review.set({
+    scope = 'commit',
+    ref = '9e9dcf55d3ef69f49c7d67d7208ad4b422bebad7',
+    subject = 'fix: keep the gutter',
+    path = 'lua/gitbutler/ui/details.lua',
+    side = 'new',
+    line = 196,
+    captured = '+          local entity = { cli_id = id, path = path }',
+  }, 'This drops the line numbers.\nStore old/new on the row.')
+  review.set({
+    scope = 'uncommitted',
+    ref = nil,
+    path = 'src/app.rs',
+    side = 'old',
+    line = 88,
+    captured = '-    let cfg = Config::load().unwrap();',
+  }, 'unwrap in a load path.')
+  review.comments[2].stale = true
+
+  local expected = table.concat({
+    'Review — 2 comments on fix/graph-tab-details',
+    '',
+    'lua/gitbutler/ui/details.lua:196  (9e9dcf5 · fix: keep the gutter · added)',
+    '  +          local entity = { cli_id = id, path = path }',
+    '  > This drops the line numbers.',
+    '    Store old/new on the row.',
+    '',
+    'src/app.rs:88  (uncommitted · removed · stale)',
+    '  -    let cfg = Config::load().unwrap();',
+    '  > unwrap in a load path.',
+  }, '\n')
+  h.assert_eq(expected, review.format('fix/graph-tab-details'))
+end)
+
+-- The branch is a label on the review, not a property of any comment, so the
+-- blob has to read correctly without one.
+h.test('review: format drops the branch clause when there is no branch', function()
+  review.clear()
+  review.set({
+    scope = 'branch',
+    ref = 'feat/visual-overhaul',
+    path = 'src/main.rs',
+    side = 'new',
+    line = 4,
+    captured = ' fn main() {',
+  }, 'why here?')
+  local expected = table.concat({
+    'Review — 1 comment',
+    '',
+    'src/main.rs:4  (feat/visual-overhaul · context)',
+    '   fn main() {',
+    '  > why here?',
+  }, '\n')
+  h.assert_eq(expected, review.format(nil))
+end)
+
+h.test('review: format of an empty store is the empty string', function()
+  review.clear()
+  h.assert_eq('', review.format('any-branch'))
+end)
