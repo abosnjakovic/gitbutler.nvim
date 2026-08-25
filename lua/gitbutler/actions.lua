@@ -1045,6 +1045,8 @@ function M.help(_buf)
     '  l        Focus the pane (h/<Esc> focuses back)',
     '  In the pane: j/k/g/G line, ]c/[c hunk, J/K scroll, <C-d>/<C-u> scroll 10',
     '  <CR>/o open file at the hunk line, <Space> mark, x discard, y copy, a amend',
+    '  C        Comment the line under the cursor (empty submit deletes)',
+    '  Y        Yank every comment as a review blob, then clear them',
     '  q/d close pane. Committed diffs have no hunk ids: mark/discard/amend warn',
     '',
     'Extras',
