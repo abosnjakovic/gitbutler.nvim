@@ -961,3 +961,196 @@ h.test('details: diff lines do not share one data table', function()
   h.assert_truthy(#lines > 1, 'fixture has several diff lines')
   h.assert_truthy(lines[1].data ~= lines[2].data, 'each row carries its own data table')
 end)
+
+-- A comment is a row like any other row. That is the whole design: one rows
+-- model, asserted as text, cursor-addressable, no second rendering path.
+h.test('details: a comment renders under the line it belongs to', function()
+  local comment = {
+    scope = 'commit',
+    ref = 'abc',
+    path = 'src/auth.lua',
+    side = 'new',
+    line = 2,
+    captured = "+local jwt = require('jwt')",
+    text = 'Pull this to the top of the file.',
+  }
+  local rows = details.build(fixtures.diff_json, {
+    comments = { ['src/auth.lua:new:2'] = comment },
+    width = 80,
+  })
+
+  local anchor_index, comment_row
+  for i, r in ipairs(rows) do
+    if r.type == 'detail_line' and r.data.path == 'src/auth.lua' and r.data.side == 'new' and r.data.line == 2 then
+      anchor_index = i
+    elseif r.type == 'detail_comment' and not comment_row then
+      comment_row = { index = i, row = r }
+    end
+  end
+
+  h.assert_truthy(anchor_index, 'the anchored line is in the rows')
+  h.assert_eq(anchor_index + 1, comment_row.index, 'the comment follows its line immediately')
+  -- 14 columns of indent: two for the lead, twelve for the gutter, so the elbow
+  -- sits directly under the code rather than under the line numbers.
+  h.assert_eq(string.rep(' ', 14) .. '╰ Pull this to the top of the file.', comment_row.row.text)
+  h.assert_falsy(comment_row.row.selectable, 'comment rows are not hunk targets')
+  h.assert_eq(2, comment_row.row.data.line)
+end)
+
+-- The marker is the only thing that says "you already commented here" while
+-- scrolling. It sits in the lead column's second slot, which has always been a
+-- pad space, so nothing else on the row moves.
+h.test('details: a commented line carries the marker in the lead column', function()
+  local rows = details.build(fixtures.diff_json, {
+    comments = {
+      ['src/auth.lua:new:2'] = {
+        path = 'src/auth.lua',
+        side = 'new',
+        line = 2,
+        captured = "+local jwt = require('jwt')",
+        text = 'x',
+      },
+    },
+    width = 80,
+  })
+  local commented, plain
+  for _, r in ipairs(rows) do
+    if r.type == 'detail_line' and r.data.line == 2 and r.data.side == 'new' then
+      commented = r
+    elseif r.type == 'detail_line' and r.data.line == 1 then
+      plain = r
+    end
+  end
+  h.assert_eq(' ●', commented.text:sub(1, #' ●'))
+  h.assert_eq('  ', plain.text:sub(1, 2))
+end)
+
+-- Uncommitted diffs move under the reviewer. A note must never silently point
+-- at code that has changed since it was written.
+h.test('details: a comment goes stale when its line no longer matches', function()
+  local moved = {
+    path = 'src/auth.lua',
+    side = 'new',
+    line = 2,
+    captured = '+local jwt = require("something else")',
+    text = 'still relevant?',
+  }
+  local fresh = {
+    path = 'src/auth.lua',
+    side = 'new',
+    line = 3,
+    captured = "+local secret = 'shh'",
+    text = 'inline this',
+  }
+  local rows = details.build(fixtures.diff_json, {
+    comments = { ['src/auth.lua:new:2'] = moved, ['src/auth.lua:new:3'] = fresh },
+    width = 80,
+  })
+
+  h.assert_truthy(moved.stale, 'build marks the drifted comment')
+  h.assert_falsy(fresh.stale, 'build leaves the matching comment alone')
+
+  local stale_row
+  for _, r in ipairs(rows) do
+    if r.type == 'detail_comment' and r.data.line == 2 then
+      stale_row = r
+    end
+  end
+  h.assert_truthy(stale_row.text:match('stale'), 'the stale marker is visible in the pane: ' .. stale_row.text)
+end)
+
+-- The pane does not wrap, so an unwrapped paragraph would run off the right
+-- edge and be unreadable — which defeats the point of showing it inline.
+h.test('details: a long comment wraps to the pane width', function()
+  local rows = details.build(fixtures.diff_json, {
+    comments = {
+      ['src/auth.lua:new:2'] = {
+        path = 'src/auth.lua',
+        side = 'new',
+        line = 2,
+        captured = "+local jwt = require('jwt')",
+        text = 'one two three four five six seven eight nine ten eleven twelve',
+      },
+    },
+    width = 40,
+  })
+  local body = {}
+  for _, r in ipairs(rows) do
+    if r.type == 'detail_comment' then
+      table.insert(body, r.text)
+    end
+  end
+  h.assert_truthy(#body > 1, 'the comment wrapped onto more than one row')
+  for _, text in ipairs(body) do
+    -- Display columns, not bytes: `╰` is three bytes and one column, and a
+    -- comment body may hold multibyte characters of its own.
+    h.assert_truthy(vim.fn.strdisplaywidth(text) <= 40, 'no comment row exceeds the pane width: ' .. text)
+  end
+end)
+
+-- `y` copies a hunk's body. Comment rows now live inside a hunk's row range, so
+-- without a skip the reviewer's own notes end up in the copied patch.
+h.test('details: copying a hunk skips the comment rows inside it', function()
+  local rows, hunks = details.build(fixtures.diff_json, {
+    comments = {
+      ['src/auth.lua:new:2'] = {
+        path = 'src/auth.lua',
+        side = 'new',
+        line = 2,
+        captured = "+local jwt = require('jwt')",
+        text = 'do not copy me',
+      },
+    },
+    width = 80,
+  })
+  local text = details._hunk_copy_text(rows, hunks[1])
+  h.assert_falsy(text:match('do not copy me'), 'the comment is not part of the hunk body')
+  h.assert_truthy(text:match("local jwt = require%('jwt'%)"), 'the diff line still is')
+end)
+
+-- Comment rows sit between the hunk header and the hunk's last line, so the
+-- range has to grow with them or `y` and the `▌` bar both truncate.
+h.test('details: hunk end_row accounts for comment rows', function()
+  local _, without = details.build(fixtures.diff_json, { width = 80 })
+  local _, with = details.build(fixtures.diff_json, {
+    comments = {
+      ['src/auth.lua:new:2'] = {
+        path = 'src/auth.lua',
+        side = 'new',
+        line = 2,
+        captured = "+local jwt = require('jwt')",
+        text = 'a note',
+      },
+    },
+    width = 80,
+  })
+  h.assert_eq(without[1].end_row + 1, with[1].end_row, 'one comment row extends the hunk by one')
+end)
+
+-- The stale suffix is appended after wrapping, so a stale comment has to be
+-- wrapped narrower or its first row runs off a pane that does not wrap.
+h.test('details: a long stale comment still fits the pane width', function()
+  local rows = details.build(fixtures.diff_json, {
+    comments = {
+      ['src/auth.lua:new:2'] = {
+        path = 'src/auth.lua',
+        side = 'new',
+        line = 2,
+        captured = '+local jwt = require("something else")',
+        text = 'one two three four five six seven eight nine ten eleven twelve',
+      },
+    },
+    width = 40,
+  })
+  local body = {}
+  for _, r in ipairs(rows) do
+    if r.type == 'detail_comment' then
+      table.insert(body, r.text)
+    end
+  end
+  h.assert_truthy(#body > 1, 'the comment wrapped onto more than one row')
+  h.assert_truthy(body[1]:match('stale'), 'the first row carries the stale tag: ' .. body[1])
+  for _, text in ipairs(body) do
+    h.assert_truthy(vim.fn.strdisplaywidth(text) <= 40, 'no comment row exceeds the pane width: ' .. text)
+  end
+end)

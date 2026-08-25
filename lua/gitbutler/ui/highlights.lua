@@ -46,6 +46,8 @@ function M.setup()
     GitButlerDetailHunk = { link = 'Comment' },
     GitButlerDetailGutter = { link = 'LineNr' },
     GitButlerDetailSelected = { link = 'WarningMsg' },
+    GitButlerDetailComment = { link = 'Special' },
+    GitButlerDetailStale = { link = 'Comment' },
   }
 
   for name, def in pairs(groups) do

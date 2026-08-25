@@ -9,6 +9,8 @@ local HL = {
   add = 'DiffAdd',
   del = 'DiffDelete',
   dim = 'GitButlerHelp',
+  comment = 'GitButlerDetailComment',
+  stale = 'GitButlerDetailStale',
 }
 
 ---Width the file header rule is padded to.
@@ -42,21 +44,22 @@ local function add(r, txt, hl)
   r.text = r.text .. txt
 end
 
----Leading glyph so every hunk row lines up: ✔︎ when marked, ▌ when selected,
----two spaces otherwise.
-local function lead(r, marked, selected)
+---Leading glyphs so every hunk row lines up. Column one is hunk state: ✔︎ when
+---marked, ▌ when the hunk is selected. Column two has always been a pad space —
+---`▌` is one display column and every other row needs two — so the comment
+---marker goes there without moving anything else on the row.
+local function lead(r, marked, selected, commented)
   if marked then
-    -- Two columns like every other lead, or a marked header sits one column
-    -- left of its neighbours.
     add(r, '✔︎', HL.mark)
-    add(r, ' ')
   elseif selected then
-    -- Bar + space: `▌` is one display column, so the trailing space keeps the
-    -- selected hunk aligned with the two-space lead of every other row.
     add(r, '▌', HL.selected)
-    add(r, ' ')
   else
-    add(r, '  ')
+    add(r, ' ')
+  end
+  if commented then
+    add(r, '●', HL.comment)
+  else
+    add(r, ' ')
   end
 end
 
@@ -78,6 +81,39 @@ local function gutter(old, new)
     old and string.format('%4d', old) or '    ',
     new and string.format('%4d', new) or '    '
   )
+end
+
+---Columns a comment row spends on indent: two for the lead, twelve for the
+---gutter (`%4d %4d │ `), two for the `╰ ` elbow.
+local COMMENT_INDENT = 14
+local COMMENT_BODY_INDENT = 16
+
+---Appended to a stale comment's first row. Named so its width can be reserved
+---from the wrap budget rather than hardcoded in two places.
+local STALE_SUFFIX = '  · stale'
+
+---Greedy word wrap. `width` is the display columns available to the text
+---itself. Existing line breaks are kept, so a reviewer's paragraphs survive.
+---@param text string
+---@param width integer
+---@return string[]
+local function wrap(text, width)
+  local out = {}
+  for _, para in ipairs(vim.split(tostring(scalar(text, '')), '\n', { plain = true })) do
+    local line = ''
+    for word in para:gmatch('%S+') do
+      if line == '' then
+        line = word
+      elseif vim.fn.strdisplaywidth(line .. ' ' .. word) <= width then
+        line = line .. ' ' .. word
+      else
+        table.insert(out, line)
+        line = word
+      end
+    end
+    table.insert(out, line)
+  end
+  return out
 end
 
 function M._file_header(path, status)
@@ -126,12 +162,19 @@ function M._commit_meta_rows(meta)
 end
 
 ---Build detail rows from decoded `but diff <id> --format=json`.
+---
+---Not quite pure: it writes `.stale` onto each comment record in
+---`state.comments`, because whether a note still points at its code is only
+---knowable while rendering the diff it belongs to. The store learns about
+---drift from renders and nowhere else.
 ---@param data table
----@param state? { selected_hunk?: integer, marked?: table<string,boolean>, meta?: table }
+---@param state? { selected_hunk?: integer, marked?: table<string,boolean>, meta?: table, comments?: table<string, ReviewComment>, width?: integer }
 ---@return DetailsRow[] rows, { id?: string, path: string, row: integer, end_row: integer }[] hunks
 function M.build(data, state)
   state = state or {}
   local marked = state.marked or {}
+  local comments = state.comments or {}
+  local comment_width = math.max(20, (state.width or 80) - COMMENT_BODY_INDENT)
   local rows, hunks = {}, {}
   local function push(r)
     table.insert(rows, r)
@@ -196,11 +239,15 @@ function M.build(data, state)
           local end_row = head_row
           for _, line in ipairs(body) do
             local marker = line:sub(1, 1)
+            -- Looked up before `lead`, which needs to know whether to draw the
+            -- marker, and before the branches below have assigned `row_data.side`.
+            local key = path .. ':' .. (marker == '-' and ('old:' .. old) or ('new:' .. new))
+            local comment = comments[key]
             -- A fresh table per row: `side` and `line` differ line by line, so
             -- the hunk-wide `entity` can no longer be shared down here.
             local row_data = { cli_id = id, path = path, raw = line }
             local r = row('detail_line', row_data, false)
-            lead(r, false, is_selected)
+            lead(r, false, is_selected, comment ~= nil)
             if marker == '+' then
               row_data.side, row_data.line = 'new', new
               add(r, gutter(nil, new), HL.gutter)
@@ -220,6 +267,37 @@ function M.build(data, state)
               old, new = old + 1, new + 1
             end
             end_row = push(r)
+
+            if comment then
+              -- One string compare is the whole staleness mechanism.
+              comment.stale = comment.captured ~= line
+              local hl = comment.stale and HL.stale or HL.comment
+              -- The suffix lands on the first row after wrapping, so the body
+              -- has to be wrapped narrower or that row runs off the pane.
+              -- ponytail: floor of 8 columns — a pane under ~33 columns can
+              -- still overflow by a few; widen the pane or drop the suffix to
+              -- its own row if that ever matters.
+              local body_width = comment.stale and math.max(8, comment_width - vim.fn.strdisplaywidth(STALE_SUFFIX))
+                or comment_width
+              for i, body_line in ipairs(wrap(comment.text, body_width)) do
+                local cr = row('detail_comment', {
+                  path = path,
+                  side = row_data.side,
+                  line = row_data.line,
+                }, false)
+                if i == 1 then
+                  add(cr, string.rep(' ', COMMENT_INDENT))
+                  add(cr, '╰ ' .. body_line, hl)
+                  if comment.stale then
+                    add(cr, STALE_SUFFIX, HL.stale)
+                  end
+                else
+                  add(cr, string.rep(' ', COMMENT_BODY_INDENT))
+                  add(cr, body_line, hl)
+                end
+                end_row = push(cr)
+              end
+            end
           end
 
           table.insert(hunks, {
@@ -593,11 +671,13 @@ function M._hunk_copy_text(rows, hunk)
   end
   local out = {}
   for i = hunk.row + 1, hunk.end_row do
-    local text = rows[i] and rows[i].text
-    if text then
+    local r = rows[i]
+    -- The reviewer's own notes live inside the hunk's row range now; `y` copies
+    -- the patch, not the review.
+    if r and r.type ~= 'detail_comment' and r.text then
       -- Non-greedy: the gutter's `│ ` is the first one on the row, any later
       -- one belongs to the file's own content.
-      table.insert(out, text:match('^.-│ (.*)$') or text)
+      table.insert(out, r.text:match('^.-│ (.*)$') or r.text)
     end
   end
   if #out == 0 then
