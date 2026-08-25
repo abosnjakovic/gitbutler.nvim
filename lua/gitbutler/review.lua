@@ -92,6 +92,17 @@ function M.remove(anchor)
   return true
 end
 
+---The key `for_entity` returns and `details.build` looks rows up by. One
+---function so the two sides of that seam cannot drift apart silently — a
+---mismatch renders no comments at all, with nothing failing.
+---@param path string
+---@param side 'new'|'old'
+---@param line integer
+---@return string
+function M.row_key(path, side, line)
+  return path .. ':' .. side .. ':' .. tostring(line)
+end
+
 ---The comments belonging to one open diff, keyed `path:side:line`. `build()`
 ---already knows the scope and ref it is rendering, so rows look themselves up
 ---without rebuilding the full key per line.
@@ -102,7 +113,7 @@ function M.for_entity(scope, ref)
   local out = {}
   for _, c in ipairs(M.comments) do
     if c.scope == scope and (c.ref or '') == (ref or '') then
-      out[c.path .. ':' .. c.side .. ':' .. tostring(c.line)] = c
+      out[M.row_key(c.path, c.side, c.line)] = c
     end
   end
   return out

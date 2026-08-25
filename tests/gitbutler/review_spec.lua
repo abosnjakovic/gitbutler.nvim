@@ -70,6 +70,13 @@ h.test('review: remove deletes the comment and reports whether it did', function
   h.assert_falsy(review.remove(anchor({})), 'removing a missing comment reports false')
 end)
 
+-- The key is the whole linkage between the store and the renderer, and both
+-- sides build it. If it drifts, the pane renders no comments and nothing fails.
+h.test('review: row_key is the format both sides of the seam agree on', function()
+  h.assert_eq('src/auth.lua:new:2', review.row_key('src/auth.lua', 'new', 2))
+  h.assert_eq('src/auth.lua:old:21', review.row_key('src/auth.lua', 'old', 21))
+end)
+
 -- build() looks rows up by path/side/line only, because it already knows which
 -- diff it is rendering. Comments from other diffs must not leak into it.
 h.test('review: for_entity returns only this diff, keyed path:side:line', function()

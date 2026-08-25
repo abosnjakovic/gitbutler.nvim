@@ -175,6 +175,10 @@ function M.build(data, state)
   local marked = state.marked or {}
   local comments = state.comments or {}
   local comment_width = math.max(20, (state.width or 80) - COMMENT_BODY_INDENT)
+  -- Lazy require, like `_rebuild` and `_comment_line`: `build` stays ignorant
+  -- of the store at module load time, only reaching for it to build the same
+  -- key `for_entity` used to fill `comments`.
+  local review = require('gitbutler.review')
   local rows, hunks = {}, {}
   local function push(r)
     table.insert(rows, r)
@@ -241,7 +245,7 @@ function M.build(data, state)
             local marker = line:sub(1, 1)
             -- Looked up before `lead`, which needs to know whether to draw the
             -- marker, and before the branches below have assigned `row_data.side`.
-            local key = path .. ':' .. (marker == '-' and ('old:' .. old) or ('new:' .. new))
+            local key = review.row_key(path, marker == '-' and 'old' or 'new', marker == '-' and old or new)
             local comment = comments[key]
             -- A fresh table per row: `side` and `line` differ line by line, so
             -- the hunk-wide `entity` can no longer be shared down here.
@@ -1124,17 +1128,10 @@ function M.show_commit(sha)
   end)
 end
 
----Row types that name something `but diff` can be asked about.
-local ENTITY_TYPES = {
-  file = true,
-  committed_file = true,
-  commit = true,
-  branch = true,
-  uncommitted_header = true,
-}
-
 ---Which kind of thing a status row's diff belongs to. A comment on a line has
----to say what it is anchored to, and only the status row knows.
+---to say what it is anchored to, and only the status row knows. Also the set
+---of row types that name something `but diff` can be asked about — kept as
+---one table so the two can't drift apart and reject a real diff line.
 local ROW_SCOPE = {
   commit = 'commit',
   committed_file = 'commit',
@@ -1172,7 +1169,7 @@ function M.show_for_line(line)
     M.show_commit(line.data and line.data.sha or '')
     return
   end
-  if not ENTITY_TYPES[line.type] then
+  if not ROW_SCOPE[line.type] then
     return
   end
   local id = line.data and line.data.cli_id
@@ -1198,7 +1195,8 @@ function M.show_for_line(line)
     meta = meta,
     scope = ROW_SCOPE[line.type],
     ref = row_ref(line),
-    subject = meta and meta.message and vim.split(meta.message, '\n', { plain = true })[1] or nil,
+    subject = meta and scalar(meta.message, nil) and vim.split(scalar(meta.message, nil), '\n', { plain = true })[1]
+      or nil,
   })
 end
 

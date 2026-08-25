@@ -266,7 +266,7 @@ src/app.rs:88  (uncommitted · added · stale)
 
 A comment whose line has left the diff — because you edited it away, or the change got committed — stops rendering entirely: no marker, no note. It is not lost. It stays in the store and `Y` still yanks it, with the captured line quoted so you can still tell what it was about. The count `Y` reports is the authoritative tally of what you are holding, not what you can currently see.
 
-A comment is tagged `stale` once the line it was written against stops matching, which happens when the working tree moves under a review or the changes get committed. The captured line is still quoted, so the note stays locatable. Landed history renders as raw `git show` output with no line data, so `C` warns there.
+A comment is tagged `stale` once the line it was written against stops matching — because the working tree moved under the review, or the changes got committed. The check runs when the pane redraws a diff, so move the status cursor off the row and back to re-evaluate a review you have left sitting. The captured line is still quoted, so the note stays locatable. Landed history renders as raw `git show` output with no line data, so `C` warns there.
 
 ### Open a commit in a diff tool (o)
 

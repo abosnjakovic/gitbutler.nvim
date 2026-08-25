@@ -1196,6 +1196,34 @@ h.test('details: show_for_line resolves the scope and ref of each row kind', fun
   h.assert_eq('uncommitted', seen[5].scope)
 end)
 
+-- `vim.json.decode` maps JSON null to `vim.NIL`, which is truthy — a bare
+-- `meta.message and` guard doesn't catch it and `vim.split` throws. This is on
+-- the cursor-move path, so it would fire while just scrolling the status view.
+h.test('details: show_for_line survives a commit whose message is vim.NIL', function()
+  reset()
+  local seen = {}
+  local orig = details.show
+  ---@diagnostic disable-next-line: duplicate-set-field
+  details.show = function(entity)
+    table.insert(seen, entity)
+  end
+
+  h.assert_truthy(
+    pcall(function()
+      details.show_for_line({
+        type = 'commit',
+        data = { cli_id = 'aa', sha = 'deadbeef', commit = { message = vim.NIL } },
+      })
+    end),
+    'show_for_line threw on a NIL commit message'
+  )
+
+  details.show = orig
+
+  h.assert_eq(1, #seen)
+  h.assert_falsy(seen[1].subject, 'a NIL message yields no subject')
+end)
+
 -- Without this the store is written but never read back, and comments vanish on
 -- the next hunk selection.
 h.test('details: _rebuild feeds the open diff its comments', function()
