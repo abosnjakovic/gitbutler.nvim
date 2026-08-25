@@ -1154,3 +1154,74 @@ h.test('details: a long stale comment still fits the pane width', function()
     h.assert_truthy(vim.fn.strdisplaywidth(text) <= 40, 'no comment row exceeds the pane width: ' .. text)
   end
 end)
+
+-- A comment records what it is attached to. That has to be resolved where the
+-- status row is still in hand — by the time the diff arrives, the row is gone.
+h.test('details: show_for_line resolves the scope and ref of each row kind', function()
+  reset()
+  local seen = {}
+  local orig = details.show
+  ---@diagnostic disable-next-line: duplicate-set-field
+  details.show = function(entity)
+    table.insert(seen, entity)
+  end
+
+  details.show_for_line({
+    type = 'commit',
+    data = { cli_id = 'aa', sha = 'deadbeef', commit = { message = 'fix: a thing\n\nbody' } },
+  })
+  details.show_for_line({ type = 'committed_file', data = { cli_id = 'bb', commit_id = 'cafebabe' } })
+  details.show_for_line({ type = 'branch', data = { cli_id = 'cc', name = 'fix/graph-tab-details' } })
+  details.show_for_line({ type = 'file', data = { cli_id = 'dd' } })
+  details.show_for_line({ type = 'uncommitted_header', data = { cli_id = 'zz' } })
+
+  details.show = orig
+
+  h.assert_eq(5, #seen)
+  h.assert_eq('commit', seen[1].scope)
+  h.assert_eq('deadbeef', seen[1].ref)
+  h.assert_eq('fix: a thing', seen[1].subject)
+
+  h.assert_eq('commit', seen[2].scope)
+  h.assert_eq('cafebabe', seen[2].ref)
+  h.assert_falsy(seen[2].subject, 'a committed-file row carries no message')
+
+  -- A branch diff spans several commits, so no single sha describes a line in
+  -- it. The branch name is what is actually known.
+  h.assert_eq('branch', seen[3].scope)
+  h.assert_eq('fix/graph-tab-details', seen[3].ref)
+
+  h.assert_eq('uncommitted', seen[4].scope)
+  h.assert_falsy(seen[4].ref, 'uncommitted changes have no ref')
+  h.assert_eq('uncommitted', seen[5].scope)
+end)
+
+-- Without this the store is written but never read back, and comments vanish on
+-- the next hunk selection.
+h.test('details: _rebuild feeds the open diff its comments', function()
+  reset()
+  local review = require('gitbutler.review')
+  review.clear()
+  review.set({
+    scope = 'commit',
+    ref = 'deadbeef',
+    path = 'src/auth.lua',
+    side = 'new',
+    line = 2,
+    captured = "+local jwt = require('jwt')",
+  }, 'from the store')
+
+  details.win_state.entity = { cli_id = 'aa', kind = 'commit', scope = 'commit', ref = 'deadbeef' }
+  details.win_state.data = fixtures.diff_json
+  details._rebuild()
+
+  local found
+  for _, r in ipairs(details.win_state.rows or {}) do
+    if r.type == 'detail_comment' then
+      found = r
+    end
+  end
+  h.assert_truthy(found, 'the stored comment reached the rendered rows')
+  h.assert_truthy(found.text:match('from the store'), found.text)
+  review.clear()
+end)

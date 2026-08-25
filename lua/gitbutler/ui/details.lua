@@ -329,7 +329,7 @@ local NS = vim.api.nvim_create_namespace('gitbutler')
 ---@field status_buf? GitButlerBuffer the status view this pane hangs off
 ---@field full boolean fullscreen (status window hidden)
 ---@field width_pct integer 30..90
----@field entity? { cli_id?: string, kind?: string, sha?: string, meta?: table }
+---@field entity? { cli_id?: string, kind?: string, sha?: string, meta?: table, scope?: string, ref?: string, subject?: string }
 ---@field data? table last decoded diff payload
 ---@field rows? DetailsRow[] last rendered rows
 ---@field hunks { id?: string, path: string, row: integer, end_row: integer }[]
@@ -502,10 +502,14 @@ function M._rebuild()
   if not st.data then
     return
   end
+  local entity = st.entity or {}
+  local comments = entity.scope and require('gitbutler.review').for_entity(entity.scope, entity.ref) or {}
   local rows, hunks = M.build(st.data, {
     selected_hunk = st.selected,
     marked = st.marked,
-    meta = st.entity and st.entity.meta or nil,
+    meta = entity.meta,
+    comments = comments,
+    width = M.is_open() and vim.api.nvim_win_get_width(st.win) or 80,
   })
   st.hunks = hunks
   M._render(rows)
@@ -1045,6 +1049,33 @@ local ENTITY_TYPES = {
   uncommitted_header = true,
 }
 
+---Which kind of thing a status row's diff belongs to. A comment on a line has
+---to say what it is anchored to, and only the status row knows.
+local ROW_SCOPE = {
+  commit = 'commit',
+  committed_file = 'commit',
+  branch = 'branch',
+  file = 'uncommitted',
+  uncommitted_header = 'uncommitted',
+}
+
+---The identity within that scope: a sha for a commit, a name for a branch,
+---nothing for uncommitted changes. A branch diff spans several commits, so no
+---single sha describes a line in it and the name is what is genuinely known.
+---@param line GitButlerLine
+---@return string?
+local function row_ref(line)
+  local d = line.data or {}
+  if line.type == 'commit' then
+    return d.sha
+  elseif line.type == 'committed_file' then
+    return d.commit_id
+  elseif line.type == 'branch' then
+    return d.name or d.cli_id
+  end
+  return nil
+end
+
 ---Show the diff for a status row; rows that name no entity leave the pane alone.
 ---@param line? GitButlerLine
 function M.show_for_line(line)
@@ -1077,7 +1108,14 @@ function M.show_for_line(line)
       message = c.message,
     }
   end
-  M.show({ cli_id = id, kind = line.type, meta = meta })
+  M.show({
+    cli_id = id,
+    kind = line.type,
+    meta = meta,
+    scope = ROW_SCOPE[line.type],
+    ref = row_ref(line),
+    subject = meta and meta.message and vim.split(meta.message, '\n', { plain = true })[1] or nil,
+  })
 end
 
 ---Debounced follow-the-cursor entry point, called from the status buffer's
