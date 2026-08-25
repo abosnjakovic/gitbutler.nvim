@@ -268,17 +268,12 @@ M.contexts = {
     { key = 'k', native = true, desc = 'line up' },
     { key = 'g', native = true, desc = 'top' },
     { key = 'G', native = true, desc = 'bottom' },
-    { key = ']c', action = 'hunk_next', desc = 'next hunk', hotbar = true },
-    { key = '[c', action = 'hunk_prev', desc = 'prev hunk' },
-    { key = 'J', action = 'scroll_down', desc = 'scroll' },
-    { key = 'K', action = 'scroll_up', desc = 'scroll' },
-    { key = '<C-d>', action = 'scroll_page_down', desc = 'scroll 10' },
-    { key = '<C-u>', action = 'scroll_page_up', desc = 'scroll 10' },
-    { key = '<CR>', action = 'open_hunk', desc = 'open file' },
-    { key = 'o', action = 'open_hunk', desc = 'open file' },
-    { key = '<Space>', action = 'toggle_mark', desc = 'mark hunk', hotbar = true },
-    { key = 'x', action = 'hunk_discard', desc = 'discard', hotbar = true },
-    { key = 'y', action = 'hunk_copy', desc = 'copy hunk', hotbar = true },
+    -- Curated (`hotbar = true`) entries are declared here, ahead of the rest
+    -- of the pane's keys: `hotbar.build` truncates the curated bucket
+    -- greedily in this declaration order, so whatever is listed first is
+    -- what survives a narrow pane. `comment` and `yank review` are the two
+    -- least-guessable keys in the pane (the only two with a `help` string),
+    -- so they lead.
     {
       key = 'C',
       action = 'comment_line',
@@ -293,6 +288,17 @@ M.contexts = {
       hotbar = true,
       help = 'Yank every comment as a review blob, then clear them',
     },
+    { key = ']c', action = 'hunk_next', desc = 'next hunk', hotbar = true },
+    { key = '[c', action = 'hunk_prev', desc = 'prev hunk' },
+    { key = 'J', action = 'scroll_down', desc = 'scroll' },
+    { key = 'K', action = 'scroll_up', desc = 'scroll' },
+    { key = '<C-d>', action = 'scroll_page_down', desc = 'scroll 10' },
+    { key = '<C-u>', action = 'scroll_page_up', desc = 'scroll 10' },
+    { key = '<CR>', action = 'open_hunk', desc = 'open file' },
+    { key = 'o', action = 'open_hunk', desc = 'open file' },
+    { key = '<Space>', action = 'toggle_mark', desc = 'mark hunk', hotbar = true },
+    { key = 'x', action = 'hunk_discard', desc = 'discard', hotbar = true },
+    { key = 'y', action = 'hunk_copy', desc = 'copy hunk', hotbar = true },
     { key = 'a', action = 'hunk_amend', desc = 'amend', hotbar = true },
     { key = 'h', action = 'focus_status', desc = 'back' },
     { key = '<Left>', action = 'focus_status', desc = 'back' },

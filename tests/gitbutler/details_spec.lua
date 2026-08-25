@@ -1724,16 +1724,14 @@ h.test('details: at a pane-typical width the hint line keeps ? and a verb', func
   local untruncated = require('gitbutler.ui.hints').for_context('details', nil, false)
   h.assert_truthy(#text < #untruncated / 2, 'the line is data-truncated, not just visually clipped: ' .. text)
   h.assert_truthy(text:match('%?'), 'help survives truncation: ' .. text)
-  h.assert_truthy(
-    text:match('next hunk')
-      or text:match('mark hunk')
-      or text:match('discard')
-      or text:match('copy hunk')
-      or text:match('comment')
-      or text:match('yank')
-      or text:match('amend'),
-    'a pane verb survives truncation: ' .. text
-  )
+  -- Pinned to the specific verbs, not an OR-list of "any of these seven".
+  -- A widened OR-list here once absorbed a real regression: `comment` and
+  -- `yank review` silently dropped out of the hint line at this width while
+  -- this assertion kept passing on `next hunk` instead. They are the two
+  -- least-guessable keys in the pane (the only two carrying a `help`
+  -- string), so this asserts them by name.
+  h.assert_truthy(text:match('comment'), 'comment survives truncation at width 60: ' .. text)
+  h.assert_truthy(text:match('yank review'), 'yank review survives truncation at width 60: ' .. text)
 end)
 
 -- The routing decision must not change what `status` renders. It already
