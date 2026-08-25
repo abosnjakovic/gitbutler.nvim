@@ -863,7 +863,7 @@ function M._register_handlers(buf)
     M.resize(-5)
   end)
   buf:on('help', function()
-    require('gitbutler.actions').help(M.win_state.status_buf)
+    require('gitbutler.actions').help(M.win_state.buffer)
   end)
 end
 
@@ -924,7 +924,7 @@ local function set_keymap(buf)
       M.resize(-5)
     end,
     ['?'] = function()
-      require('gitbutler.actions').help(M.win_state.status_buf)
+      require('gitbutler.actions').help(M.win_state.buffer)
     end,
   }
   for key, fn in pairs(keys) do
