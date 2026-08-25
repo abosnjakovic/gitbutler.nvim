@@ -1179,7 +1179,16 @@ h.test('details: show_for_line resolves the scope and ref of each row kind', fun
     data = { cli_id = 'aa', sha = 'deadbeef', commit = { message = 'fix: a thing\n\nbody' } },
   })
   details.show_for_line({ type = 'committed_file', data = { cli_id = 'bb', commit_id = 'cafebabe' } })
-  details.show_for_line({ type = 'branch', data = { cli_id = 'cc', name = 'fix/graph-tab-details' } })
+  -- Shaped like a real graph row: `name` is the display string, `branch` the
+  -- payload it was derived from.
+  details.show_for_line({
+    type = 'branch',
+    data = {
+      cli_id = 'cc',
+      name = 'fix/graph-tab-details',
+      branch = { name = 'fix/graph-tab-details' },
+    },
+  })
   details.show_for_line({ type = 'file', data = { cli_id = 'dd' } })
   details.show_for_line({ type = 'uncommitted_header', data = { cli_id = 'zz' } })
 
@@ -1202,6 +1211,36 @@ h.test('details: show_for_line resolves the scope and ref of each row kind', fun
   h.assert_eq('uncommitted', seen[4].scope)
   h.assert_falsy(seen[4].ref, 'uncommitted changes have no ref')
   h.assert_eq('uncommitted', seen[5].scope)
+end)
+
+-- The graph labels a nameless branch `(unnamed)`. Anchoring comments to that
+-- label makes every nameless lane the same lane, so one lane's notes render on
+-- another. The cli id is what still tells them apart.
+h.test('details: two nameless branches resolve to different refs', function()
+  reset()
+  local seen = {}
+  local orig = details.show
+  ---@diagnostic disable-next-line: duplicate-set-field
+  details.show = function(entity)
+    table.insert(seen, entity)
+  end
+
+  -- `branch.name` absent, and present as JSON null — `vim.NIL` is truthy, so a
+  -- bare `or` would take it as a real name.
+  details.show_for_line({
+    type = 'branch',
+    data = { cli_id = 'aa', name = '(unnamed)', branch = {} },
+  })
+  details.show_for_line({
+    type = 'branch',
+    data = { cli_id = 'bb', name = '(unnamed)', branch = { name = vim.NIL } },
+  })
+
+  details.show = orig
+
+  h.assert_eq(2, #seen)
+  h.assert_eq('aa', seen[1].ref)
+  h.assert_eq('bb', seen[2].ref)
 end)
 
 -- `vim.json.decode` maps JSON null to `vim.NIL`, which is truthy — a bare

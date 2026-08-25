@@ -278,9 +278,11 @@ function M.build(data, state)
               local hl = comment.stale and HL.stale or HL.comment
               -- The suffix lands on the first row after wrapping, so the body
               -- has to be wrapped narrower or that row runs off the pane.
-              -- ponytail: floor of 8 columns — a pane under ~33 columns can
-              -- still overflow by a few; widen the pane or drop the suffix to
-              -- its own row if that ever matters.
+              -- ponytail: the floor of 8 never binds — `comment_width` already
+              -- floors at 20 and the suffix is 9 columns wide. That floor is
+              -- also where this stops fitting: a stale row is exactly `width`
+              -- columns until the pane drops under 36, below which it stays 36
+              -- and overflows. Drop the suffix to its own row if that matters.
               local body_width = comment.stale and math.max(8, comment_width - vim.fn.strdisplaywidth(STALE_SUFFIX))
                 or comment_width
               for i, body_line in ipairs(wrap(comment.text, body_width)) do
@@ -1143,6 +1145,11 @@ local ROW_SCOPE = {
 ---The identity within that scope: a sha for a commit, a name for a branch,
 ---nothing for uncommitted changes. A branch diff spans several commits, so no
 ---single sha describes a line in it and the name is what is genuinely known.
+---
+---Read the name off the raw payload rather than `d.name`, which the graph has
+---already defaulted to the display string `(unnamed)`. Two nameless lanes
+---share that string, and comments anchored to it would surface on the wrong
+---branch; the cli id is what still distinguishes them.
 ---@param line GitButlerLine
 ---@return string?
 local function row_ref(line)
@@ -1152,7 +1159,7 @@ local function row_ref(line)
   elseif line.type == 'committed_file' then
     return d.commit_id
   elseif line.type == 'branch' then
-    return d.name or d.cli_id
+    return scalar(d.branch and d.branch.name, nil) or d.cli_id
   end
   return nil
 end
