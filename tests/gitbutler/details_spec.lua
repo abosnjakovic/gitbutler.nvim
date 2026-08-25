@@ -1734,6 +1734,41 @@ h.test('details: at a pane-typical width the hint line keeps ? and a verb', func
   h.assert_truthy(text:match('yank review'), 'yank review survives truncation at width 60: ' .. text)
 end)
 
+-- Every alias of a verb used to get its own hotbar item: `<CR>` and `o` both
+-- read `open file`, `d` and `q` both `close`, `h`/`<Left>`/`<Esc>` all `back`.
+-- Each duplicate spent the width budget again on a verb already on the line,
+-- which is what pushed `open file` out to a 250-column pane. The `keep` tail
+-- already deduped by action; the other three buckets did not.
+h.test('details: the hint line lists a verb once, however many keys are bound to it', function()
+  local items = require('gitbutler.ui.buffer')._registry_hotbar_items('details')
+
+  local by_action, descs = {}, {}
+  for _, it in ipairs(items) do
+    descs[#descs + 1] = it[1] .. ' ' .. it[2]
+    by_action[it[2]] = (by_action[it[2]] or 0) + 1
+  end
+  local shown = table.concat(descs, ' • ')
+
+  -- The pane binds three keys to `focus_status`, two to `open_hunk` and two to
+  -- `close_pane`; each verb is worth one item.
+  h.assert_eq(1, by_action['open file'], shown)
+  h.assert_eq(1, by_action['close'], shown)
+  h.assert_eq(1, by_action['back'], shown)
+  -- The surviving alias is the one the registry declares first.
+  h.assert_truthy(shown:match('<CR> open file'), shown)
+  h.assert_falsy(shown:match('o open file'), shown)
+  h.assert_falsy(shown:match('q close'), shown)
+
+  -- `open file` used to need a 250-column pane. The dedupe above frees budget,
+  -- but what actually gets it onto a 160-column line is the registry declaring
+  -- `<CR>` ahead of the four scroll keys — the uncurated bucket truncates in
+  -- declaration order too. This pins that ordering; move `<CR>` back below the
+  -- scroll block and it fails.
+  local line = require('gitbutler.ui.hotbar').build('details', items, 160, nil).text
+  h.assert_truthy(line:match('<CR> open file'), 'open file fits a 160-column pane: ' .. line)
+  h.assert_truthy(vim.fn.strdisplaywidth(line) <= 160, 'the line stays within the pane: ' .. line)
+end)
+
 -- The routing decision must not change what `status` renders. It already
 -- used the mode hotbar unconditionally, on every row type, both before and
 -- after this change — `update_hint` returns for the status view before ever

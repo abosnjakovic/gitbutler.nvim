@@ -370,9 +370,11 @@ end
 ---
 ---`hotbar.build`'s `keep` tail is appended with no width check, so it must
 ---stay small or it overflows the window itself: `help` and one `close`-like
----action, deduped by action so an aliased close key (`details` binds both
----`d` and `q` to `close_pane`) isn't kept twice and doesn't spend the tail's
----budget twice for the same thing.
+---action.
+---
+---Every bucket holds one item per action rather than per key, so an aliased
+---verb (`details` binds both `d` and `q` to `close_pane`, both `<CR>` and `o`
+---to `open_hunk`) appears once and spends the budget once.
 ---
 ---Everything else competes for the width-budgeted portion, in priority
 ---order: an entry curated with `hotbar = true` first — the same curation
@@ -385,20 +387,30 @@ end
 ---@param view string
 ---@return table[]
 local function registry_hotbar_items(view)
-  local kept_actions, kept, curated, rest, native = {}, {}, {}, {}, {}
+  local seen, kept, curated, rest, native = {}, {}, {}, {}, {}
   for _, spec in ipairs(require('gitbutler.keys').resolved(view)) do
-    local is_close = spec.action ~= nil and spec.action:find('close', 1, true) ~= nil
-    local keep = (spec.action == 'help' or is_close) and not kept_actions[spec.action]
-    local it = { spec.key, spec.desc, keep = keep or nil }
-    if keep then
-      kept_actions[spec.action] = true
-      table.insert(kept, it)
-    elseif spec.hotbar then
-      table.insert(curated, it)
-    elseif spec.action then
-      table.insert(rest, it)
-    else
-      table.insert(native, it)
+    -- One item per action, not per key. The pane aliases `<CR>`/`o` to
+    -- `open_hunk`, `h`/`<Left>`/`<Esc>` to `focus_status` and `d`/`q` to
+    -- `close_pane`; listing each alias spends the width budget several times
+    -- over on the same verb, which is what pushed `open file` off the line
+    -- until the pane was 250 columns wide. `resolved` preserves the registry's
+    -- declaration order, so the alias that survives is the one declared first.
+    if not (spec.action and seen[spec.action]) then
+      local is_close = spec.action ~= nil and spec.action:find('close', 1, true) ~= nil
+      local keep = spec.action == 'help' or is_close
+      local it = { spec.key, spec.desc, keep = keep or nil }
+      if spec.action then
+        seen[spec.action] = true
+      end
+      if keep then
+        table.insert(kept, it)
+      elseif spec.hotbar then
+        table.insert(curated, it)
+      elseif spec.action then
+        table.insert(rest, it)
+      else
+        table.insert(native, it)
+      end
     end
   end
   local items = {}
@@ -624,4 +636,8 @@ end
 
 return {
   Buffer = Buffer,
+  -- Test seam: the pane's real hint line needs a window wide enough to show
+  -- every bucket, and `vim.o.columns` does not resize the headless layout in
+  -- time for one. Calling this directly asserts the invariant itself.
+  _registry_hotbar_items = registry_hotbar_items,
 }

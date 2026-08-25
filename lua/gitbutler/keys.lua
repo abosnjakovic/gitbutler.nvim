@@ -290,12 +290,15 @@ M.contexts = {
     },
     { key = ']c', action = 'hunk_next', desc = 'next hunk', hotbar = true },
     { key = '[c', action = 'hunk_prev', desc = 'prev hunk' },
+    -- Ahead of the scroll block: the uncurated bucket is also truncated in
+    -- declaration order, and four entries that all read "scroll" are worth
+    -- less on a clipped line than the one verb that leaves the pane.
+    { key = '<CR>', action = 'open_hunk', desc = 'open file' },
+    { key = 'o', action = 'open_hunk', desc = 'open file' },
     { key = 'J', action = 'scroll_down', desc = 'scroll' },
     { key = 'K', action = 'scroll_up', desc = 'scroll' },
     { key = '<C-d>', action = 'scroll_page_down', desc = 'scroll 10' },
     { key = '<C-u>', action = 'scroll_page_up', desc = 'scroll 10' },
-    { key = '<CR>', action = 'open_hunk', desc = 'open file' },
-    { key = 'o', action = 'open_hunk', desc = 'open file' },
     { key = '<Space>', action = 'toggle_mark', desc = 'mark hunk', hotbar = true },
     { key = 'x', action = 'hunk_discard', desc = 'discard', hotbar = true },
     { key = 'y', action = 'hunk_copy', desc = 'copy hunk', hotbar = true },
