@@ -383,13 +383,15 @@ h.test('details: open splits beside the status window and close tears it down', 
   local sb = mock_status_buf()
   local before = #vim.api.nvim_list_wins()
 
+  -- +2: the vsplit itself, plus the pinned hint float that `Buffer:attach`
+  -- opens now the pane is a Buffer.
   details.open(sb)
   h.assert_truthy(details.is_open())
-  h.assert_eq(before + 1, #vim.api.nvim_list_wins())
+  h.assert_eq(before + 2, #vim.api.nvim_list_wins())
   h.assert_eq(sb.win, vim.api.nvim_get_current_win(), 'focus did not return to status')
 
   details.open(sb) -- idempotent
-  h.assert_eq(before + 1, #vim.api.nvim_list_wins())
+  h.assert_eq(before + 2, #vim.api.nvim_list_wins())
 
   details.close()
   h.assert_falsy(details.is_open())
@@ -1563,4 +1565,38 @@ h.test('details: Y without a branch under the cursor drops the branch clause', f
   details._yank_comments()
 
   h.assert_truthy(vim.fn.getreg('"'):match('^Review — 1 comment\n'), vim.fn.getreg('"'))
+end)
+
+-- The pane was a raw scratch buffer, so it had no hint line and `?` in it
+-- showed the status view's help. Making it a Buffer with its own view name is
+-- what fixes both. `_buffer()` is nil until the pane is open, so this needs a
+-- real window like every other window-dependent test in this file.
+h.test('details: the pane is a Buffer with its own view name', function()
+  reset()
+  local sb = mock_status_buf()
+  details.open(sb)
+  local buf = details._buffer()
+  h.assert_truthy(buf, 'the pane owns a Buffer')
+  h.assert_eq('details', buf.view)
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- Every key the pane binds must resolve through the registry, or the hint line
+-- and the help float describe a different set of keys from the ones that work.
+-- Native entries (j/k/g/G) carry no action and are deliberately unbound, so
+-- they are skipped here rather than asserted on.
+h.test('details: every registry action for the pane has a handler', function()
+  reset()
+  local sb = mock_status_buf()
+  details.open(sb)
+  local keys = require('gitbutler.keys')
+  local buf = details._buffer()
+  for _, spec in ipairs(keys.resolved('details')) do
+    if spec.action then
+      h.assert_truthy(type(buf.keymaps[spec.action]) == 'function', 'details action has a handler: ' .. spec.action)
+    end
+  end
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
 end)
