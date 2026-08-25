@@ -1,28 +1,22 @@
 local M = {}
 
----Hotbar items for normal mode: {key, description, keep?}.
----`keep = true` items survive width truncation (dropped last).
-M.normal_items = {
-  { 'j', 'down' },
-  { 'k', 'up' },
-  { 'space', 'mark' },
-  { 'a', 'amend' },
-  { 'S', 'squash' },
-  { 'c', 'commit' },
-  { 'm', 'move' },
-  { 's', 'stack' },
-  { 't', 'branch' },
-  { '/', 'jump' },
-  { 'x', 'discard' },
-  { 'u', 'undo' },
-  { 'p', 'push' },
-  { 'v', 'pr' },
-  { 'i', 'pull' },
-  { 'L', 'land' },
-  { 'O', 'oplog' },
-  { '?', 'help', keep = true },
-  { 'q', 'quit', keep = true },
-}
+---Hotbar items for normal mode, derived from the registry: `{key, desc, keep?}`.
+---`keep = true` survives width truncation and is dropped last.
+---
+---Help and quit are the two a narrow window must never lose, so they are the
+---kept pair and they sort last.
+---@return table[]
+function M.normal_items()
+  local items, tail = {}, {}
+  for _, spec in ipairs(require('gitbutler.keys').resolved('status')) do
+    if spec.hotbar and spec.action then
+      local keep = spec.action == 'help' or spec.action == 'close'
+      table.insert(keep and tail or items, { spec.key, spec.desc, keep = keep or nil })
+    end
+  end
+  vim.list_extend(items, tail)
+  return items
+end
 
 ---Hotbar items for the operation modes.
 local MODE_ITEMS = {
@@ -61,7 +55,7 @@ local MODE_ITEMS = {
 ---@param mode string
 ---@return {[1]:string,[2]:string,keep?:boolean}[]
 function M.items_for(mode)
-  return MODE_ITEMS[mode] or M.normal_items
+  return MODE_ITEMS[mode] or M.normal_items()
 end
 
 local PILL_HL = {
