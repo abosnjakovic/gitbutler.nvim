@@ -495,6 +495,16 @@ function M._hunk_at(hunks, at)
   return nil
 end
 
+---The pane's cursor row, or nil when the pane is closed. A named seam so the
+---row-dispatch logic can be tested without a real window.
+---@return integer?
+function M._cursor_row()
+  if not M.is_open() then
+    return nil
+  end
+  return vim.api.nvim_win_get_cursor(M.win_state.win)[1]
+end
+
 ---Re-render from the diff payload already in hand — selection and marks are
 ---render-time state, so changing them never needs another CLI call.
 function M._rebuild()
@@ -703,6 +713,78 @@ function M._hunk_copy()
   vim.notify('gitbutler: copied ' .. #text .. ' bytes of hunk', vim.log.levels.INFO)
 end
 
+---`C` — comment the diff line under the cursor. Opens the popup pre-filled when
+---the line already has a comment; submitting it empty deletes it, which is the
+---only way a comment is removed.
+function M._comment_line()
+  local st = M.win_state
+  local at = M._cursor_row()
+  local line = at and st.rows and st.rows[at]
+  local entity = st.entity or {}
+  if not line or line.type ~= 'detail_line' or not line.data or not entity.scope then
+    vim.notify('gitbutler: put the cursor on a diff line', vim.log.levels.WARN)
+    return
+  end
+
+  local review = require('gitbutler.review')
+  local anchor = {
+    scope = entity.scope,
+    ref = entity.ref,
+    subject = entity.subject,
+    path = line.data.path,
+    side = line.data.side,
+    line = line.data.line,
+    captured = line.data.raw,
+  }
+  local existing = review.get(anchor)
+
+  require('gitbutler.ui.float').input({
+    title = existing and 'Edit comment' or 'Comment',
+    content = existing and vim.split(existing.text, '\n', { plain = true }) or nil,
+    allow_empty = true,
+    on_submit = function(text)
+      if text == '' then
+        review.remove(anchor)
+      else
+        review.set(anchor, text)
+      end
+      M._rebuild()
+    end,
+  })
+end
+
+---`Y` — copy every comment collected this session to the `+` and `"` registers
+---and empty the store. The branch is a label on the review rather than a
+---property of any comment, so it comes from wherever the status cursor happens
+---to be and is simply omitted when there is no lane there.
+function M._yank_comments()
+  local review = require('gitbutler.review')
+  local total, stale = review.counts()
+  if total == 0 then
+    vim.notify('gitbutler: no comments to yank', vim.log.levels.WARN)
+    return
+  end
+
+  local sb = M.win_state.status_buf
+  local branch = sb and sb.get_cursor_branch and sb:get_cursor_branch()
+  local text = review.format(branch and branch.name or nil)
+
+  vim.fn.setreg('+', text)
+  vim.fn.setreg('"', text)
+  review.clear()
+  M._rebuild()
+
+  vim.notify(
+    string.format(
+      'gitbutler: yanked %d comment%s%s',
+      total,
+      total == 1 and '' or 's',
+      stale > 0 and (' (' .. stale .. ' stale)') or ''
+    ),
+    vim.log.levels.INFO
+  )
+end
+
 ---`a` — enter amend mode on the status buffer with the hunks as source. `kind`
 ---is 'file': amend treats a hunk exactly like an uncommitted file, and the
 ---source rows live in the other window so `rows` stays empty.
@@ -771,6 +853,8 @@ local function set_keymap(buf)
     ['<Space>'] = M._toggle_mark,
     ['x'] = M._hunk_discard,
     ['y'] = M._hunk_copy,
+    ['C'] = M._comment_line,
+    ['Y'] = M._yank_comments,
     ['a'] = M._hunk_amend,
     ['h'] = M._focus_status,
     ['<Left>'] = M._focus_status,

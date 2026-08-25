@@ -1225,3 +1225,251 @@ h.test('details: _rebuild feeds the open diff its comments', function()
   h.assert_truthy(found.text:match('from the store'), found.text)
   review.clear()
 end)
+
+-- The popup is stubbed: this test is about which anchor gets built from the row
+-- under the cursor, not about Neovim's floating windows.
+h.test('details: C anchors a comment to the row under the cursor', function()
+  reset()
+  local review = require('gitbutler.review')
+  review.clear()
+  h.after(function()
+    review.clear()
+  end)
+
+  local float = require('gitbutler.ui.float')
+  local orig_input, opts_seen = float.input, nil
+  h.after(function()
+    float.input = orig_input
+  end)
+  ---@diagnostic disable-next-line: duplicate-set-field
+  float.input = function(opts)
+    opts_seen = opts
+    return 0, 0
+  end
+
+  local orig_cursor = details._cursor_row
+  h.after(function()
+    details._cursor_row = orig_cursor
+  end)
+  details.win_state.entity = { cli_id = 'aa', scope = 'commit', ref = 'deadbeef', subject = 'fix: a thing' }
+  details.win_state.rows = {
+    { type = 'detail_hunk', data = {} },
+    {
+      type = 'detail_line',
+      data = { path = 'src/auth.lua', side = 'new', line = 2, raw = "+local jwt = require('jwt')" },
+    },
+  }
+  ---@diagnostic disable-next-line: duplicate-set-field
+  details._cursor_row = function()
+    return 2
+  end
+
+  details._comment_line()
+  h.assert_truthy(opts_seen, 'the popup opened')
+  h.assert_truthy(opts_seen.allow_empty, 'an empty submit has to reach on_submit to delete')
+
+  opts_seen.on_submit('needs a guard')
+  h.assert_eq(1, #review.comments)
+  local c = review.comments[1]
+  h.assert_eq('commit', c.scope)
+  h.assert_eq('deadbeef', c.ref)
+  h.assert_eq('fix: a thing', c.subject)
+  h.assert_eq('src/auth.lua', c.path)
+  h.assert_eq('new', c.side)
+  h.assert_eq(2, c.line)
+  h.assert_eq("+local jwt = require('jwt')", c.captured)
+  h.assert_eq('needs a guard', c.text)
+end)
+
+-- Clearing the popup is how a comment is deleted; there is no second key for it.
+h.test('details: an empty submit deletes the comment', function()
+  reset()
+  local review = require('gitbutler.review')
+  review.clear()
+  h.after(function()
+    review.clear()
+  end)
+  local anchor = {
+    scope = 'commit',
+    ref = 'deadbeef',
+    path = 'src/auth.lua',
+    side = 'new',
+    line = 2,
+    captured = "+local jwt = require('jwt')",
+  }
+  review.set(anchor, 'a note')
+
+  local float = require('gitbutler.ui.float')
+  local orig_input, opts_seen = float.input, nil
+  h.after(function()
+    float.input = orig_input
+  end)
+  ---@diagnostic disable-next-line: duplicate-set-field
+  float.input = function(opts)
+    opts_seen = opts
+    return 0, 0
+  end
+
+  local orig_cursor = details._cursor_row
+  h.after(function()
+    details._cursor_row = orig_cursor
+  end)
+  details.win_state.entity = { cli_id = 'aa', scope = 'commit', ref = 'deadbeef' }
+  details.win_state.rows = {
+    {
+      type = 'detail_line',
+      data = { path = 'src/auth.lua', side = 'new', line = 2, raw = "+local jwt = require('jwt')" },
+    },
+  }
+  ---@diagnostic disable-next-line: duplicate-set-field
+  details._cursor_row = function()
+    return 1
+  end
+
+  details._comment_line()
+  h.assert_eq('a note', table.concat(opts_seen.content or {}, '\n'), 'the popup opens pre-filled for an edit')
+  opts_seen.on_submit('')
+  h.assert_eq(0, #review.comments)
+end)
+
+-- Hunk headers, file headers, closing rows and landed-history `git show` rows
+-- all name no line, so C has nothing to attach to.
+h.test('details: C on a row that is not a diff line warns and stores nothing', function()
+  reset()
+  local review = require('gitbutler.review')
+  review.clear()
+  local float = require('gitbutler.ui.float')
+  local orig_input, opened = float.input, false
+  h.after(function()
+    float.input = orig_input
+  end)
+  ---@diagnostic disable-next-line: duplicate-set-field
+  float.input = function()
+    opened = true
+    return 0, 0
+  end
+
+  local orig_cursor = details._cursor_row
+  h.after(function()
+    details._cursor_row = orig_cursor
+  end)
+  details.win_state.entity = { cli_id = 'aa', scope = 'commit', ref = 'deadbeef' }
+  details.win_state.rows = {
+    { type = 'detail_hunk', data = { path = 'src/auth.lua' } },
+    { type = 'commit_show' },
+  }
+  for _, at in ipairs({ 1, 2 }) do
+    ---@diagnostic disable-next-line: duplicate-set-field
+    details._cursor_row = function()
+      return at
+    end
+    details._comment_line()
+  end
+
+  h.assert_falsy(opened, 'the popup never opened')
+  h.assert_eq(0, #review.comments)
+end)
+
+-- The whole point of the feature: one keypress produces the text that gets
+-- pasted, and the store is empty afterwards so the next review starts clean.
+h.test('details: Y writes the blob to both registers and empties the store', function()
+  reset()
+  local review = require('gitbutler.review')
+  h.after(review.clear)
+  h.after(function()
+    details.win_state.status_buf = nil
+  end)
+  local orig_unnamed = vim.fn.getreg('"')
+  local orig_plus = vim.fn.getreg('+')
+  h.after(function()
+    vim.fn.setreg('"', orig_unnamed)
+    vim.fn.setreg('+', orig_plus)
+  end)
+
+  review.clear()
+  review.set({
+    scope = 'commit',
+    ref = 'deadbeef',
+    subject = 'fix: a thing',
+    path = 'src/auth.lua',
+    side = 'new',
+    line = 2,
+    captured = "+local jwt = require('jwt')",
+  }, 'needs a guard')
+
+  details.win_state.status_buf = {
+    get_cursor_branch = function()
+      return { name = 'fix/graph-tab-details' }
+    end,
+  }
+
+  details._yank_comments()
+
+  local expected = table.concat({
+    'Review — 1 comment on fix/graph-tab-details',
+    '',
+    'src/auth.lua:2  (deadbee · fix: a thing · added)',
+    "  +local jwt = require('jwt')",
+    '  > needs a guard',
+  }, '\n')
+  h.assert_eq(expected, vim.fn.getreg('"'))
+  h.assert_eq(expected, vim.fn.getreg('+'))
+  h.assert_eq(0, #review.comments, 'the store is drained')
+end)
+
+-- Yanking nothing must not clobber whatever the user already had in their
+-- registers.
+h.test('details: Y with no comments warns and leaves the registers alone', function()
+  reset()
+  local review = require('gitbutler.review')
+  h.after(review.clear)
+  h.after(function()
+    details.win_state.status_buf = nil
+  end)
+  local orig_unnamed = vim.fn.getreg('"')
+  local orig_plus = vim.fn.getreg('+')
+  h.after(function()
+    vim.fn.setreg('"', orig_unnamed)
+    vim.fn.setreg('+', orig_plus)
+  end)
+
+  review.clear()
+  vim.fn.setreg('"', 'previous clipboard contents')
+
+  details.win_state.status_buf = nil
+  details._yank_comments()
+
+  h.assert_eq('previous clipboard contents', vim.fn.getreg('"'))
+end)
+
+-- The pane may be showing a diff with no lane under the status cursor. The blob
+-- still has to be well-formed.
+h.test('details: Y without a branch under the cursor drops the branch clause', function()
+  reset()
+  local review = require('gitbutler.review')
+  h.after(review.clear)
+  h.after(function()
+    details.win_state.status_buf = nil
+  end)
+  local orig_unnamed = vim.fn.getreg('"')
+  local orig_plus = vim.fn.getreg('+')
+  h.after(function()
+    vim.fn.setreg('"', orig_unnamed)
+    vim.fn.setreg('+', orig_plus)
+  end)
+
+  review.clear()
+  review.set({
+    scope = 'uncommitted',
+    ref = nil,
+    path = 'src/app.rs',
+    side = 'new',
+    line = 4,
+    captured = '+    let x = 1;',
+  }, 'name this')
+
+  details.win_state.status_buf = nil
+  details._yank_comments()
+
+  h.assert_truthy(vim.fn.getreg('"'):match('^Review — 1 comment\n'), vim.fn.getreg('"'))
+end)

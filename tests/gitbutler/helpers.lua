@@ -9,8 +9,17 @@ M.pass = 0
 M.fail = 0
 M.errors = {}
 
+---Cleanups to run when the current test ends, pass or fail. Registered by
+---`M.after`, drained by `M.test`.
+M._after = {}
+
 function M.test(name, fn)
+  M._after = {}
   local ok, err = pcall(fn)
+  for i = #M._after, 1, -1 do
+    pcall(M._after[i])
+  end
+  M._after = {}
   if ok then
     M.pass = M.pass + 1
     print('  PASS  ' .. name)
@@ -44,6 +53,14 @@ function M.assert_type(expected_type, val, msg)
   if type(val) ~= expected_type then
     error((msg or '') .. ' expected type ' .. expected_type .. ' got ' .. type(val), 2)
   end
+end
+
+---Register a cleanup for the current test. Restoring a stub this way survives a
+---failing assertion, which `error()`s out of the test body — a stub left
+---installed leaks into every spec that runs after it in the same headless run.
+---@param fn fun()
+function M.after(fn)
+  table.insert(M._after, fn)
 end
 
 function M.mock_buffer()
