@@ -31,6 +31,7 @@ require('tests.gitbutler.cursor_restore_spec')
 require('tests.gitbutler.refresh_opts_spec')
 require('tests.gitbutler.watch_spec')
 require('tests.gitbutler.float_spec')
+require('tests.gitbutler.buffer_spec')
 
 -- Summary
 local h = require('tests.gitbutler.helpers')

@@ -177,6 +177,19 @@ function Buffer:open()
     vim.api.nvim_win_set_buf(self.win, self.buf)
   end
 
+  self:attach(self.win)
+end
+
+---Take ownership of a window the caller already created: window options, the
+---pinned hint window, the cursor and resize autocmds, and the keymaps.
+---
+---Split out of `open` so the details pane can reuse all of it. That pane makes
+---its own window — a vsplit beside the status view, with a width percentage and
+---a fullscreen toggle — which `open`'s `config.values.kind` switch cannot do.
+---@param win integer
+function Buffer:attach(win)
+  self.win = win
+
   vim.wo[self.win].number = false
   vim.wo[self.win].relativenumber = false
   vim.wo[self.win].signcolumn = 'no'
