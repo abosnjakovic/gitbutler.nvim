@@ -846,6 +846,14 @@ end)
 
 h.test('details: y sets both registers from the selected hunk', function()
   local sb = open_with_diff()
+  -- `+` is the system clipboard: leaving the hunk in it would make `make test`
+  -- overwrite whatever the developer had copied.
+  local orig_unnamed = vim.fn.getreg('"')
+  local orig_plus = vim.fn.getreg('+')
+  h.after(function()
+    vim.fn.setreg('"', orig_unnamed)
+    vim.fn.setreg('+', orig_plus)
+  end)
   local orig_notify = vim.notify
   vim.notify = function() end
   details._hunk_copy()
