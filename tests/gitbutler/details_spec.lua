@@ -1600,3 +1600,103 @@ h.test('details: every registry action for the pane has a handler', function()
   details.close()
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
 end)
+
+-- The pane had no hint line at all. This is the user-visible half of the fix.
+--
+-- `text:match('C')` (a bare letter) would pass even against the buggy
+-- `hints.status` fallback, since its own default entry is `<C-r> Refresh` —
+-- both contain a capital C/R. Matching the desc word itself is what actually
+-- discriminates the registry-derived line from the status one.
+h.test('details: the pane renders a hint line of its own keys', function()
+  reset()
+  local hints = require('gitbutler.ui.hints')
+  local text = hints.for_context('details', nil, false)
+  h.assert_truthy(text:match('comment'), 'the comment key is advertised: ' .. text)
+  h.assert_falsy(text:match('amend mode'), 'status-view entries do not leak in: ' .. text)
+end)
+
+-- The CI view has no entry in `hints`, so it silently showed status hints —
+-- the same bug as the pane, in a second place.
+h.test('details: a view with no hint table falls back to its own registry keys', function()
+  local hints = require('gitbutler.ui.hints')
+  local text = hints.for_context('ci', nil, false)
+  h.assert_truthy(text:match('rerun'), 'CI keys, not status keys: ' .. text)
+end)
+
+-- `hints.for_context`'s plain text is unclipped by design — fine for a unit
+-- test, but `details` alone has 27 registry entries, and at the pane's real
+-- (narrower) width that text just gets cut off wherever the window ends. A
+-- naive cut left only navigation keys visible and dropped `?` and every verb
+-- past the first few, which defeats the point of this whole fix. So
+-- `update_hint` routes a registry-derived line through the same width-aware
+-- hotbar `status` already uses, with `?` and the pane's own less-obvious
+-- verbs (registry entries carrying their own `help` string) prioritised to
+-- survive truncation. This asserts the outcome at a realistic pane width,
+-- not just that the underlying text contains the word somewhere.
+h.test('details: at a pane-typical width the hint line keeps ? and a verb', function()
+  reset()
+  local buffer_mod = require('gitbutler.ui.buffer')
+  local buf = buffer_mod.Buffer.new()
+  buf.view = 'details'
+  buf.buf = vim.api.nvim_create_buf(false, true)
+  local orig_columns = vim.o.columns
+  vim.o.columns = 240 -- headroom so the split can actually be narrowed to 60
+  vim.cmd('vsplit')
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, buf.buf)
+  h.after(function()
+    vim.o.columns = orig_columns
+    buf:close()
+  end)
+  buf:attach(win)
+  vim.api.nvim_win_set_width(win, 60)
+
+  buf:update_hint()
+
+  local text = vim.api.nvim_buf_get_lines(buf.hint_buf, 0, -1, false)[1]
+  -- `nvim_buf_get_lines` reads buffer data, not the visually clipped
+  -- display — `wrap = false` only hides the overflow on screen, it does not
+  -- shorten the line's own text. So this line alone would pass even against
+  -- the untruncated `hints.for_context` route (300 chars, contains every
+  -- word regardless of width) and would not actually prove truncation
+  -- happened. The length check below is what proves it: the untruncated
+  -- registry text is 300 bytes, so a genuinely width-bounded line must be
+  -- far shorter.
+  local untruncated = require('gitbutler.ui.hints').for_context('details', nil, false)
+  h.assert_truthy(#text < #untruncated / 2, 'the line is data-truncated, not just visually clipped: ' .. text)
+  h.assert_truthy(text:match('%?'), 'help survives truncation: ' .. text)
+  h.assert_truthy(text:match('comment') or text:match('yank'), 'a pane verb survives truncation: ' .. text)
+end)
+
+-- The routing decision must not change what `status` renders. It already
+-- used the mode hotbar unconditionally, on every row type, both before and
+-- after this change — `hints.status`'s curated per-row-type table (`commit`,
+-- `merge_base`, …) is for other `hints.for_context` callers, not the live
+-- status buffer. This pins that the refactor did not quietly move status
+-- onto the registry-hotbar path or the plain-text path.
+h.test('status: the hint line is still exactly the mode hotbar, unaffected by the routing change', function()
+  reset()
+  local buffer_mod = require('gitbutler.ui.buffer')
+  local hotbar = require('gitbutler.ui.hotbar')
+  local modes = require('gitbutler.ui.modes')
+  local buf = buffer_mod.Buffer.new()
+  buf.view = 'status'
+  buf.buf = vim.api.nvim_create_buf(false, true)
+  buf.lines = { { type = 'commit', text = 'commit row' } } -- a row hints.status.commit has a curated entry for
+  vim.cmd('vsplit')
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, buf.buf)
+  h.after(function()
+    buf:close()
+  end)
+  buf:attach(win)
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+
+  buf:update_hint()
+
+  local mode = modes.current()
+  local expected =
+    hotbar.build(mode, hotbar.items_for(mode), vim.api.nvim_win_get_width(win), hotbar.pill_hl(mode)).text
+  local actual = vim.api.nvim_buf_get_lines(buf.hint_buf, 0, -1, false)[1]
+  h.assert_eq(expected, actual, 'status hint line byte-for-byte unchanged')
+end)

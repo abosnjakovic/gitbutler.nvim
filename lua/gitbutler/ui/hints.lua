@@ -36,14 +36,39 @@ local function format(items)
   return table.concat(parts, ''), key_ranges
 end
 
+---Whether a view/row-type has a curated per-row-type entry (as opposed to
+---needing the registry fallback). `buffer.lua` uses this to decide which
+---renderer to use — the width-aware hotbar is the right one for a
+---registry-derived line, since those can run long.
+---@param view string|nil
+---@param line_type string|nil
+---@return boolean
+function M.has_entry(view, line_type)
+  local view_hints = view and hints[view]
+  return view_hints ~= nil and (view_hints[line_type] or view_hints.default) ~= nil
+end
+
 ---Resolve hint text for a view + line type.
+---
+---A per-row-type entry wins: it can say what `<Tab>` means on this particular
+---row, which a per-context list cannot. Absent one, the view's own registry
+---entries are used. Falling back to the status view's hints, as this used to,
+---is what made the CI view and the details pane advertise keys they do not bind.
 ---@param view string|nil
 ---@param line_type string|nil
 ---@param selectable boolean|nil whether <Space> Select should be included
 ---@return string text, table key_ranges 0-indexed byte ranges {col_start, col_end}
 function M.for_context(view, line_type, selectable)
-  local view_hints = view and hints[view] or hints.status
-  local items = view_hints[line_type] or view_hints.default
+  local items
+  if M.has_entry(view, line_type) then
+    local view_hints = hints[view]
+    items = view_hints[line_type] or view_hints.default
+  else
+    items = {}
+    for _, spec in ipairs(require('gitbutler.keys').resolved(view or 'status')) do
+      table.insert(items, { spec.key, spec.desc })
+    end
+  end
   if not selectable then
     local filtered = {}
     for _, item in ipairs(items) do

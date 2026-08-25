@@ -351,6 +351,60 @@ function Buffer:render(lines)
   self:update_hint()
 end
 
+---Paint a hotbar-built line (mode pill + width-truncated items) into the hint window.
+local function render_hotbar(self, built)
+  vim.bo[self.hint_buf].modifiable = true
+  vim.api.nvim_buf_clear_namespace(self.hint_buf, self.ns, 0, -1)
+  vim.api.nvim_buf_set_lines(self.hint_buf, 0, -1, false, { built.text })
+  for _, s in ipairs(built.spans) do
+    vim.api.nvim_buf_add_highlight(self.hint_buf, self.ns, s[3], 0, s[1], s[2])
+  end
+  vim.bo[self.hint_buf].modifiable = false
+end
+
+---Hotbar items for a view whose hint line is registry-derived rather than a
+---curated per-row-type table (`hints.has_entry` is false).
+---
+---`hotbar.build`'s `keep` tail is appended with no width check, so it must
+---stay small or it overflows the window itself: `help` and one `close`-like
+---action, deduped by action so an aliased close key (`details` binds both
+---`d` and `q` to `close_pane`) isn't kept twice and doesn't spend the tail's
+---budget twice for the same thing.
+---
+---Everything else competes for the width-budgeted portion, in priority
+---order: an entry with its own `help` string first — that field already
+---marks "the one-word desc doesn't cover this" (`comment`, `yank review` in
+---the details pane), which is exactly what a clipped line must not drop
+---first — then other bound actions, then native entries (no `action`, e.g.
+---details' `j`/`k`/`g`/`G`) last, since vim-standard motions are the least
+---surprising thing to lose to truncation.
+---@param view string
+---@return table[]
+local function registry_hotbar_items(view)
+  local kept_actions, kept, helpful, rest, native = {}, {}, {}, {}, {}
+  for _, spec in ipairs(require('gitbutler.keys').resolved(view)) do
+    local is_close = spec.action ~= nil and spec.action:find('close', 1, true) ~= nil
+    local keep = (spec.action == 'help' or is_close) and not kept_actions[spec.action]
+    local it = { spec.key, spec.desc, keep = keep or nil }
+    if keep then
+      kept_actions[spec.action] = true
+      table.insert(kept, it)
+    elseif spec.help then
+      table.insert(helpful, it)
+    elseif spec.action then
+      table.insert(rest, it)
+    else
+      table.insert(native, it)
+    end
+  end
+  local items = {}
+  vim.list_extend(items, kept)
+  vim.list_extend(items, helpful)
+  vim.list_extend(items, rest)
+  vim.list_extend(items, native)
+  return items
+end
+
 ---Refresh the pinned hint window contents based on current cursor context.
 function Buffer:update_hint()
   if not self.view then
@@ -360,25 +414,30 @@ function Buffer:update_hint()
     return
   end
 
+  local hotbar = require('gitbutler.ui.hotbar')
+  local width = (self.win and vim.api.nvim_win_is_valid(self.win)) and vim.api.nvim_win_get_width(self.win) or 80
+
   if self.view == 'status' then
-    local hotbar = require('gitbutler.ui.hotbar')
-    local width = (self.win and vim.api.nvim_win_is_valid(self.win)) and vim.api.nvim_win_get_width(self.win) or 80
     local mode = require('gitbutler.ui.modes').current()
-    local built = hotbar.build(mode, hotbar.items_for(mode), width, hotbar.pill_hl(mode))
-    vim.bo[self.hint_buf].modifiable = true
-    vim.api.nvim_buf_clear_namespace(self.hint_buf, self.ns, 0, -1)
-    vim.api.nvim_buf_set_lines(self.hint_buf, 0, -1, false, { built.text })
-    for _, s in ipairs(built.spans) do
-      vim.api.nvim_buf_add_highlight(self.hint_buf, self.ns, s[3], 0, s[1], s[2])
-    end
-    vim.bo[self.hint_buf].modifiable = false
+    render_hotbar(self, hotbar.build(mode, hotbar.items_for(mode), width, hotbar.pill_hl(mode)))
     return
   end
 
   local line = self:get_cursor_line()
   local line_type = line and line.type or nil
-  local selectable = line ~= nil and (line.type == 'commit' or line.type == 'file' or line.type == 'committed_file')
   local hints = require('gitbutler.ui.hints')
+
+  -- A registry-derived line has no fixed length (`details` alone has 27
+  -- entries) and the hint window is one line, so it needs the same
+  -- width-aware truncation the status hotbar already has — not the plain,
+  -- unclipped text `hints.for_context` returns for a curated per-row-type
+  -- entry, which is already the right length by design.
+  if not hints.has_entry(self.view, line_type) then
+    render_hotbar(self, hotbar.build(self.view, registry_hotbar_items(self.view), width, hotbar.pill_hl(self.view)))
+    return
+  end
+
+  local selectable = line ~= nil and (line.type == 'commit' or line.type == 'file' or line.type == 'committed_file')
   local text, key_ranges = hints.for_context(self.view, line_type, selectable)
 
   vim.bo[self.hint_buf].modifiable = true
