@@ -42,15 +42,16 @@ function M.open(opts)
 end
 
 ---Open a small input float near the cursor for text entry (commit message, branch name, etc).
----When single_line is true, Enter submits and height defaults to 1.
----Otherwise, Ctrl-C Ctrl-C submits (for multi-line input like commit messages).
+---`<CR>` saves in normal mode either way; a single-line float also takes it from
+---insert mode, where a multi-line one needs `<CR>` for what it means everywhere
+---else. `<C-c><C-c>` still saves from both modes for anyone with the habit.
 ---@param opts {title: string, on_submit: fun(text: string), on_abort?: fun(), height?: number, width?: number, content?: string[], single_line?: boolean, allow_empty?: boolean}
 ---@return number buf, number win
 function M.input(opts)
   local is_single = opts.single_line == true
-  -- Advertise the submit key in the title: single-line takes <CR>, multi-line
-  -- (commit messages, PR bodies) needs Ctrl-C Ctrl-C since <CR> inserts a line.
-  local hint = is_single and '  (⏎ save · Esc cancel)' or '  (Ctrl-C Ctrl-C save · Esc cancel)'
+  -- Advertise the shortest path to saving. A single-line float saves straight
+  -- from insert; a multi-line one has to leave it first.
+  local hint = is_single and '  (⏎ save · q cancel)' or '  (Esc then ⏎ save · q cancel)'
   local buf, win = M.open({
     title = (opts.title or 'Input') .. hint,
     width = opts.width or config.values.input_float.width,
@@ -89,17 +90,22 @@ function M.input(opts)
     end
   end
 
+  -- Normal-mode <CR> saves in every float. It overrides the native "down to
+  -- first non-blank" motion, which is no loss in a box this small.
+  vim.keymap.set('n', '<CR>', submit, { buffer = buf })
   if is_single then
-    -- Single-line: Enter submits, Esc aborts
+    -- One line has nowhere to put a newline, so <CR> can save from insert too.
     vim.keymap.set('i', '<CR>', submit, { buffer = buf })
-    vim.keymap.set('n', '<CR>', submit, { buffer = buf })
   end
 
   -- Ctrl-C Ctrl-C always works as submit (multi-line and single-line)
   vim.keymap.set({ 'n', 'i' }, '<C-c><C-c>', submit, { buffer = buf })
   vim.keymap.set({ 'n', 'i' }, '<C-c><C-k>', abort, { buffer = buf })
   vim.keymap.set('n', 'q', abort, { buffer = buf })
-  vim.keymap.set('n', '<Esc>', abort, { buffer = buf })
+  -- <Esc> deliberately does NOT abort. The float opens in insert mode, so Esc
+  -- is how you reach normal mode to press <CR> — and Vim users double-tap it
+  -- out of habit. Aborting on the second tap would discard the text they were
+  -- about to save. `q` and `<C-c><C-k>` cancel.
 
   return buf, win
 end
