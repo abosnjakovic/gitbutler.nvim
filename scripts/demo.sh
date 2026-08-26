@@ -25,13 +25,21 @@ fi
 # The landed history below the common base is whatever `git log <base>` already
 # shows, so no setup is needed for the landed-history / details recordings.
 scratch="DEMO.md"
-cleanup() { rm -f "$scratch"; }
+staging="$(mktemp -d)"
+cleanup() { rm -f "$scratch"; rm -rf "$staging"; }
 trap cleanup EXIT INT TERM
 printf '# Release notes\n\n- Token verification on the login route\n- Inline landed history in the graph\n' >"$scratch"
 
-for tape in doc/demo/butler.tape doc/demo/amend.tape doc/demo/landed-history.tape doc/demo/details.tape; do
+# Every tape records the graph, and the graph lists uncommitted changes — so a
+# GIF rewritten in place turns up as a dirty row in whichever tape runs next,
+# shifting the cursor counts under it. Record into a staging directory and move
+# the results back only once every tape is done, so each one sees the same tree.
+for tape in doc/demo/review.tape doc/demo/butler.tape doc/demo/amend.tape doc/demo/landed-history.tape doc/demo/details.tape; do
   echo "=== $tape ==="
-  vhs "$tape" || { echo "  -> FAILED"; exit 1; }
+  staged_tape="$staging/$(basename "$tape")"
+  sed 's|^Output "doc/demo/|Output "'"$staging"'/|' "$tape" >"$staged_tape"
+  vhs "$staged_tape" || { echo "  -> FAILED"; exit 1; }
 done
 
+mv "$staging"/*.gif doc/demo/ || { echo "demo: no GIFs produced"; exit 1; }
 echo "demo: GIFs regenerated in doc/demo/."

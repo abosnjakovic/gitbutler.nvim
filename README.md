@@ -20,6 +20,10 @@ The details pane shows a commit's diff under its `commit / Author / Date / messa
 
 ![Details pane with the commit header and hunk navigation](doc/demo/details.gif)
 
+The pane is also where you review a diff. `C` comments the line under the cursor and the note renders under it; `Y` drains every comment into one structured blob on the clipboard — file, line, commit, the diff line itself and what you said about it. Written for reviewing code an agent wrote: read the diff, mark it up, paste the blob back:
+
+![Commenting diff lines with C and yanking the review with Y](doc/demo/review.gif)
+
 Regenerate the recordings with `make demo` (needs [vhs](https://github.com/charmbracelet/vhs) and a GitButler workspace).
 
 
