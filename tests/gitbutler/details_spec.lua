@@ -303,7 +303,7 @@ h.test('details: show_for_line maps entity rows and ignores the rest', function(
   details.show_for_line({ type = 'uncommitted_header', data = { cli_id = 'zz' } })
   details.win_state.entity = nil
   details.show_for_line({ type = 'blank' })
-  details.show_for_line({ type = 'merge_base', data = { cli_id = 'mb' } })
+  details.show_for_line({ type = 'connector' })
   details.show_for_line(nil)
   cli.diff_json = orig
 
@@ -311,6 +311,25 @@ h.test('details: show_for_line maps entity rows and ignores the rest', function(
   h.assert_eq('file1', seen[1])
   h.assert_eq('zz', seen[5])
   h.assert_falsy(details.win_state.entity, 'ignored rows changed the pane')
+end)
+
+-- The common base carries a sha but no cli_id, so `but diff` can't address it.
+-- It used to fall through and leave the pane on whatever was there before.
+h.test('details: the common base opens through git show, like landed history', function()
+  reset()
+  local seen = {}
+  local orig = details.show_commit
+  ---@diagnostic disable-next-line: duplicate-set-field
+  details.show_commit = function(sha)
+    table.insert(seen, sha)
+  end
+  details.show_for_line({ type = 'merge_base', data = { sha = 'mb1' } })
+  details.show_for_line({ type = 'base_commit', data = { sha = 'bc1' } })
+  details.show_commit = orig
+
+  h.assert_eq(2, #seen)
+  h.assert_eq('mb1', seen[1])
+  h.assert_eq('bc1', seen[2])
 end)
 
 h.test('details: a diff in flight across a close/reopen is still dropped', function()
@@ -827,6 +846,14 @@ end)
 
 h.test('details: y sets both registers from the selected hunk', function()
   local sb = open_with_diff()
+  -- `+` is the system clipboard: leaving the hunk in it would make `make test`
+  -- overwrite whatever the developer had copied.
+  local orig_unnamed = vim.fn.getreg('"')
+  local orig_plus = vim.fn.getreg('+')
+  h.after(function()
+    vim.fn.setreg('"', orig_unnamed)
+    vim.fn.setreg('+', orig_plus)
+  end)
   local orig_notify = vim.notify
   vim.notify = function() end
   details._hunk_copy()
@@ -893,4 +920,647 @@ h.test('details: details_focus focuses the pane, warns when closed', function()
   vim.notify = orig
   details.close()
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- The gutter has always computed these numbers and thrown them away. A comment
+-- needs to name the line it is attached to, so the row keeps them.
+h.test('details: a diff line records its side, line number and raw text', function()
+  local rows = details.build(fixtures.diff_json, {})
+  local first_added, first_removed, first_context
+  for _, r in ipairs(rows) do
+    if r.type == 'detail_line' then
+      local marker = (r.data.raw or ''):sub(1, 1)
+      if marker == '+' and not first_added then
+        first_added = r
+      elseif marker == '-' and not first_removed then
+        first_removed = r
+      elseif marker ~= '+' and marker ~= '-' and not first_context then
+        first_context = r
+      end
+    end
+  end
+
+  -- Hunk 1 is `@@ -1,2 +1,4 @@`: context ` local M = {}` at 1/1, then the two
+  -- additions at new 2 and 3.
+  h.assert_eq('new', first_added.data.side)
+  h.assert_eq(2, first_added.data.line)
+  h.assert_eq("+local jwt = require('jwt')", first_added.data.raw)
+  h.assert_eq('src/auth.lua', first_added.data.path)
+
+  h.assert_eq('new', first_context.data.side)
+  h.assert_eq(1, first_context.data.line)
+
+  -- Hunk 2 removes ` return false` at old line 21.
+  h.assert_eq('old', first_removed.data.side)
+  h.assert_eq(21, first_removed.data.line)
+  h.assert_eq('-  return false', first_removed.data.raw)
+end)
+
+-- Each line owns its data now. Sharing one table across a hunk would give every
+-- line the same line number.
+h.test('details: diff lines do not share one data table', function()
+  local rows = details.build(fixtures.diff_json, {})
+  local lines = {}
+  for _, r in ipairs(rows) do
+    if r.type == 'detail_line' then
+      table.insert(lines, r)
+    end
+  end
+  h.assert_truthy(#lines > 1, 'fixture has several diff lines')
+  h.assert_truthy(lines[1].data ~= lines[2].data, 'each row carries its own data table')
+end)
+
+-- A comment is a row like any other row. That is the whole design: one rows
+-- model, asserted as text, cursor-addressable, no second rendering path.
+h.test('details: a comment renders under the line it belongs to', function()
+  local comment = {
+    scope = 'commit',
+    ref = 'abc',
+    path = 'src/auth.lua',
+    side = 'new',
+    line = 2,
+    captured = "+local jwt = require('jwt')",
+    text = 'Pull this to the top of the file.',
+  }
+  local rows = details.build(fixtures.diff_json, {
+    comments = { ['src/auth.lua:new:2'] = comment },
+    width = 80,
+  })
+
+  local anchor_index, comment_row
+  for i, r in ipairs(rows) do
+    if r.type == 'detail_line' and r.data.path == 'src/auth.lua' and r.data.side == 'new' and r.data.line == 2 then
+      anchor_index = i
+    elseif r.type == 'detail_comment' and not comment_row then
+      comment_row = { index = i, row = r }
+    end
+  end
+
+  h.assert_truthy(anchor_index, 'the anchored line is in the rows')
+  h.assert_eq(anchor_index + 1, comment_row.index, 'the comment follows its line immediately')
+  -- 14 columns of indent: two for the lead, twelve for the gutter, so the elbow
+  -- sits directly under the code rather than under the line numbers.
+  h.assert_eq(string.rep(' ', 14) .. '╰ Pull this to the top of the file.', comment_row.row.text)
+  h.assert_falsy(comment_row.row.selectable, 'comment rows are not hunk targets')
+  h.assert_eq(2, comment_row.row.data.line)
+end)
+
+-- The marker is the only thing that says "you already commented here" while
+-- scrolling. It sits in the lead column's second slot, which has always been a
+-- pad space, so nothing else on the row moves.
+h.test('details: a commented line carries the marker in the lead column', function()
+  local rows = details.build(fixtures.diff_json, {
+    comments = {
+      ['src/auth.lua:new:2'] = {
+        path = 'src/auth.lua',
+        side = 'new',
+        line = 2,
+        captured = "+local jwt = require('jwt')",
+        text = 'x',
+      },
+    },
+    width = 80,
+  })
+  local commented, plain
+  for _, r in ipairs(rows) do
+    if r.type == 'detail_line' and r.data.line == 2 and r.data.side == 'new' then
+      commented = r
+    elseif r.type == 'detail_line' and r.data.line == 1 then
+      plain = r
+    end
+  end
+  h.assert_eq(' ●', commented.text:sub(1, #' ●'))
+  h.assert_eq('  ', plain.text:sub(1, 2))
+end)
+
+-- Uncommitted diffs move under the reviewer. A note must never silently point
+-- at code that has changed since it was written.
+h.test('details: a comment goes stale when its line no longer matches', function()
+  local moved = {
+    path = 'src/auth.lua',
+    side = 'new',
+    line = 2,
+    captured = '+local jwt = require("something else")',
+    text = 'still relevant?',
+  }
+  local fresh = {
+    path = 'src/auth.lua',
+    side = 'new',
+    line = 3,
+    captured = "+local secret = 'shh'",
+    text = 'inline this',
+  }
+  local rows = details.build(fixtures.diff_json, {
+    comments = { ['src/auth.lua:new:2'] = moved, ['src/auth.lua:new:3'] = fresh },
+    width = 80,
+  })
+
+  h.assert_truthy(moved.stale, 'build marks the drifted comment')
+  h.assert_falsy(fresh.stale, 'build leaves the matching comment alone')
+
+  local stale_row
+  for _, r in ipairs(rows) do
+    if r.type == 'detail_comment' and r.data.line == 2 then
+      stale_row = r
+    end
+  end
+  h.assert_truthy(stale_row.text:match('stale'), 'the stale marker is visible in the pane: ' .. stale_row.text)
+end)
+
+-- The pane does not wrap, so an unwrapped paragraph would run off the right
+-- edge and be unreadable — which defeats the point of showing it inline.
+h.test('details: a long comment wraps to the pane width', function()
+  local rows = details.build(fixtures.diff_json, {
+    comments = {
+      ['src/auth.lua:new:2'] = {
+        path = 'src/auth.lua',
+        side = 'new',
+        line = 2,
+        captured = "+local jwt = require('jwt')",
+        text = 'one two three four five six seven eight nine ten eleven twelve',
+      },
+    },
+    width = 40,
+  })
+  local body = {}
+  for _, r in ipairs(rows) do
+    if r.type == 'detail_comment' then
+      table.insert(body, r.text)
+    end
+  end
+  h.assert_truthy(#body > 1, 'the comment wrapped onto more than one row')
+  for _, text in ipairs(body) do
+    -- Display columns, not bytes: `╰` is three bytes and one column, and a
+    -- comment body may hold multibyte characters of its own.
+    h.assert_truthy(vim.fn.strdisplaywidth(text) <= 40, 'no comment row exceeds the pane width: ' .. text)
+  end
+end)
+
+-- `y` copies a hunk's body. Comment rows now live inside a hunk's row range, so
+-- without a skip the reviewer's own notes end up in the copied patch.
+h.test('details: copying a hunk skips the comment rows inside it', function()
+  local rows, hunks = details.build(fixtures.diff_json, {
+    comments = {
+      ['src/auth.lua:new:2'] = {
+        path = 'src/auth.lua',
+        side = 'new',
+        line = 2,
+        captured = "+local jwt = require('jwt')",
+        text = 'do not copy me',
+      },
+    },
+    width = 80,
+  })
+  local text = details._hunk_copy_text(rows, hunks[1])
+  h.assert_falsy(text:match('do not copy me'), 'the comment is not part of the hunk body')
+  h.assert_truthy(text:match("local jwt = require%('jwt'%)"), 'the diff line still is')
+end)
+
+-- Comment rows sit between the hunk header and the hunk's last line, so the
+-- range has to grow with them or `y` and the `▌` bar both truncate.
+h.test('details: hunk end_row accounts for comment rows', function()
+  local _, without = details.build(fixtures.diff_json, { width = 80 })
+  local _, with = details.build(fixtures.diff_json, {
+    comments = {
+      ['src/auth.lua:new:2'] = {
+        path = 'src/auth.lua',
+        side = 'new',
+        line = 2,
+        captured = "+local jwt = require('jwt')",
+        text = 'a note',
+      },
+    },
+    width = 80,
+  })
+  h.assert_eq(without[1].end_row + 1, with[1].end_row, 'one comment row extends the hunk by one')
+end)
+
+-- The stale suffix is appended after wrapping, so a stale comment has to be
+-- wrapped narrower or its first row runs off a pane that does not wrap.
+h.test('details: a long stale comment still fits the pane width', function()
+  local rows = details.build(fixtures.diff_json, {
+    comments = {
+      ['src/auth.lua:new:2'] = {
+        path = 'src/auth.lua',
+        side = 'new',
+        line = 2,
+        captured = '+local jwt = require("something else")',
+        text = 'one two three four five six seven eight nine ten eleven twelve',
+      },
+    },
+    width = 40,
+  })
+  local body = {}
+  for _, r in ipairs(rows) do
+    if r.type == 'detail_comment' then
+      table.insert(body, r.text)
+    end
+  end
+  h.assert_truthy(#body > 1, 'the comment wrapped onto more than one row')
+  h.assert_truthy(body[1]:match('stale'), 'the first row carries the stale tag: ' .. body[1])
+  for _, text in ipairs(body) do
+    h.assert_truthy(vim.fn.strdisplaywidth(text) <= 40, 'no comment row exceeds the pane width: ' .. text)
+  end
+end)
+
+-- A comment records what it is attached to. That has to be resolved where the
+-- status row is still in hand — by the time the diff arrives, the row is gone.
+h.test('details: show_for_line resolves the scope and ref of each row kind', function()
+  reset()
+  local seen = {}
+  local orig = details.show
+  ---@diagnostic disable-next-line: duplicate-set-field
+  details.show = function(entity)
+    table.insert(seen, entity)
+  end
+
+  details.show_for_line({
+    type = 'commit',
+    data = { cli_id = 'aa', sha = 'deadbeef', commit = { message = 'fix: a thing\n\nbody' } },
+  })
+  details.show_for_line({ type = 'committed_file', data = { cli_id = 'bb', commit_id = 'cafebabe' } })
+  -- Shaped like a real graph row: `name` is the display string, `branch` the
+  -- payload it was derived from.
+  details.show_for_line({
+    type = 'branch',
+    data = {
+      cli_id = 'cc',
+      name = 'fix/graph-tab-details',
+      branch = { name = 'fix/graph-tab-details' },
+    },
+  })
+  details.show_for_line({ type = 'file', data = { cli_id = 'dd' } })
+  details.show_for_line({ type = 'uncommitted_header', data = { cli_id = 'zz' } })
+
+  details.show = orig
+
+  h.assert_eq(5, #seen)
+  h.assert_eq('commit', seen[1].scope)
+  h.assert_eq('deadbeef', seen[1].ref)
+  h.assert_eq('fix: a thing', seen[1].subject)
+
+  h.assert_eq('commit', seen[2].scope)
+  h.assert_eq('cafebabe', seen[2].ref)
+  h.assert_falsy(seen[2].subject, 'a committed-file row carries no message')
+
+  -- A branch diff spans several commits, so no single sha describes a line in
+  -- it. The branch name is what is actually known.
+  h.assert_eq('branch', seen[3].scope)
+  h.assert_eq('fix/graph-tab-details', seen[3].ref)
+
+  h.assert_eq('uncommitted', seen[4].scope)
+  h.assert_falsy(seen[4].ref, 'uncommitted changes have no ref')
+  h.assert_eq('uncommitted', seen[5].scope)
+end)
+
+-- The graph labels a nameless branch `(unnamed)`. Anchoring comments to that
+-- label makes every nameless lane the same lane, so one lane's notes render on
+-- another. The cli id is what still tells them apart.
+h.test('details: two nameless branches resolve to different refs', function()
+  reset()
+  local seen = {}
+  local orig = details.show
+  ---@diagnostic disable-next-line: duplicate-set-field
+  details.show = function(entity)
+    table.insert(seen, entity)
+  end
+
+  -- `branch.name` absent, and present as JSON null — `vim.NIL` is truthy, so a
+  -- bare `or` would take it as a real name.
+  details.show_for_line({
+    type = 'branch',
+    data = { cli_id = 'aa', name = '(unnamed)', branch = {} },
+  })
+  details.show_for_line({
+    type = 'branch',
+    data = { cli_id = 'bb', name = '(unnamed)', branch = { name = vim.NIL } },
+  })
+
+  details.show = orig
+
+  h.assert_eq(2, #seen)
+  h.assert_eq('aa', seen[1].ref)
+  h.assert_eq('bb', seen[2].ref)
+end)
+
+-- `vim.json.decode` maps JSON null to `vim.NIL`, which is truthy — a bare
+-- `meta.message and` guard doesn't catch it and `vim.split` throws. This is on
+-- the cursor-move path, so it would fire while just scrolling the status view.
+h.test('details: show_for_line survives a commit whose message is vim.NIL', function()
+  reset()
+  local seen = {}
+  local orig = details.show
+  ---@diagnostic disable-next-line: duplicate-set-field
+  details.show = function(entity)
+    table.insert(seen, entity)
+  end
+
+  h.assert_truthy(
+    pcall(function()
+      details.show_for_line({
+        type = 'commit',
+        data = { cli_id = 'aa', sha = 'deadbeef', commit = { message = vim.NIL } },
+      })
+    end),
+    'show_for_line threw on a NIL commit message'
+  )
+
+  details.show = orig
+
+  h.assert_eq(1, #seen)
+  h.assert_falsy(seen[1].subject, 'a NIL message yields no subject')
+end)
+
+-- Without this the store is written but never read back, and comments vanish on
+-- the next hunk selection.
+h.test('details: _rebuild feeds the open diff its comments', function()
+  reset()
+  local review = require('gitbutler.review')
+  review.clear()
+  review.set({
+    scope = 'commit',
+    ref = 'deadbeef',
+    path = 'src/auth.lua',
+    side = 'new',
+    line = 2,
+    captured = "+local jwt = require('jwt')",
+  }, 'from the store')
+
+  details.win_state.entity = { cli_id = 'aa', kind = 'commit', scope = 'commit', ref = 'deadbeef' }
+  details.win_state.data = fixtures.diff_json
+  details._rebuild()
+
+  local found
+  for _, r in ipairs(details.win_state.rows or {}) do
+    if r.type == 'detail_comment' then
+      found = r
+    end
+  end
+  h.assert_truthy(found, 'the stored comment reached the rendered rows')
+  h.assert_truthy(found.text:match('from the store'), found.text)
+  review.clear()
+end)
+
+-- The popup is stubbed: this test is about which anchor gets built from the row
+-- under the cursor, not about Neovim's floating windows.
+h.test('details: C anchors a comment to the row under the cursor', function()
+  reset()
+  local review = require('gitbutler.review')
+  review.clear()
+  h.after(function()
+    review.clear()
+  end)
+
+  local float = require('gitbutler.ui.float')
+  local orig_input, opts_seen = float.input, nil
+  h.after(function()
+    float.input = orig_input
+  end)
+  ---@diagnostic disable-next-line: duplicate-set-field
+  float.input = function(opts)
+    opts_seen = opts
+    return 0, 0
+  end
+
+  local orig_cursor = details._cursor_row
+  h.after(function()
+    details._cursor_row = orig_cursor
+  end)
+  details.win_state.entity = { cli_id = 'aa', scope = 'commit', ref = 'deadbeef', subject = 'fix: a thing' }
+  details.win_state.rows = {
+    { type = 'detail_hunk', data = {} },
+    {
+      type = 'detail_line',
+      data = { path = 'src/auth.lua', side = 'new', line = 2, raw = "+local jwt = require('jwt')" },
+    },
+  }
+  ---@diagnostic disable-next-line: duplicate-set-field
+  details._cursor_row = function()
+    return 2
+  end
+
+  details._comment_line()
+  h.assert_truthy(opts_seen, 'the popup opened')
+  h.assert_truthy(opts_seen.allow_empty, 'an empty submit has to reach on_submit to delete')
+
+  opts_seen.on_submit('needs a guard')
+  h.assert_eq(1, #review.comments)
+  local c = review.comments[1]
+  h.assert_eq('commit', c.scope)
+  h.assert_eq('deadbeef', c.ref)
+  h.assert_eq('fix: a thing', c.subject)
+  h.assert_eq('src/auth.lua', c.path)
+  h.assert_eq('new', c.side)
+  h.assert_eq(2, c.line)
+  h.assert_eq("+local jwt = require('jwt')", c.captured)
+  h.assert_eq('needs a guard', c.text)
+end)
+
+-- Clearing the popup is how a comment is deleted; there is no second key for it.
+h.test('details: an empty submit deletes the comment', function()
+  reset()
+  local review = require('gitbutler.review')
+  review.clear()
+  h.after(function()
+    review.clear()
+  end)
+  local anchor = {
+    scope = 'commit',
+    ref = 'deadbeef',
+    path = 'src/auth.lua',
+    side = 'new',
+    line = 2,
+    captured = "+local jwt = require('jwt')",
+  }
+  review.set(anchor, 'a note')
+
+  local float = require('gitbutler.ui.float')
+  local orig_input, opts_seen = float.input, nil
+  h.after(function()
+    float.input = orig_input
+  end)
+  ---@diagnostic disable-next-line: duplicate-set-field
+  float.input = function(opts)
+    opts_seen = opts
+    return 0, 0
+  end
+
+  local orig_cursor = details._cursor_row
+  h.after(function()
+    details._cursor_row = orig_cursor
+  end)
+  details.win_state.entity = { cli_id = 'aa', scope = 'commit', ref = 'deadbeef' }
+  details.win_state.rows = {
+    {
+      type = 'detail_line',
+      data = { path = 'src/auth.lua', side = 'new', line = 2, raw = "+local jwt = require('jwt')" },
+    },
+  }
+  ---@diagnostic disable-next-line: duplicate-set-field
+  details._cursor_row = function()
+    return 1
+  end
+
+  details._comment_line()
+  h.assert_eq('a note', table.concat(opts_seen.content or {}, '\n'), 'the popup opens pre-filled for an edit')
+  opts_seen.on_submit('')
+  h.assert_eq(0, #review.comments)
+end)
+
+-- Hunk headers, file headers, closing rows and landed-history `git show` rows
+-- all name no line, so C has nothing to attach to.
+h.test('details: C on a row that is not a diff line warns and stores nothing', function()
+  reset()
+  local review = require('gitbutler.review')
+  review.clear()
+  local float = require('gitbutler.ui.float')
+  local orig_input, opened = float.input, false
+  h.after(function()
+    float.input = orig_input
+  end)
+  ---@diagnostic disable-next-line: duplicate-set-field
+  float.input = function()
+    opened = true
+    return 0, 0
+  end
+
+  local orig_cursor = details._cursor_row
+  h.after(function()
+    details._cursor_row = orig_cursor
+  end)
+  details.win_state.entity = { cli_id = 'aa', scope = 'commit', ref = 'deadbeef' }
+  details.win_state.rows = {
+    { type = 'detail_hunk', data = { path = 'src/auth.lua' } },
+    { type = 'commit_show' },
+  }
+  for _, at in ipairs({ 1, 2 }) do
+    ---@diagnostic disable-next-line: duplicate-set-field
+    details._cursor_row = function()
+      return at
+    end
+    details._comment_line()
+  end
+
+  h.assert_falsy(opened, 'the popup never opened')
+  h.assert_eq(0, #review.comments)
+end)
+
+-- The whole point of the feature: one keypress produces the text that gets
+-- pasted, and the store is empty afterwards so the next review starts clean.
+h.test('details: Y writes the blob to both registers and empties the store', function()
+  reset()
+  local review = require('gitbutler.review')
+  h.after(review.clear)
+  h.after(function()
+    details.win_state.status_buf = nil
+  end)
+  local orig_unnamed = vim.fn.getreg('"')
+  local orig_plus = vim.fn.getreg('+')
+  h.after(function()
+    vim.fn.setreg('"', orig_unnamed)
+    vim.fn.setreg('+', orig_plus)
+  end)
+
+  -- `+` is the system clipboard, and headless Linux CI has no provider for it:
+  -- `setreg('+', …)` is a no-op there and `getreg('+')` reads back empty. What
+  -- the pane is responsible for is writing both registers — whether the OS can
+  -- hold the second one is not this test's business. So record the writes.
+  local wrote = {}
+  local orig_setreg = vim.fn.setreg
+  h.after(function()
+    vim.fn.setreg = orig_setreg
+  end)
+  ---@diagnostic disable-next-line: duplicate-set-field
+  vim.fn.setreg = function(name, value)
+    wrote[name] = value
+    return orig_setreg(name, value)
+  end
+
+  review.clear()
+  review.set({
+    scope = 'commit',
+    ref = 'deadbeef',
+    subject = 'fix: a thing',
+    path = 'src/auth.lua',
+    side = 'new',
+    line = 2,
+    captured = "+local jwt = require('jwt')",
+  }, 'needs a guard')
+
+  details.win_state.status_buf = {
+    get_cursor_branch = function()
+      return { name = 'fix/graph-tab-details' }
+    end,
+  }
+
+  details._yank_comments()
+
+  local expected = table.concat({
+    'Review — 1 comment on fix/graph-tab-details',
+    '',
+    'src/auth.lua:2  (deadbee · fix: a thing · added)',
+    "  +local jwt = require('jwt')",
+    '  > needs a guard',
+  }, '\n')
+  h.assert_eq(expected, vim.fn.getreg('"'))
+  h.assert_eq(expected, wrote['+'])
+  h.assert_eq(expected, wrote['"'])
+  h.assert_eq(0, #review.comments, 'the store is drained')
+end)
+
+-- Yanking nothing must not clobber whatever the user already had in their
+-- registers.
+h.test('details: Y with no comments warns and leaves the registers alone', function()
+  reset()
+  local review = require('gitbutler.review')
+  h.after(review.clear)
+  h.after(function()
+    details.win_state.status_buf = nil
+  end)
+  local orig_unnamed = vim.fn.getreg('"')
+  local orig_plus = vim.fn.getreg('+')
+  h.after(function()
+    vim.fn.setreg('"', orig_unnamed)
+    vim.fn.setreg('+', orig_plus)
+  end)
+
+  review.clear()
+  vim.fn.setreg('"', 'previous clipboard contents')
+
+  details.win_state.status_buf = nil
+  details._yank_comments()
+
+  h.assert_eq('previous clipboard contents', vim.fn.getreg('"'))
+end)
+
+-- The pane may be showing a diff with no lane under the status cursor. The blob
+-- still has to be well-formed.
+h.test('details: Y without a branch under the cursor drops the branch clause', function()
+  reset()
+  local review = require('gitbutler.review')
+  h.after(review.clear)
+  h.after(function()
+    details.win_state.status_buf = nil
+  end)
+  local orig_unnamed = vim.fn.getreg('"')
+  local orig_plus = vim.fn.getreg('+')
+  h.after(function()
+    vim.fn.setreg('"', orig_unnamed)
+    vim.fn.setreg('+', orig_plus)
+  end)
+
+  review.clear()
+  review.set({
+    scope = 'uncommitted',
+    ref = nil,
+    path = 'src/app.rs',
+    side = 'new',
+    line = 4,
+    captured = '+    let x = 1;',
+  }, 'name this')
+
+  details.win_state.status_buf = nil
+  details._yank_comments()
+
+  h.assert_truthy(vim.fn.getreg('"'):match('^Review — 1 comment\n'), vim.fn.getreg('"'))
 end)

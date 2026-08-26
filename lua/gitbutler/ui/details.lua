@@ -9,6 +9,8 @@ local HL = {
   add = 'DiffAdd',
   del = 'DiffDelete',
   dim = 'GitButlerHelp',
+  comment = 'GitButlerDetailComment',
+  stale = 'GitButlerDetailStale',
 }
 
 ---Width the file header rule is padded to.
@@ -42,21 +44,22 @@ local function add(r, txt, hl)
   r.text = r.text .. txt
 end
 
----Leading glyph so every hunk row lines up: ✔︎ when marked, ▌ when selected,
----two spaces otherwise.
-local function lead(r, marked, selected)
+---Leading glyphs so every hunk row lines up. Column one is hunk state: ✔︎ when
+---marked, ▌ when the hunk is selected. Column two has always been a pad space —
+---`▌` is one display column and every other row needs two — so the comment
+---marker goes there without moving anything else on the row.
+local function lead(r, marked, selected, commented)
   if marked then
-    -- Two columns like every other lead, or a marked header sits one column
-    -- left of its neighbours.
     add(r, '✔︎', HL.mark)
-    add(r, ' ')
   elseif selected then
-    -- Bar + space: `▌` is one display column, so the trailing space keeps the
-    -- selected hunk aligned with the two-space lead of every other row.
     add(r, '▌', HL.selected)
-    add(r, ' ')
   else
-    add(r, '  ')
+    add(r, ' ')
+  end
+  if commented then
+    add(r, '●', HL.comment)
+  else
+    add(r, ' ')
   end
 end
 
@@ -78,6 +81,39 @@ local function gutter(old, new)
     old and string.format('%4d', old) or '    ',
     new and string.format('%4d', new) or '    '
   )
+end
+
+---Columns a comment row spends on indent: two for the lead, twelve for the
+---gutter (`%4d %4d │ `), two for the `╰ ` elbow.
+local COMMENT_INDENT = 14
+local COMMENT_BODY_INDENT = 16
+
+---Appended to a stale comment's first row. Named so its width can be reserved
+---from the wrap budget rather than hardcoded in two places.
+local STALE_SUFFIX = '  · stale'
+
+---Greedy word wrap. `width` is the display columns available to the text
+---itself. Existing line breaks are kept, so a reviewer's paragraphs survive.
+---@param text string
+---@param width integer
+---@return string[]
+local function wrap(text, width)
+  local out = {}
+  for _, para in ipairs(vim.split(tostring(scalar(text, '')), '\n', { plain = true })) do
+    local line = ''
+    for word in para:gmatch('%S+') do
+      if line == '' then
+        line = word
+      elseif vim.fn.strdisplaywidth(line .. ' ' .. word) <= width then
+        line = line .. ' ' .. word
+      else
+        table.insert(out, line)
+        line = word
+      end
+    end
+    table.insert(out, line)
+  end
+  return out
 end
 
 function M._file_header(path, status)
@@ -126,12 +162,23 @@ function M._commit_meta_rows(meta)
 end
 
 ---Build detail rows from decoded `but diff <id> --format=json`.
+---
+---Not quite pure: it writes `.stale` onto each comment record in
+---`state.comments`, because whether a note still points at its code is only
+---knowable while rendering the diff it belongs to. The store learns about
+---drift from renders and nowhere else.
 ---@param data table
----@param state? { selected_hunk?: integer, marked?: table<string,boolean>, meta?: table }
+---@param state? { selected_hunk?: integer, marked?: table<string,boolean>, meta?: table, comments?: table<string, ReviewComment>, width?: integer }
 ---@return DetailsRow[] rows, { id?: string, path: string, row: integer, end_row: integer }[] hunks
 function M.build(data, state)
   state = state or {}
   local marked = state.marked or {}
+  local comments = state.comments or {}
+  local comment_width = math.max(20, (state.width or 80) - COMMENT_BODY_INDENT)
+  -- Lazy require, like `_rebuild` and `_comment_line`: `build` stays ignorant
+  -- of the store at module load time, only reaching for it to build the same
+  -- key `for_entity` used to fill `comments`.
+  local review = require('gitbutler.review')
   local rows, hunks = {}, {}
   local function push(r)
     table.insert(rows, r)
@@ -196,22 +243,67 @@ function M.build(data, state)
           local end_row = head_row
           for _, line in ipairs(body) do
             local marker = line:sub(1, 1)
-            local r = row('detail_line', entity, false)
-            lead(r, false, is_selected)
+            -- Looked up before `lead`, which needs to know whether to draw the
+            -- marker, and before the branches below have assigned `row_data.side`.
+            local key = review.row_key(path, marker == '-' and 'old' or 'new', marker == '-' and old or new)
+            local comment = comments[key]
+            -- A fresh table per row: `side` and `line` differ line by line, so
+            -- the hunk-wide `entity` can no longer be shared down here.
+            local row_data = { cli_id = id, path = path, raw = line }
+            local r = row('detail_line', row_data, false)
+            lead(r, false, is_selected, comment ~= nil)
             if marker == '+' then
+              row_data.side, row_data.line = 'new', new
               add(r, gutter(nil, new), HL.gutter)
               add(r, line, HL.add)
               new = new + 1
             elseif marker == '-' then
+              row_data.side, row_data.line = 'old', old
               add(r, gutter(old, nil), HL.gutter)
               add(r, line, HL.del)
               old = old + 1
             else
+              -- A context line exists on both sides; it anchors to the new one,
+              -- which is the file as it stands after the change.
+              row_data.side, row_data.line = 'new', new
               add(r, gutter(old, new), HL.gutter)
               add(r, line)
               old, new = old + 1, new + 1
             end
             end_row = push(r)
+
+            if comment then
+              -- One string compare is the whole staleness mechanism.
+              comment.stale = comment.captured ~= line
+              local hl = comment.stale and HL.stale or HL.comment
+              -- The suffix lands on the first row after wrapping, so the body
+              -- has to be wrapped narrower or that row runs off the pane.
+              -- ponytail: the floor of 8 never binds — `comment_width` already
+              -- floors at 20 and the suffix is 9 columns wide. That floor is
+              -- also where this stops fitting: a stale row is exactly `width`
+              -- columns until the pane drops under 36, below which it stays 36
+              -- and overflows. Drop the suffix to its own row if that matters.
+              local body_width = comment.stale and math.max(8, comment_width - vim.fn.strdisplaywidth(STALE_SUFFIX))
+                or comment_width
+              for i, body_line in ipairs(wrap(comment.text, body_width)) do
+                local cr = row('detail_comment', {
+                  path = path,
+                  side = row_data.side,
+                  line = row_data.line,
+                }, false)
+                if i == 1 then
+                  add(cr, string.rep(' ', COMMENT_INDENT))
+                  add(cr, '╰ ' .. body_line, hl)
+                  if comment.stale then
+                    add(cr, STALE_SUFFIX, HL.stale)
+                  end
+                else
+                  add(cr, string.rep(' ', COMMENT_BODY_INDENT))
+                  add(cr, body_line, hl)
+                end
+                end_row = push(cr)
+              end
+            end
           end
 
           table.insert(hunks, {
@@ -243,7 +335,7 @@ local NS = vim.api.nvim_create_namespace('gitbutler')
 ---@field status_buf? GitButlerBuffer the status view this pane hangs off
 ---@field full boolean fullscreen (status window hidden)
 ---@field width_pct integer 30..90
----@field entity? { cli_id?: string, kind?: string, sha?: string, meta?: table }
+---@field entity? { cli_id?: string, kind?: string, sha?: string, meta?: table, scope?: string, ref?: string, subject?: string }
 ---@field data? table last decoded diff payload
 ---@field rows? DetailsRow[] last rendered rows
 ---@field hunks { id?: string, path: string, row: integer, end_row: integer }[]
@@ -409,6 +501,16 @@ function M._hunk_at(hunks, at)
   return nil
 end
 
+---The pane's cursor row, or nil when the pane is closed. A named seam so the
+---row-dispatch logic can be tested without a real window.
+---@return integer?
+function M._cursor_row()
+  if not M.is_open() then
+    return nil
+  end
+  return vim.api.nvim_win_get_cursor(M.win_state.win)[1]
+end
+
 ---Re-render from the diff payload already in hand — selection and marks are
 ---render-time state, so changing them never needs another CLI call.
 function M._rebuild()
@@ -416,10 +518,14 @@ function M._rebuild()
   if not st.data then
     return
   end
+  local entity = st.entity or {}
+  local comments = entity.scope and require('gitbutler.review').for_entity(entity.scope, entity.ref) or {}
   local rows, hunks = M.build(st.data, {
     selected_hunk = st.selected,
     marked = st.marked,
-    meta = st.entity and st.entity.meta or nil,
+    meta = entity.meta,
+    comments = comments,
+    width = M.is_open() and vim.api.nvim_win_get_width(st.win) or 80,
   })
   st.hunks = hunks
   M._render(rows)
@@ -585,11 +691,13 @@ function M._hunk_copy_text(rows, hunk)
   end
   local out = {}
   for i = hunk.row + 1, hunk.end_row do
-    local text = rows[i] and rows[i].text
-    if text then
+    local r = rows[i]
+    -- The reviewer's own notes live inside the hunk's row range now; `y` copies
+    -- the patch, not the review.
+    if r and r.type ~= 'detail_comment' and r.text then
       -- Non-greedy: the gutter's `│ ` is the first one on the row, any later
       -- one belongs to the file's own content.
-      table.insert(out, text:match('^.-│ (.*)$') or text)
+      table.insert(out, r.text:match('^.-│ (.*)$') or r.text)
     end
   end
   if #out == 0 then
@@ -609,6 +717,78 @@ function M._hunk_copy()
   vim.fn.setreg('+', text)
   vim.fn.setreg('"', text)
   vim.notify('gitbutler: copied ' .. #text .. ' bytes of hunk', vim.log.levels.INFO)
+end
+
+---`C` — comment the diff line under the cursor. Opens the popup pre-filled when
+---the line already has a comment; submitting it empty deletes it, which is the
+---only way a comment is removed.
+function M._comment_line()
+  local st = M.win_state
+  local at = M._cursor_row()
+  local line = at and st.rows and st.rows[at]
+  local entity = st.entity or {}
+  if not line or line.type ~= 'detail_line' or not line.data or not entity.scope then
+    vim.notify('gitbutler: put the cursor on a diff line', vim.log.levels.WARN)
+    return
+  end
+
+  local review = require('gitbutler.review')
+  local anchor = {
+    scope = entity.scope,
+    ref = entity.ref,
+    subject = entity.subject,
+    path = line.data.path,
+    side = line.data.side,
+    line = line.data.line,
+    captured = line.data.raw,
+  }
+  local existing = review.get(anchor)
+
+  require('gitbutler.ui.float').input({
+    title = existing and 'Edit comment' or 'Comment',
+    content = existing and vim.split(existing.text, '\n', { plain = true }) or nil,
+    allow_empty = true,
+    on_submit = function(text)
+      if text == '' then
+        review.remove(anchor)
+      else
+        review.set(anchor, text)
+      end
+      M._rebuild()
+    end,
+  })
+end
+
+---`Y` — copy every comment collected this session to the `+` and `"` registers
+---and empty the store. The branch is a label on the review rather than a
+---property of any comment, so it comes from wherever the status cursor happens
+---to be and is simply omitted when there is no lane there.
+function M._yank_comments()
+  local review = require('gitbutler.review')
+  local total, stale = review.counts()
+  if total == 0 then
+    vim.notify('gitbutler: no comments to yank', vim.log.levels.WARN)
+    return
+  end
+
+  local sb = M.win_state.status_buf
+  local branch = sb and sb.get_cursor_branch and sb:get_cursor_branch()
+  local text = review.format(branch and branch.name or nil)
+
+  vim.fn.setreg('+', text)
+  vim.fn.setreg('"', text)
+  review.clear()
+  M._rebuild()
+
+  vim.notify(
+    string.format(
+      'gitbutler: yanked %d comment%s%s',
+      total,
+      total == 1 and '' or 's',
+      stale > 0 and (' (' .. stale .. ' stale)') or ''
+    ),
+    vim.log.levels.INFO
+  )
 end
 
 ---`a` — enter amend mode on the status buffer with the hunks as source. `kind`
@@ -650,28 +830,18 @@ end
 ---the status window's `q`, which closes the whole view. Matches upstream.
 ---@param buf integer
 local function set_keymap(buf)
-  local function step(dir)
+  -- j/k/g/G stay native so every pane scrolls line by line, whether it holds a
+  -- structured `but diff` or a plain `git show`. Hunk selection is not lost:
+  -- the CursorMoved hook snaps it to whichever hunk the cursor lands in, so
+  -- <Space>/x/a still act on the right one. ]c/[c jump hunk to hunk.
+  local function hunk_step(dir)
     return function()
-      -- A plain commit view (git show) has no hunks; let j/k move the cursor
-      -- normally so the message and patch are scrollable.
-      if #M.win_state.hunks == 0 then
-        vim.cmd('normal! ' .. (dir > 0 and 'j' or 'k'))
-        return
-      end
       M._select_hunk(M._next_hunk(M.win_state.hunks, M.win_state.selected, dir))
     end
   end
   local keys = {
-    ['j'] = step(1),
-    ['k'] = step(-1),
-    ['<Down>'] = step(1),
-    ['<Up>'] = step(-1),
-    ['g'] = function()
-      M._select_hunk(1)
-    end,
-    ['G'] = function()
-      M._select_hunk(#M.win_state.hunks)
-    end,
+    [']c'] = hunk_step(1),
+    ['[c'] = hunk_step(-1),
     ['J'] = function()
       scroll(1, '\5')
     end,
@@ -689,6 +859,8 @@ local function set_keymap(buf)
     ['<Space>'] = M._toggle_mark,
     ['x'] = M._hunk_discard,
     ['y'] = M._hunk_copy,
+    ['C'] = M._comment_line,
+    ['Y'] = M._yank_comments,
     ['a'] = M._hunk_amend,
     ['h'] = M._focus_status,
     ['<Left>'] = M._focus_status,
@@ -958,14 +1130,39 @@ function M.show_commit(sha)
   end)
 end
 
----Row types that name something `but diff` can be asked about.
-local ENTITY_TYPES = {
-  file = true,
-  committed_file = true,
-  commit = true,
-  branch = true,
-  uncommitted_header = true,
+---Which kind of thing a status row's diff belongs to. A comment on a line has
+---to say what it is anchored to, and only the status row knows. Also the set
+---of row types that name something `but diff` can be asked about — kept as
+---one table so the two can't drift apart and reject a real diff line.
+local ROW_SCOPE = {
+  commit = 'commit',
+  committed_file = 'commit',
+  branch = 'branch',
+  file = 'uncommitted',
+  uncommitted_header = 'uncommitted',
 }
+
+---The identity within that scope: a sha for a commit, a name for a branch,
+---nothing for uncommitted changes. A branch diff spans several commits, so no
+---single sha describes a line in it and the name is what is genuinely known.
+---
+---Read the name off the raw payload rather than `d.name`, which the graph has
+---already defaulted to the display string `(unnamed)`. Two nameless lanes
+---share that string, and comments anchored to it would surface on the wrong
+---branch; the cli id is what still distinguishes them.
+---@param line GitButlerLine
+---@return string?
+local function row_ref(line)
+  local d = line.data or {}
+  if line.type == 'commit' then
+    return d.sha
+  elseif line.type == 'committed_file' then
+    return d.commit_id
+  elseif line.type == 'branch' then
+    return scalar(d.branch and d.branch.name, nil) or d.cli_id
+  end
+  return nil
+end
 
 ---Show the diff for a status row; rows that name no entity leave the pane alone.
 ---@param line? GitButlerLine
@@ -974,11 +1171,12 @@ function M.show_for_line(line)
     return
   end
   -- Landed-history commits carry a sha but no cli_id; show them via `git show`.
-  if line.type == 'base_commit' then
+  -- The common base is one of them, so `d` works there too.
+  if line.type == 'base_commit' or line.type == 'merge_base' then
     M.show_commit(line.data and line.data.sha or '')
     return
   end
-  if not ENTITY_TYPES[line.type] then
+  if not ROW_SCOPE[line.type] then
     return
   end
   local id = line.data and line.data.cli_id
@@ -998,7 +1196,15 @@ function M.show_for_line(line)
       message = c.message,
     }
   end
-  M.show({ cli_id = id, kind = line.type, meta = meta })
+  M.show({
+    cli_id = id,
+    kind = line.type,
+    meta = meta,
+    scope = ROW_SCOPE[line.type],
+    ref = row_ref(line),
+    subject = meta and scalar(meta.message, nil) and vim.split(scalar(meta.message, nil), '\n', { plain = true })[1]
+      or nil,
+  })
 end
 
 ---Debounced follow-the-cursor entry point, called from the status buffer's

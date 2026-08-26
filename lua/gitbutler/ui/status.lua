@@ -252,6 +252,7 @@ function M.rerender()
     branch_suffix = branch_suffix,
     base_history = base_history_state(),
     base_expanded = M._base.expanded,
+    base_detail = M._base.detail,
     base_more = M._base.more,
     base_count = #M._base.commits,
   }))

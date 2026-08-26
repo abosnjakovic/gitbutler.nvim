@@ -156,7 +156,7 @@ f/F      Toggle committed-file list (cursor commit / all commits)
 y        Copy sha / path / branch name to the clipboard
 :        Run an arbitrary but command
 !        Run an arbitrary shell command
-<Tab>    Inline diff on files, fold toggle on branch headers
+<Tab>    File list on commits, inline diff on files, fold toggle on branch headers
 <C-r>    Refresh
 q        Close
 ?        Help
@@ -191,7 +191,7 @@ O        Operations log
 B        Branch management popup
 ```
 
-On a landed-history row (below the common base): `<Tab>` expands the commit's message and files (or loads more history on the `↓ load more` row), `o` opens it in the diff tool, and `y` copies its SHA. These commits are read-only — the mutation keys don't apply.
+On a landed-history row — the common base itself, or anything below it: `<Tab>` expands the commit's message and files (or loads more history on the `↓ load more` row), and `d` opens it in the details pane. Below the base, `o` opens it in the diff tool and `y` copies its SHA. These commits are read-only — the mutation keys don't apply.
 
 ### Modes
 
@@ -220,15 +220,16 @@ The pane follows the status cursor: whatever the cursor sits on — an uncommitt
 Inside the pane:
 
 ```
-j/k      Next / previous hunk (the ▌ bar marks the selected hunk)
-<Down>/<Up>  Next / previous hunk
+j/k/g/G  Move the cursor (native; the ▌ bar follows the hunk it lands in)
+]c/[c    Next / previous hunk
 J/K      Scroll one line
 <C-d>/<C-u>  Scroll 10 lines
-g/G      First / last hunk
 <CR>/o   Open the file at this hunk's line (jump to code)
 <Space>  Mark / unmark the hunk (✔︎)
 x        Discard marked hunks, else the selected one (with confirmation)
 y        Copy the selected hunk's body to the clipboard
+C        Comment the line under the cursor (empty submit deletes)
+Y        Yank every comment as a review blob, then clear them
 a        Amend the marked (or selected) hunks into a target
 h/<Left>/<Esc>  Focus the status window
 D        Toggle fullscreen
@@ -242,6 +243,30 @@ Note that `q` here closes the *pane*, not the whole view — deliberately differ
 **Jump to code.** `<CR>` or `o` on a hunk opens its file in an editor window beside the pane, cursor on the hunk's line, so you can edit the change in place — the TUI stays open, and your edits flow straight back into the next `but` diff or commit. From the status view, `o` on a file row does the same, landing on the file's first changed hunk. The editor window is reused across jumps rather than stacking new splits.
 
 **Committed diffs are read-only in the pane.** `but diff` returns no hunk ids for committed entities (a commit, a file inside a commit, or a branch), so navigation, scrolling, and `y` work there, but `<Space>`, `x`, and `a` have nothing to address and warn instead. Hunk operations are available on uncommitted changes only.
+
+**Line comments.** `C` on a diff line opens a popup and attaches a comment to that line; the comment renders under it, and the lead column marks the line so you can see what you have already covered while scrolling. `C` on a commented line reopens it for editing, and submitting an empty popup deletes it. One comment per line.
+
+`Y` copies every comment collected so far and clears them:
+
+```
+Review — 2 comments on fix/graph-tab-details
+
+lua/gitbutler/ui/details.lua:196  (9e9dcf5 · fix: keep the gutter · added)
+  +          local entity = { cli_id = id, path = path }
+  > This drops the line numbers the gutter just computed.
+
+src/app.rs:88  (uncommitted · added · stale)
+  +    let cfg = Config::load().unwrap();
+  > unwrap in a load path. Return the error.
+```
+
+`path:line` leads each block because a terminal makes it clickable and a coding agent resolves it natively, so a note lands on the code without a round trip about where it points. Comments live in memory for the session only — nothing is written to disk, and `Y` empties the store.
+
+`Y` writes to the `+` and unnamed registers and reports how many comments it took. With nothing to yank it says so and leaves your registers alone, so it will not overwrite the clipboard with an empty review.
+
+A comment whose line has left the diff — because you edited it away, or the change got committed — stops rendering entirely: no marker, no note. It is not lost. It stays in the store and `Y` still yanks it, with the captured line quoted so you can still tell what it was about. The count `Y` reports is the authoritative tally of what you are holding, not what you can currently see.
+
+A comment is tagged `stale` once the line it was written against stops matching — because the working tree moved under the review, or the changes got committed. The check runs when the pane redraws a diff, so move the status cursor off the row and back to re-evaluate a review you have left sitting. The captured line is still quoted, so the note stays locatable. Landed history renders as raw `git show` output with no line data, so `C` warns there.
 
 ### Open a commit in a diff tool (o)
 
@@ -287,14 +312,17 @@ q        Close
 
 `but squash` requires an explicit target, so `S` here resolves the commit directly below the cursor commit in the log and squashes into that, keeping that commit's message. On the oldest commit shown there is no parent, and the key warns instead.
 
-### Landed history (below the common base)
+### Landed history (the common base and below)
 
 The commit graph continues past the common base into the trunk's already-landed history — the linear ancestry of the base, newest first. This replaces the old standalone timeline view: the history now lives inline in the main graph instead of a separate window.
 
+The common base row is the first of these commits, so it carries the same `▸` / `▾` marker and expands the same way.
+
 ```
 <Tab>    Expand a commit (message + files), or load more on the ↓ row
-o        Open the commit in the diff tool
-y        Copy the commit SHA
+d        Open the commit in the details pane
+o        Open the commit in the diff tool (below the base only)
+y        Copy the commit SHA (below the base only)
 ```
 
 These rows are read-only — amend, squash, uncommit, commit, move, and the other mutation keys don't act on landed commits. The section loads 15 commits at a time; configure with `base_history = { count = 15 }` in your setup.

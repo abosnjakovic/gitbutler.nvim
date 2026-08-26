@@ -873,12 +873,21 @@ function M.toggle_fold(buf)
   end
 
   -- Landed-history rows: expand a commit's body/files, or load the next page.
-  if line.type == 'base_commit' then
+  -- The common base is one of them — it reads as the first landed commit, so
+  -- <Tab> has to open it the same way the rows underneath it open.
+  if line.type == 'base_commit' or line.type == 'merge_base' then
     require('gitbutler.ui.status').toggle_base_expand(line.data and line.data.sha or '')
     return
   end
   if line.type == 'base_more' then
     require('gitbutler.ui.status').load_more_base()
+    return
+  end
+
+  -- Lane commits expand their own file list, so <Tab> means "show me what this
+  -- commit touched" everywhere. Same state `f` toggles.
+  if line.type == 'commit' then
+    M.toggle_file_list(buf)
     return
   end
 
@@ -1027,15 +1036,17 @@ function M.help(_buf)
     '  y        Copy sha / path / name',
     '  :        Run a but command',
     '  !        Run a shell command',
-    '  <Tab>    Inline diff / fold',
+    '  <Tab>    Expand commit files / inline diff / fold',
     '  <C-r>    Refresh',
     '',
     'Details pane',
     '  d/D      Toggle the details split / fullscreen',
     '  +/-      Grow / shrink the pane',
     '  l        Focus the pane (h/<Esc> focuses back)',
-    '  In the pane: j/k hunk, J/K scroll, <C-d>/<C-u> scroll 10, g/G first/last',
+    '  In the pane: j/k/g/G line, ]c/[c hunk, J/K scroll, <C-d>/<C-u> scroll 10',
     '  <CR>/o open file at the hunk line, <Space> mark, x discard, y copy, a amend',
+    '  C        Comment the line under the cursor (empty submit deletes)',
+    '  Y        Yank every comment as a review blob, then clear them',
     '  q/d close pane. Committed diffs have no hunk ids: mark/discard/amend warn',
     '',
     'Extras',
@@ -1051,7 +1062,7 @@ function M.help(_buf)
     '  O        Operations log',
     '  B        Branch management',
     '',
-    'Landed history (below the common base)',
+    'Landed history (the common base and below)',
     '  <Tab>    Expand a commit (message + files) / load more',
     '  o        Open the commit in the diff tool',
     '  y        Copy the commit SHA',

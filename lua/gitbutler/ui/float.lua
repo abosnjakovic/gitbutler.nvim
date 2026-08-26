@@ -44,7 +44,7 @@ end
 ---Open a small input float near the cursor for text entry (commit message, branch name, etc).
 ---When single_line is true, Enter submits and height defaults to 1.
 ---Otherwise, Ctrl-C Ctrl-C submits (for multi-line input like commit messages).
----@param opts {title: string, on_submit: fun(text: string), on_abort?: fun(), height?: number, width?: number, content?: string[], single_line?: boolean}
+---@param opts {title: string, on_submit: fun(text: string), on_abort?: fun(), height?: number, width?: number, content?: string[], single_line?: boolean, allow_empty?: boolean}
 ---@return number buf, number win
 function M.input(opts)
   local is_single = opts.single_line == true
@@ -75,7 +75,7 @@ function M.input(opts)
     vim.cmd('stopinsert')
     vim.api.nvim_win_close(win, true)
     vim.api.nvim_buf_delete(buf, { force = true })
-    if text ~= '' then
+    if text ~= '' or opts.allow_empty then
       opts.on_submit(text)
     end
   end
