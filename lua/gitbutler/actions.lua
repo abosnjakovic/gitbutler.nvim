@@ -1020,11 +1020,11 @@ local function help_lines_for(context)
 end
 
 -- Prose that describes pane/mode behaviour rather than a single key, so it
--- has no home in the registry. NOT copied verbatim from the old hand-written
--- table below (`M.help`'s `help_lines`): the old `C  Comment the line…` and
--- `Y  Yank every comment…` lines are gone here, since the details pane now
--- generates its own float for those from its own registry entries. Appended
--- after the generated sections, for the status context only.
+-- has no home in the registry. This is what survived of the hand-written table
+-- `M.help` used to carry — the per-key lines went to the registry, and the
+-- pane's own `C`/`Y` entries are not repeated here because the details pane
+-- now generates its own float from its own entries. Appended after the
+-- generated sections, for the status context only.
 local STATUS_HELP_PROSE = {
   '',
   -- Named "Inside the details pane" rather than "Details pane" — the
@@ -1063,80 +1063,6 @@ end
 
 ---Show help popup.
 function M.help(buf)
-  local help_lines = {
-    'GitButler Status — Keybindings',
-    '',
-    'Navigation',
-    '  j/k      Next / previous row',
-    '  J/K      Next / previous section',
-    '  <C-d>/<C-u>  Jump 10 rows',
-    '  g/G      Uncommitted area / merge base',
-    '  t        Go to branch (fuzzy picker)',
-    '  /        Jump to CLI id',
-    '  <Esc>    Back (exit mode, else clear marks)',
-    '',
-    'Marks',
-    '  <Space>  Mark / unmark (homogeneous multi-select)',
-    '',
-    'Modes',
-    '  a        Amend mode: uncommitted changes into a commit or branch',
-    '  R        Amend mode with every unassigned file as the source',
-    '  S        Squash mode: commits / branches / committed files into a target',
-    '  w        Uncommit the marked (or cursor) commits / committed files',
-    '  c        Commit mode (pick where the commit lands)',
-    '  m        Move mode (reorder / retarget commits)',
-    '  s        Stack mode (apply / unapply / move)',
-    '',
-    'Operations',
-    '  n        Insert empty commit',
-    '  b        New branch',
-    '  x        Discard (confirm)',
-    '  u/U      Undo / redo (confirm)',
-    '  <CR>     Describe / reword (float)',
-    '  M        Reword in an editor split',
-    '  f/F      Toggle file list (commit / all)',
-    '  y        Copy sha / path / name',
-    '  :        Run a but command',
-    '  !        Run a shell command',
-    '  <Tab>    Expand commit files / inline diff / fold',
-    '  <C-r>    Refresh',
-    '',
-    'Details pane',
-    '  d/D      Toggle the details split / fullscreen',
-    '  +/-      Grow / shrink the pane',
-    '  l        Focus the pane (h/<Esc> focuses back)',
-    '  In the pane: j/k/g/G line, ]c/[c hunk, J/K scroll, <C-d>/<C-u> scroll 10',
-    '  <CR>/o open file at the hunk line, <Space> mark, x discard, y copy, a amend',
-    '  C        Comment the line under the cursor (empty submit deletes)',
-    '  Y        Yank every comment as a review blob, then clear them',
-    '  q/d close pane. Committed diffs have no hunk ids: mark/discard/amend warn',
-    '',
-    'Extras',
-    '  o        Open under cursor: file → jump to code; commit → diff tool',
-    '  A        Absorb changes',
-    '  p/P      Push branch / all',
-    '  v        Create PR',
-    '  V        Toggle PR draft',
-    '  C        CI view',
-    '  L        Land directly onto target',
-    '  i        Pull / integrate upstream',
-    '  H        Commit log',
-    '  O        Operations log',
-    '  B        Branch management',
-    '',
-    'Landed history (the common base and below)',
-    '  <Tab>    Expand a commit (message + files) / load more',
-    '  o        Open the commit in the diff tool',
-    '  y        Copy the commit SHA',
-    '',
-    '  q  Close    ?  This help',
-  }
-  -- ponytail: superseded by `help_lines_for`, which generates from the registry.
-  -- Deleting this table locks the hunk to the commit that added its `C` and `Y`
-  -- entries, which GitButler then refuses to place anywhere. Remove it once
-  -- feat/details-line-comments has merged.
-  M._legacy_help_lines = help_lines
-
   local _, lines = M._help_content(buf)
 
   local width = 66

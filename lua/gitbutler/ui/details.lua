@@ -867,68 +867,25 @@ function M._register_handlers(buf)
   end)
 end
 
----Buffer-local keymap for the details pane. `q` closes the pane only — unlike
----the status window's `q`, which closes the whole view. Matches upstream.
----@param buf integer
+---Buffer-local keymap for the details pane, bound from the registry so the
+---keys the pane answers and the keys it advertises cannot drift apart. `q`
+---closes the pane only — unlike the status window's `q`, which closes the
+---whole view. Matches upstream.
+---
+---j/k/g/G carry no `action` (`native = true`) and so bind to nothing, which is
+---what keeps every pane scrolling line by line whether it holds a structured
+---`but diff` or a plain `git show`. Hunk selection is not lost: the
+---CursorMoved hook snaps it to whichever hunk the cursor lands in, so
+---<Space>/x/a still act on the right one. ]c/[c jump hunk to hunk.
+---@param buf GitButlerBuffer
 local function set_keymap(buf)
-  -- ponytail: this table duplicates `keys.contexts.details`, and the registry
-  -- is the source of truth for the hint line and the help float. Binding from
-  -- `keys.resolved('details')` instead has to wait: removing these lines
-  -- locks the hunk to the commit that added `Y`, which GitButler then refuses
-  -- to place anywhere. Delete this table and bind from the registry once
-  -- feat/details-line-comments has merged.
-  -- j/k/g/G stay native so every pane scrolls line by line, whether it holds a
-  -- structured `but diff` or a plain `git show`. Hunk selection is not lost:
-  -- the CursorMoved hook snaps it to whichever hunk the cursor lands in, so
-  -- <Space>/x/a still act on the right one. ]c/[c jump hunk to hunk.
-  local function hunk_step(dir)
-    return function()
-      M._select_hunk(M._next_hunk(M.win_state.hunks, M.win_state.selected, dir))
+  for _, spec in ipairs(require('gitbutler.keys').resolved('details')) do
+    local handler = spec.action and buf.keymaps[spec.action]
+    if handler then
+      vim.keymap.set('n', spec.key, function()
+        handler(buf)
+      end, { buffer = buf.buf, nowait = true, silent = true })
     end
-  end
-  local keys = {
-    [']c'] = hunk_step(1),
-    ['[c'] = hunk_step(-1),
-    ['J'] = function()
-      scroll(1, '\5')
-    end,
-    ['K'] = function()
-      scroll(1, '\25')
-    end,
-    ['<C-d>'] = function()
-      scroll(10, '\5')
-    end,
-    ['<C-u>'] = function()
-      scroll(10, '\25')
-    end,
-    ['<CR>'] = M._open_hunk,
-    ['o'] = M._open_hunk,
-    ['<Space>'] = M._toggle_mark,
-    ['x'] = M._hunk_discard,
-    ['y'] = M._hunk_copy,
-    ['C'] = M._comment_line,
-    ['Y'] = M._yank_comments,
-    ['a'] = M._hunk_amend,
-    ['h'] = M._focus_status,
-    ['<Left>'] = M._focus_status,
-    ['<Esc>'] = M._focus_status,
-    ['d'] = M.close,
-    ['q'] = M.close,
-    ['D'] = function()
-      M.toggle_full(M.win_state.status_buf)
-    end,
-    ['+'] = function()
-      M.resize(5)
-    end,
-    ['-'] = function()
-      M.resize(-5)
-    end,
-    ['?'] = function()
-      require('gitbutler.actions').help(M.win_state.buffer)
-    end,
-  }
-  for key, fn in pairs(keys) do
-    vim.keymap.set('n', key, fn, { buffer = buf, nowait = true, silent = true })
   end
 end
 
@@ -964,7 +921,7 @@ function M.open(status_buf)
   st.buffer, st.buf, st.win = buf, buf.buf, win
   M._render(info_rows('  (no selection)', HL.dim))
   M._apply_width()
-  set_keymap(buf.buf)
+  set_keymap(buf)
 
   vim.api.nvim_create_autocmd('CursorMoved', {
     buffer = buf.buf,
