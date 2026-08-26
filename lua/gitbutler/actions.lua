@@ -999,8 +999,70 @@ function M.toggle_select(buf)
   end
 end
 
+---Build the `?` float's lines for a context, grouped by section in the order
+---the registry lists them.
+---@param context string
+---@return string[]
+local function help_lines_for(context)
+  local lines, seen_sections = {}, {}
+  for _, spec in ipairs(require('gitbutler.keys').resolved(context)) do
+    local section = spec.section or 'Keys'
+    if not seen_sections[section] then
+      if #lines > 0 then
+        table.insert(lines, '')
+      end
+      table.insert(lines, section)
+      seen_sections[section] = true
+    end
+    table.insert(lines, string.format('  %-8s %s', spec.key, spec.help or spec.desc))
+  end
+  return lines
+end
+
+-- Prose that describes pane/mode behaviour rather than a single key, so it
+-- has no home in the registry. NOT copied verbatim from the old hand-written
+-- table below (`M.help`'s `help_lines`): the old `C  Comment the line…` and
+-- `Y  Yank every comment…` lines are gone here, since the details pane now
+-- generates its own float for those from its own registry entries. Appended
+-- after the generated sections, for the status context only.
+local STATUS_HELP_PROSE = {
+  '',
+  -- Named "Inside the details pane" rather than "Details pane" — the
+  -- generated sections above already print a "Details pane" header for the
+  -- toggle keys (`d`/`D`/`+`/`-`/`l`), and reusing that title here read as a
+  -- duplicate section.
+  'Inside the details pane',
+  '  In the pane: j/k/g/G line, ]c/[c hunk, J/K scroll, <C-d>/<C-u> scroll 10',
+  '  <CR>/o open file at the hunk line, <Space> mark, x discard, y copy, a amend',
+  '  q/d close pane. Committed diffs have no hunk ids: mark/discard/amend warn',
+  '',
+  'Landed history (the common base and below)',
+  '  <Tab>    Expand a commit (message + files) / load more',
+  '  o        Open the commit in the diff tool',
+  '  y        Copy the commit SHA',
+}
+
+---Resolve the `?` float's context and lines for a buffer. `M.help` is the
+---side-effecting UI wrapper around this; exposed so tests can assert the
+---generated content without driving a real float.
+---@param buf GitButlerBuffer?
+---@return string context
+---@return string[] lines
+function M._help_content(buf)
+  local context = buf and buf.view or 'status'
+  local title = context:sub(1, 1):upper() .. context:sub(2)
+  local lines = { ('GitButler %s — Keybindings'):format(title), '' }
+  vim.list_extend(lines, help_lines_for(context))
+  if context == 'status' then
+    vim.list_extend(lines, STATUS_HELP_PROSE)
+  end
+  table.insert(lines, '')
+  table.insert(lines, '  q  Close    ?  This help')
+  return context, lines
+end
+
 ---Show help popup.
-function M.help(_buf)
+function M.help(buf)
   local help_lines = {
     'GitButler Status — Keybindings',
     '',
@@ -1069,9 +1131,16 @@ function M.help(_buf)
     '',
     '  q  Close    ?  This help',
   }
+  -- ponytail: superseded by `help_lines_for`, which generates from the registry.
+  -- Deleting this table locks the hunk to the commit that added its `C` and `Y`
+  -- entries, which GitButler then refuses to place anywhere. Remove it once
+  -- feat/details-line-comments has merged.
+  M._legacy_help_lines = help_lines
+
+  local _, lines = M._help_content(buf)
 
   local width = 66
-  for _, l in ipairs(help_lines) do
+  for _, l in ipairs(lines) do
     width = math.max(width, vim.fn.strdisplaywidth(l) + 4)
   end
   local ui = vim.api.nvim_list_uis()[1]
@@ -1080,10 +1149,10 @@ function M.help(_buf)
     width = width,
     -- The list is taller than a short terminal: clamp so the float still opens
     -- (scrollable) instead of failing to fit.
-    height = math.min(#help_lines, ui and math.max(1, ui.height - 4) or #help_lines),
+    height = math.min(#lines, ui and math.max(1, ui.height - 4) or #lines),
   })
 
-  vim.api.nvim_buf_set_lines(help_buf, 0, -1, false, help_lines)
+  vim.api.nvim_buf_set_lines(help_buf, 0, -1, false, lines)
   vim.bo[help_buf].modifiable = false
 
   local function close_help()

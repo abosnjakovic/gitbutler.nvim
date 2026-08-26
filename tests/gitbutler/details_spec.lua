@@ -383,13 +383,15 @@ h.test('details: open splits beside the status window and close tears it down', 
   local sb = mock_status_buf()
   local before = #vim.api.nvim_list_wins()
 
+  -- +2: the vsplit itself, plus the pinned hint float that `Buffer:attach`
+  -- opens now the pane is a Buffer.
   details.open(sb)
   h.assert_truthy(details.is_open())
-  h.assert_eq(before + 1, #vim.api.nvim_list_wins())
+  h.assert_eq(before + 2, #vim.api.nvim_list_wins())
   h.assert_eq(sb.win, vim.api.nvim_get_current_win(), 'focus did not return to status')
 
   details.open(sb) -- idempotent
-  h.assert_eq(before + 1, #vim.api.nvim_list_wins())
+  h.assert_eq(before + 2, #vim.api.nvim_list_wins())
 
   details.close()
   h.assert_falsy(details.is_open())
@@ -1563,4 +1565,240 @@ h.test('details: Y without a branch under the cursor drops the branch clause', f
   details._yank_comments()
 
   h.assert_truthy(vim.fn.getreg('"'):match('^Review — 1 comment\n'), vim.fn.getreg('"'))
+end)
+
+-- The pane was a raw scratch buffer, so it had no hint line and `?` in it
+-- showed the status view's help. Making it a Buffer with its own view name is
+-- what fixes both. `_buffer()` is nil until the pane is open, so this needs a
+-- real window like every other window-dependent test in this file.
+h.test('details: the pane is a Buffer with its own view name', function()
+  reset()
+  local sb = mock_status_buf()
+  details.open(sb)
+  local buf = details._buffer()
+  h.assert_truthy(buf, 'the pane owns a Buffer')
+  h.assert_eq('details', buf.view)
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- Every key the pane binds must resolve through the registry, or the hint line
+-- and the help float describe a different set of keys from the ones that work.
+-- Native entries (j/k/g/G) carry no action and are deliberately unbound, so
+-- they are skipped here rather than asserted on.
+--
+-- This is NOT the live-bindings guard, despite the name: it only checks that
+-- `M._register_handlers` populated `buf.keymaps` with a function for each
+-- registry action. Nothing in the pane ever dispatches from `buf.keymaps` —
+-- `buf:attach(win)` skips `Buffer:_set_keymaps` entirely — so this would stay
+-- green even if `set_keymap`'s own table below drifted from the registry
+-- completely. Still worth keeping: the eventual binding rewrite needs
+-- `_register_handlers` correct. The real guard is the next test.
+h.test('details: every registry action for the pane has a handler', function()
+  reset()
+  local sb = mock_status_buf()
+  details.open(sb)
+  local keys = require('gitbutler.keys')
+  local buf = details._buffer()
+  for _, spec in ipairs(keys.resolved('details')) do
+    if spec.action then
+      h.assert_truthy(type(buf.keymaps[spec.action]) == 'function', 'details action has a handler: ' .. spec.action)
+    end
+  end
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- The actual drift guard. The pane's live keys come from `set_keymap`'s own
+-- table in details.lua (buf:attach skips Buffer:_set_keymaps, so buf.keymaps
+-- is never dispatched from — see the test above), which nothing previously
+-- checked against the registry. This inspects the real vim keymaps the pane
+-- installed and compares them against `keys.resolved('details')` in both
+-- directions: every non-native registry entry must be live, and every live
+-- mapping must be documented. Natives (j/k/g/G) must have no live mapping at
+-- all, since binding them would take back the pane's line-by-line scroll.
+h.test("details: the pane's live keymaps match the registry, in both directions", function()
+  reset()
+  local sb = mock_status_buf()
+  details.open(sb)
+  local keys = require('gitbutler.keys')
+  local buf = details._buffer()
+
+  -- Neovim reports `<Space>` as a literal space in `nvim_buf_get_keymap`, and
+  -- upper-cases control-key notation (`<C-u>` -> `<C-U>`), so both sides need
+  -- the same normalisation before comparing.
+  local function normalize(key)
+    if key == ' ' then
+      return '<Space>'
+    end
+    return (key:gsub('<[Cc]%-(%a)>', function(letter)
+      return '<C-' .. letter:upper() .. '>'
+    end))
+  end
+
+  local live = {}
+  for _, map in ipairs(vim.api.nvim_buf_get_keymap(buf.buf, 'n')) do
+    live[normalize(map.lhs)] = true
+  end
+
+  local documented = {}
+  for _, spec in ipairs(keys.resolved('details')) do
+    local key = normalize(spec.key)
+    documented[key] = true
+    if spec.native then
+      h.assert_falsy(live[key], 'native key has no live mapping: ' .. spec.key)
+    else
+      h.assert_truthy(live[key], 'registry key is actually bound: ' .. spec.key)
+    end
+  end
+  for key in pairs(live) do
+    h.assert_truthy(documented[key], 'live mapping is documented in the registry: ' .. key)
+  end
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- The pane had no hint line at all. This is the user-visible half of the fix.
+--
+-- `text:match('C')` (a bare letter) would pass even against the buggy
+-- `hints.status` fallback, since its own default entry is `<C-r> Refresh` —
+-- both contain a capital C/R. Matching the desc word itself is what actually
+-- discriminates the registry-derived line from the status one.
+h.test('details: the pane renders a hint line of its own keys', function()
+  reset()
+  local hints = require('gitbutler.ui.hints')
+  local text = hints.for_context('details', nil, false)
+  h.assert_truthy(text:match('comment'), 'the comment key is advertised: ' .. text)
+  h.assert_falsy(text:match('amend mode'), 'status-view entries do not leak in: ' .. text)
+end)
+
+-- The CI view has no entry in `hints`, so it silently showed status hints —
+-- the same bug as the pane, in a second place.
+h.test('details: a view with no hint table falls back to its own registry keys', function()
+  local hints = require('gitbutler.ui.hints')
+  local text = hints.for_context('ci', nil, false)
+  h.assert_truthy(text:match('rerun'), 'CI keys, not status keys: ' .. text)
+end)
+
+-- `hints.for_context`'s plain text is unclipped by design — fine for a unit
+-- test, but `details` alone has 27 registry entries, and at the pane's real
+-- (narrower) width that text just gets cut off wherever the window ends. A
+-- naive cut left only navigation keys visible and dropped `?` and every verb
+-- past the first few, which defeats the point of this whole fix. So
+-- `update_hint` routes a registry-derived line through the same width-aware
+-- hotbar `status` already uses, with `?` and the pane's core verbs (registry
+-- entries curated with `hotbar = true`, the same curation `status` already
+-- uses to pick its own) prioritised to survive truncation. This asserts the
+-- outcome at a realistic pane width, not just that the underlying text
+-- contains the word somewhere.
+h.test('details: at a pane-typical width the hint line keeps ? and a verb', function()
+  reset()
+  local buffer_mod = require('gitbutler.ui.buffer')
+  local buf = buffer_mod.Buffer.new()
+  buf.view = 'details'
+  buf.buf = vim.api.nvim_create_buf(false, true)
+  local orig_columns = vim.o.columns
+  vim.o.columns = 240 -- headroom so the split can actually be narrowed to 60
+  vim.cmd('vsplit')
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, buf.buf)
+  h.after(function()
+    vim.o.columns = orig_columns
+    buf:close()
+  end)
+  buf:attach(win)
+  vim.api.nvim_win_set_width(win, 60)
+
+  buf:update_hint()
+
+  local text = vim.api.nvim_buf_get_lines(buf.hint_buf, 0, -1, false)[1]
+  -- `nvim_buf_get_lines` reads buffer data, not the visually clipped
+  -- display — `wrap = false` only hides the overflow on screen, it does not
+  -- shorten the line's own text. So this line alone would pass even against
+  -- the untruncated `hints.for_context` route (300 chars, contains every
+  -- word regardless of width) and would not actually prove truncation
+  -- happened. The length check below is what proves it: the untruncated
+  -- registry text is 300 bytes, so a genuinely width-bounded line must be
+  -- far shorter.
+  local untruncated = require('gitbutler.ui.hints').for_context('details', nil, false)
+  h.assert_truthy(#text < #untruncated / 2, 'the line is data-truncated, not just visually clipped: ' .. text)
+  h.assert_truthy(text:match('%?'), 'help survives truncation: ' .. text)
+  -- Pinned to the specific verbs, not an OR-list of "any of these seven".
+  -- A widened OR-list here once absorbed a real regression: `comment` and
+  -- `yank review` silently dropped out of the hint line at this width while
+  -- this assertion kept passing on `next hunk` instead. They are the two
+  -- least-guessable keys in the pane (the only two carrying a `help`
+  -- string), so this asserts them by name.
+  h.assert_truthy(text:match('comment'), 'comment survives truncation at width 60: ' .. text)
+  h.assert_truthy(text:match('yank review'), 'yank review survives truncation at width 60: ' .. text)
+end)
+
+-- Every alias of a verb used to get its own hotbar item: `<CR>` and `o` both
+-- read `open file`, `d` and `q` both `close`, `h`/`<Left>`/`<Esc>` all `back`.
+-- Each duplicate spent the width budget again on a verb already on the line,
+-- which is what pushed `open file` out to a 250-column pane. The `keep` tail
+-- already deduped by action; the other three buckets did not.
+h.test('details: the hint line lists a verb once, however many keys are bound to it', function()
+  local items = require('gitbutler.ui.buffer')._registry_hotbar_items('details')
+
+  local by_action, descs = {}, {}
+  for _, it in ipairs(items) do
+    descs[#descs + 1] = it[1] .. ' ' .. it[2]
+    by_action[it[2]] = (by_action[it[2]] or 0) + 1
+  end
+  local shown = table.concat(descs, ' • ')
+
+  -- The pane binds three keys to `focus_status`, two to `open_hunk` and two to
+  -- `close_pane`; each verb is worth one item.
+  h.assert_eq(1, by_action['open file'], shown)
+  h.assert_eq(1, by_action['close'], shown)
+  h.assert_eq(1, by_action['back'], shown)
+  -- The surviving alias is the one the registry declares first.
+  h.assert_truthy(shown:match('<CR> open file'), shown)
+  h.assert_falsy(shown:match('o open file'), shown)
+  h.assert_falsy(shown:match('q close'), shown)
+
+  -- `open file` used to need a 250-column pane. The dedupe above frees budget,
+  -- but what actually gets it onto a 160-column line is the registry declaring
+  -- `<CR>` ahead of the four scroll keys — the uncurated bucket truncates in
+  -- declaration order too. This pins that ordering; move `<CR>` back below the
+  -- scroll block and it fails.
+  local line = require('gitbutler.ui.hotbar').build('details', items, 160, nil).text
+  h.assert_truthy(line:match('<CR> open file'), 'open file fits a 160-column pane: ' .. line)
+  h.assert_truthy(vim.fn.strdisplaywidth(line) <= 160, 'the line stays within the pane: ' .. line)
+end)
+
+-- The routing decision must not change what `status` renders. It already
+-- used the mode hotbar unconditionally, on every row type, both before and
+-- after this change — `update_hint` returns for the status view before ever
+-- consulting `hints`, which is why `hints.status` (a curated per-row-type
+-- table, same shape as `hints.log`) was dead code and has since been deleted.
+-- This pins that the refactor did not quietly move status onto the
+-- registry-hotbar path or the plain-text path.
+h.test('status: the hint line is still exactly the mode hotbar, unaffected by the routing change', function()
+  reset()
+  local buffer_mod = require('gitbutler.ui.buffer')
+  local hotbar = require('gitbutler.ui.hotbar')
+  local modes = require('gitbutler.ui.modes')
+  local buf = buffer_mod.Buffer.new()
+  buf.view = 'status'
+  buf.buf = vim.api.nvim_create_buf(false, true)
+  buf.lines = { { type = 'commit', text = 'commit row' } } -- row type is irrelevant: status never reaches `hints`
+  vim.cmd('vsplit')
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, buf.buf)
+  h.after(function()
+    buf:close()
+  end)
+  buf:attach(win)
+  vim.api.nvim_win_set_cursor(win, { 1, 0 })
+
+  buf:update_hint()
+
+  local mode = modes.current()
+  local expected =
+    hotbar.build(mode, hotbar.items_for(mode), vim.api.nvim_win_get_width(win), hotbar.pill_hl(mode)).text
+  local actual = vim.api.nvim_buf_get_lines(buf.hint_buf, 0, -1, false)[1]
+  h.assert_eq(expected, actual, 'status hint line byte-for-byte unchanged')
 end)

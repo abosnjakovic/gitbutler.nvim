@@ -327,11 +327,10 @@ end
 
 --- Window controller -------------------------------------------------------
 
-local NS = vim.api.nvim_create_namespace('gitbutler')
-
 ---@class DetailsWin
----@field buf? integer scratch buffer
----@field win? integer split window
+---@field buffer? GitButlerBuffer the pane's own Buffer; nil when closed
+---@field buf? integer scratch buffer (mirrors buffer.buf)
+---@field win? integer split window (mirrors buffer.win)
 ---@field status_buf? GitButlerBuffer the status view this pane hangs off
 ---@field full boolean fullscreen (status window hidden)
 ---@field width_pct integer 30..90
@@ -350,6 +349,7 @@ M.win_state = { full = false, width_pct = 50, selected = 1, marked = {}, hunks =
 ---setting and survives; `gen` and `follow` must survive too, or a close/reopen
 ---would rewind them and let a still-in-flight callback pass the staleness
 ---guard and render its diff under whatever entity is showing by then.
+---`buffer` (and `buf`/`win`) are dropped like the rest of the closed state.
 function M._reset_state()
   local prev = M.win_state
   M.win_state = {
@@ -374,34 +374,20 @@ function M.is_open()
     and vim.api.nvim_win_get_buf(st.win) == st.buf
 end
 
----Write rows (text + spans) into the details buffer. Same contract as
----`Buffer:render` for graph rows, minus the fold/selection decoration the
----details pane has no use for.
+---Write rows (text + spans) into the details buffer, via the pane's own
+---`Buffer:render` — every row is `graph = true`, so it writes `text` and
+---applies `spans` verbatim, the same thing this used to do by hand, plus the
+---hint update and the cursor-key restore.
+---
+---`st.rows` is assigned unconditionally, before the buffer-existence check:
+---several tests inspect it with no window open, and `_comment_line` reads it.
 ---@param rows DetailsRow[]
 function M._render(rows)
   local st = M.win_state
   st.rows = rows
-  local buf = st.buf
-  if not buf or not vim.api.nvim_buf_is_valid(buf) then
-    return
+  if st.buffer then
+    st.buffer:render(rows)
   end
-
-  vim.bo[buf].modifiable = true
-  vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
-
-  local text = {}
-  for _, r in ipairs(rows) do
-    table.insert(text, r.text)
-  end
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, text)
-
-  for i, r in ipairs(rows) do
-    for _, s in ipairs(r.spans or {}) do
-      vim.api.nvim_buf_add_highlight(buf, NS, s[3], i - 1, s[1], s[2])
-    end
-  end
-
-  vim.bo[buf].modifiable = false
 end
 
 local function info_rows(text, hl)
@@ -826,10 +812,71 @@ local function scroll(count, key)
   end
 end
 
+---The pane's Buffer, or nil when it is closed. A named accessor so tests can
+---reach it without depending on where in `win_state` it lives.
+---@return GitButlerBuffer?
+function M._buffer()
+  return M.win_state.buffer
+end
+
+---Bind the pane's handlers under the action names `keys.contexts.details`
+---uses. A name that does not match there is a key the hint line advertises
+---and the pane does not answer. j/k/g/G carry no `action` in the registry —
+---see `set_keymap` — so no handler is registered for them: mapping them would
+---break the pane's native line-by-line scroll.
+---@param buf GitButlerBuffer
+function M._register_handlers(buf)
+  buf:on('hunk_next', function()
+    M._select_hunk(M._next_hunk(M.win_state.hunks, M.win_state.selected, 1))
+  end)
+  buf:on('hunk_prev', function()
+    M._select_hunk(M._next_hunk(M.win_state.hunks, M.win_state.selected, -1))
+  end)
+  buf:on('scroll_down', function()
+    scroll(1, '\5')
+  end)
+  buf:on('scroll_up', function()
+    scroll(1, '\25')
+  end)
+  buf:on('scroll_page_down', function()
+    scroll(10, '\5')
+  end)
+  buf:on('scroll_page_up', function()
+    scroll(10, '\25')
+  end)
+  buf:on('open_hunk', M._open_hunk)
+  buf:on('toggle_mark', M._toggle_mark)
+  buf:on('hunk_discard', M._hunk_discard)
+  buf:on('hunk_copy', M._hunk_copy)
+  buf:on('comment_line', M._comment_line)
+  buf:on('yank_comments', M._yank_comments)
+  buf:on('hunk_amend', M._hunk_amend)
+  buf:on('focus_status', M._focus_status)
+  buf:on('close_pane', M.close)
+  buf:on('toggle_full', function()
+    M.toggle_full(M.win_state.status_buf)
+  end)
+  buf:on('grow', function()
+    M.resize(5)
+  end)
+  buf:on('shrink', function()
+    M.resize(-5)
+  end)
+  buf:on('help', function()
+    require('gitbutler.actions').help(M.win_state.buffer)
+  end)
+end
+
 ---Buffer-local keymap for the details pane. `q` closes the pane only — unlike
 ---the status window's `q`, which closes the whole view. Matches upstream.
 ---@param buf integer
 local function set_keymap(buf)
+  -- ponytail: this table duplicates `keys.contexts.details`, and the registry
+  -- is the source of truth for the hint line and the help float. Binding from
+  -- `keys.resolved('details')` instead has to wait: removing these lines
+  -- locks the hunk to the commit that added `Y`, which GitButler then refuses
+  -- to place anywhere. Delete this table and bind from the registry once
+  -- feat/details-line-comments has merged.
   -- j/k/g/G stay native so every pane scrolls line by line, whether it holds a
   -- structured `but diff` or a plain `git show`. Hunk selection is not lost:
   -- the CursorMoved hook snaps it to whichever hunk the cursor lands in, so
@@ -877,7 +924,7 @@ local function set_keymap(buf)
       M.resize(-5)
     end,
     ['?'] = function()
-      require('gitbutler.actions').help(M.win_state.status_buf)
+      require('gitbutler.actions').help(M.win_state.buffer)
     end,
   }
   for key, fn in pairs(keys) do
@@ -902,27 +949,25 @@ function M.open(status_buf)
   vim.cmd('rightbelow vsplit')
   local win = vim.api.nvim_get_current_win()
 
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].buftype = 'nofile'
-  vim.bo[buf].bufhidden = 'wipe'
-  vim.bo[buf].swapfile = false
-  vim.bo[buf].filetype = 'gitbutler-details'
-  vim.api.nvim_win_set_buf(win, buf)
+  local buf = require('gitbutler.ui.buffer').Buffer.new()
+  buf.view = 'details'
+  buf.buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf.buf].buftype = 'nofile'
+  vim.bo[buf.buf].bufhidden = 'wipe'
+  vim.bo[buf.buf].swapfile = false
+  vim.bo[buf.buf].filetype = 'gitbutler-details'
+  vim.api.nvim_win_set_buf(win, buf.buf)
 
-  vim.wo[win].number = false
-  vim.wo[win].relativenumber = false
-  vim.wo[win].signcolumn = 'no'
-  vim.wo[win].foldcolumn = '0'
-  vim.wo[win].wrap = false
-  vim.wo[win].cursorline = true
+  M._register_handlers(buf)
+  buf:attach(win)
 
-  st.buf, st.win = buf, win
+  st.buffer, st.buf, st.win = buf, buf.buf, win
   M._render(info_rows('  (no selection)', HL.dim))
   M._apply_width()
-  set_keymap(buf)
+  set_keymap(buf.buf)
 
   vim.api.nvim_create_autocmd('CursorMoved', {
-    buffer = buf,
+    buffer = buf.buf,
     callback = function()
       M._sync_cursor()
     end,
@@ -1007,6 +1052,13 @@ function M.close()
     M._restore_status()
   end
   local focus = st.status_buf and st.status_buf.win
+  -- Hand-rolled teardown, not `Buffer:close()` — but the hint float is still
+  -- the Buffer's to close. Today `BufWinLeave` closes it anyway when the
+  -- window goes down below, so this is only reachable under `eventignore` or
+  -- a `noautocmd` close, but leaving it to chance leaks an orphan float.
+  if st.buffer then
+    st.buffer:_close_hint_window()
+  end
   if st.win and vim.api.nvim_win_is_valid(st.win) then
     pcall(vim.api.nvim_win_close, st.win, true)
   end
