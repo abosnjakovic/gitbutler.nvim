@@ -1461,6 +1461,21 @@ h.test('details: Y writes the blob to both registers and empties the store', fun
     vim.fn.setreg('+', orig_plus)
   end)
 
+  -- `+` is the system clipboard, and headless Linux CI has no provider for it:
+  -- `setreg('+', …)` is a no-op there and `getreg('+')` reads back empty. What
+  -- the pane is responsible for is writing both registers — whether the OS can
+  -- hold the second one is not this test's business. So record the writes.
+  local wrote = {}
+  local orig_setreg = vim.fn.setreg
+  h.after(function()
+    vim.fn.setreg = orig_setreg
+  end)
+  ---@diagnostic disable-next-line: duplicate-set-field
+  vim.fn.setreg = function(name, value)
+    wrote[name] = value
+    return orig_setreg(name, value)
+  end
+
   review.clear()
   review.set({
     scope = 'commit',
@@ -1488,7 +1503,8 @@ h.test('details: Y writes the blob to both registers and empties the store', fun
     '  > needs a guard',
   }, '\n')
   h.assert_eq(expected, vim.fn.getreg('"'))
-  h.assert_eq(expected, vim.fn.getreg('+'))
+  h.assert_eq(expected, wrote['+'])
+  h.assert_eq(expected, wrote['"'])
   h.assert_eq(0, #review.comments, 'the store is drained')
 end)
 
