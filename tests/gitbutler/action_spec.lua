@@ -581,3 +581,28 @@ test('actions.toggle_fold expands the common base like a landed commit', functio
 
   status.toggle_base_expand = original_toggle
 end)
+
+-- `<Tab>` and `d` are one system: the pane owns diffs, and it follows the
+-- status cursor, so toggling it on a file row already shows that file.
+test('actions.toggle_fold on a file row toggles the details pane', function()
+  local details = require('gitbutler.ui.details')
+  local buf = h.mock_buffer()
+  buf.get_cursor_line = function()
+    return { type = 'file', data = { cli_id = 'qs' } }
+  end
+
+  local seen
+  local orig = details.toggle
+  details.toggle = function(b)
+    seen = b
+  end
+  h.after(function()
+    details.toggle = orig
+  end)
+
+  local before = #vim.api.nvim_list_wins()
+  actions.toggle_fold(buf)
+
+  assert_eq(buf, seen, 'toggle_fold did not hand the status buffer to the pane')
+  assert_eq(before, #vim.api.nvim_list_wins(), 'toggle_fold opened a window of its own')
+end)

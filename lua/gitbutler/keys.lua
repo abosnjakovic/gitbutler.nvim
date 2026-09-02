@@ -179,7 +179,7 @@ M.contexts = {
       action = 'toggle_fold',
       desc = 'expand',
       section = 'Operations',
-      help = 'Expand commit files / inline diff / fold',
+      help = 'Expand commit files / details pane / fold',
     },
     -- Details pane
     {
