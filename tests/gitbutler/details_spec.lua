@@ -414,7 +414,14 @@ h.test('details: toggle_full hides the status window and restores it', function(
   details.toggle_full(sb)
   h.assert_falsy(details.win_state.full)
   h.assert_truthy(sb.win and vim.api.nvim_win_is_valid(sb.win), 'status window was not restored')
-  h.assert_eq(with_pane, #vim.api.nvim_list_wins())
+  -- +1, not back to `with_pane`: `_restore_status` now re-attaches the status
+  -- buffer (`sb:attach`), which opens its own pinned hint float — the same
+  -- window every status view gets from `Buffer:open()` in production.
+  -- `mock_status_buf` never attaches `sb` up front, so `with_pane` was
+  -- captured before that float existed; restoring is what (re)creates it,
+  -- and re-attaching is also what re-registers the CursorMoved ->
+  -- follow_cursor hook that the fullscreen round trip used to drop.
+  h.assert_eq(with_pane + 1, #vim.api.nvim_list_wins())
 
   details.close()
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
@@ -1891,6 +1898,7 @@ h.test('details: _reorient moves a live pane without recreating its buffer', fun
     vim.o.columns = cols
   end)
   reset()
+  details.win_state.width_pct = 50 -- pin: the preceding test can leave this at 85
   set_columns(200)
   local sb = mock_status_buf()
   details.open(sb)
@@ -1924,6 +1932,7 @@ h.test('details: an open pane watches for layout changes', function()
     vim.o.columns = cols
   end)
   reset()
+  details.win_state.width_pct = 50 -- pin: the preceding test can leave this at 85
   set_columns(200)
   local sb = mock_status_buf()
   details.open(sb)
@@ -1946,4 +1955,278 @@ h.test('details: an open pane watches for layout changes', function()
 
   details.close()
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- `_avail_width` adds the open pane's own width back in while it is beside
+-- the status window, so the group's total room reads the same before and
+-- after the pane opened. Without the add-back, the status window alone
+-- measures roughly half the group on every later resize, which is enough by
+-- itself to push a vertical pane to the bottom even though nothing about the
+-- layout actually changed.
+h.test("details: _avail_width's add-back keeps a vertical pane vertical across a same-layout resize", function()
+  local cols = vim.o.columns
+  h.after(function()
+    vim.o.columns = cols
+  end)
+  reset()
+  details.win_state.width_pct = 50
+  -- 140, not the 200 the other orientation tests use: at 200 the status
+  -- window alone is still wide enough on its own (roughly half, ~99 columns)
+  -- to clear the 60-column threshold, so a missing add-back would not
+  -- actually flip anything there. 140 sits in the band where the whole group
+  -- clears it but the status window's own post-split share does not.
+  set_columns(140)
+  local sb = mock_status_buf()
+  details.open(sb)
+  h.assert_falsy(details.win_state.horizontal, 'a 140-column editor split the pane sideways')
+
+  -- Nothing about vim.o.columns or the window layout changes here — only the
+  -- event fires, exactly as a Neovim-internal WinResized would with no actual
+  -- resize (e.g. another plugin opening and closing a scratch window).
+  vim.api.nvim_exec_autocmds('WinResized', {})
+  vim.wait(50, function()
+    return false
+  end)
+
+  h.assert_falsy(details.win_state.horizontal, 'the pane flipped to the bottom on a same-layout resize')
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- The existing orientation tests only ever assert the pane's position, never
+-- its size, so a horizontal pane's height could be hardcoded and still pass.
+h.test('details: _apply_size sizes a horizontal pane to its share of vim.o.lines', function()
+  local cols, lines = vim.o.columns, vim.o.lines
+  h.after(function()
+    vim.o.columns = cols
+    vim.o.lines = lines
+    vim.cmd('wincmd =')
+  end)
+  reset()
+  details.win_state.width_pct = 50
+  vim.o.lines = 50
+  set_columns(80) -- narrow enough to force the pane below the status window
+  local sb = mock_status_buf()
+  details.open(sb)
+  h.assert_truthy(details.win_state.horizontal, 'an 80-column editor did not split the pane below')
+
+  local expected = math.max(5, math.floor(vim.o.lines * details.win_state.width_pct / 100))
+  h.assert_eq(expected, vim.api.nvim_win_get_height(details.win_state.win))
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- The spec promises the cursor stays where it was across a re-place, but the
+-- pane cursor never leaves row 1 in the existing orientation tests, so
+-- nothing has ever exercised the restore.
+h.test('details: _reorient keeps the cursor row across a re-place', function()
+  local cols = vim.o.columns
+  h.after(function()
+    vim.o.columns = cols
+  end)
+  reset()
+  details.win_state.width_pct = 50
+  set_columns(200)
+  local sb = mock_status_buf()
+  details.open(sb)
+  local st = details.win_state
+  st.data = fixtures.diff_json
+  details._rebuild()
+  h.assert_truthy(#st.hunks >= 2, 'fixture needs at least two hunks to move off row 1')
+
+  -- Park the cursor away from row 1, which the pane already starts on and so
+  -- would not discriminate a restore that always leaves the cursor at the top.
+  local target_row = st.hunks[2].row
+  vim.api.nvim_win_set_cursor(st.win, { target_row, 0 })
+
+  set_columns(80)
+  details._reorient()
+
+  h.assert_truthy(details.win_state.horizontal, 'the re-place did not change orientation')
+  h.assert_eq(target_row, vim.api.nvim_win_get_cursor(st.win)[1], 'the cursor row did not survive the re-place')
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- `_horizontal()`'s `c.min_width or 60` fallback masks the wired-up config so
+-- completely that deleting `details = { min_width = 60 }` from config.lua is
+-- invisible. This pins that a user-set value actually reaches the decision.
+h.test('details: config.values.details.min_width changes the orientation decision', function()
+  local config = require('gitbutler.config')
+  local orig_min_width = config.values.details.min_width
+  h.after(function()
+    config.values.details.min_width = orig_min_width
+  end)
+  local cols = vim.o.columns
+  h.after(function()
+    vim.o.columns = cols
+  end)
+
+  -- A fixed 160-column group at the default 50% share: 160 * 0.5 = 80.
+  reset()
+  details.win_state.width_pct = 50
+  set_columns(160)
+  config.values.details.min_width = 60
+  local sb = mock_status_buf()
+  details.open(sb)
+  h.assert_falsy(details.win_state.horizontal, 'min_width 60 fits an 80-column share beside the status window')
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+
+  reset()
+  details.win_state.width_pct = 50
+  config.values.details.min_width = 100
+  local sb2 = mock_status_buf()
+  details.open(sb2)
+  h.assert_truthy(details.win_state.horizontal, 'min_width 100 no longer fits the same 80-column share')
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb2.buf, { force = true })
+end)
+
+-- In fullscreen `status_buf.win` is nil, so a re-place would close the pane's
+-- own window and then fail to reopen it (no status window to split off).
+-- `_reorient` must stay out of the way entirely while `win_state.full` is
+-- true, rather than relying on `_place`'s failure path to save it.
+h.test('details: _reorient is a no-op while fullscreen', function()
+  local cols = vim.o.columns
+  h.after(function()
+    vim.o.columns = cols
+  end)
+  reset()
+  details.win_state.width_pct = 50
+  set_columns(200)
+  local sb = mock_status_buf()
+  details.open(sb)
+
+  -- An unrelated window keeps the tabpage from refusing to close the pane's
+  -- own window below (`E444: cannot close last window`), which would
+  -- otherwise mask a missing fullscreen guard by accident.
+  vim.cmd('split')
+  local extra_win = vim.api.nvim_get_current_win()
+  h.after(function()
+    pcall(vim.api.nvim_win_close, extra_win, true)
+  end)
+
+  vim.api.nvim_set_current_win(details.win_state.win)
+  details.toggle_full(sb)
+  h.assert_truthy(details.win_state.full)
+
+  set_columns(80) -- would otherwise force the pane horizontal
+  local win_before = details.win_state.win
+  local ok = pcall(details._reorient)
+
+  h.assert_truthy(ok, 'reorient threw while fullscreen')
+  h.assert_truthy(details.is_open(), 'the pane closed itself while fullscreen')
+  h.assert_eq(win_before, details.win_state.win, 'the pane window changed during fullscreen')
+  h.assert_truthy(details.win_state.full, 'reorient cleared fullscreen')
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+---Stack `n` horizontal splits off `win`, each taking over as current so the
+---next one stacks below it in turn — exhausting the row room in `win`'s own
+---column, the same shape as the reviewer's repro (lines = 50, ~12 windows).
+---@return integer[] the created windows, oldest first — close in reverse
+local function stack_splits(win, n)
+  local stacked = {}
+  for _ = 1, n do
+    vim.api.nvim_set_current_win(win)
+    if not pcall(vim.cmd, 'belowright split') then
+      break
+    end
+    table.insert(stacked, vim.api.nvim_get_current_win())
+  end
+  return stacked
+end
+
+-- The real repro behind the `pcall` fix: with the status window's column
+-- group already packed with stacked windows, a re-place that wants a
+-- horizontal split has no room and `vim.cmd('belowright split')` raises
+-- `E36`. Before the fix this threw straight out of `_reorient` (called from
+-- a WinResized/VimResized autocmd) and left the pane's window already closed
+-- with nothing put back in its place.
+h.test('details: _reorient survives a failed re-place (E36) and keeps the previous orientation', function()
+  local cols, lines = vim.o.columns, vim.o.lines
+  h.after(function()
+    vim.o.columns = cols
+    vim.o.lines = lines
+    vim.cmd('wincmd =')
+  end)
+  reset()
+  details.win_state.width_pct = 50
+  vim.o.lines = 20
+  set_columns(200)
+  local sb = mock_status_buf()
+
+  -- Request far more than any real screen fits: a lone window's actual height
+  -- does not reliably track `vim.o.lines` after a `wincmd =` in this suite
+  -- (nothing to equalize against with only one window on screen), so the
+  -- count has to run until stacking genuinely fails rather than assume a
+  -- fixed number for a fixed `lines` value.
+  local stacked = stack_splits(sb.win, 100)
+  h.assert_truthy(#stacked < 100, 'stacking never ran out of room — the room-exhaustion setup did not take effect')
+  h.after(function()
+    for i = #stacked, 1, -1 do
+      pcall(vim.api.nvim_win_close, stacked[i], true)
+    end
+  end)
+
+  vim.api.nvim_set_current_win(sb.win)
+  details.open(sb)
+  h.assert_falsy(details.win_state.horizontal, 'a wide editor should still split the pane sideways')
+  local buf = details.win_state.buf
+
+  -- Narrowing wants a horizontal pane, which the packed row group has no
+  -- room for.
+  set_columns(60)
+  h.assert_truthy(details._horizontal(), 'the scenario needs to actually want a horizontal re-place')
+  local ok = pcall(details._reorient)
+
+  h.assert_truthy(ok, 'a failed re-place threw out of _reorient: ' .. tostring(ok))
+  h.assert_truthy(details.is_open(), 'the pane disappeared instead of falling back')
+  h.assert_falsy(details.win_state.horizontal, 'the pane did not fall back to its previous orientation')
+  h.assert_eq(buf, details.win_state.buf, 'the pane buffer was recreated instead of falling back')
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- Same throw hazard, but on `open()`'s own `_place` call: the very first
+-- placement can want an orientation the status window's group has no room
+-- for. `open()` has no previous orientation to fall back to, so a throw here
+-- must take the same delete-buffer-and-reset path as an ordinary `false`
+-- return, not propagate.
+h.test('details: open survives a failed first placement (E36) instead of throwing', function()
+  local cols, lines = vim.o.columns, vim.o.lines
+  h.after(function()
+    vim.o.columns = cols
+    vim.o.lines = lines
+    vim.cmd('wincmd =')
+  end)
+  reset()
+  details.win_state.width_pct = 50
+  vim.o.lines = 20
+  set_columns(30) -- narrow enough that the very first decision wants horizontal
+  local sb = mock_status_buf()
+
+  -- See the sibling `_reorient` E36 test for why this stacks until it
+  -- genuinely runs out of room rather than assuming a fixed count.
+  local stacked = stack_splits(sb.win, 100)
+  h.assert_truthy(#stacked < 100, 'stacking never ran out of room — the room-exhaustion setup did not take effect')
+  h.after(function()
+    for i = #stacked, 1, -1 do
+      pcall(vim.api.nvim_win_close, stacked[i], true)
+    end
+  end)
+
+  vim.api.nvim_set_current_win(sb.win)
+  h.assert_truthy(details._horizontal(), 'the scenario needs to actually want a horizontal placement')
+  local ok = pcall(details.open, sb)
+
+  h.assert_truthy(ok, 'a failed first placement threw out of open(): ' .. tostring(ok))
+  h.assert_falsy(details.is_open(), 'a failed placement should leave the pane closed, not half-open')
 end)

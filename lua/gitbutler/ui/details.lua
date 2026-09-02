@@ -1006,10 +1006,26 @@ function M._reorient()
   -- `old` runs, so that handler's `win_state.win == win` guard drops the
   -- event instead of tearing down the pane we just reopened.
   pcall(vim.api.nvim_win_close, old, true)
-  local placed = M._place(want)
+  -- The status window's column group may have no room for the new
+  -- orientation: `vim.cmd('belowright split' | 'rightbelow vsplit')` raises
+  -- `E36: Not enough room` rather than returning false, and this runs from a
+  -- WinResized/VimResized autocmd, so an unwrapped throw would escape as a
+  -- visible error with the pane already gone. pcall it, and on any failure
+  -- fall back to the orientation the pane already had — `_place` leaves
+  -- `st.horizontal` untouched when the split throws, so `not want` is
+  -- exactly that. Guarded with its own pcall so the fallback cannot itself
+  -- throw and re-open the same hole.
+  local ok, placed = pcall(M._place, want)
   vim.bo[st.buf].bufhidden = prev_bufhidden
-  if not placed then
-    return
+  if not ok or not placed then
+    local fb_ok, fb_placed = pcall(M._place, not want)
+    if not fb_ok or not fb_placed then
+      -- ponytail: both orientations failed, which only happens if the status
+      -- window itself is gone — `open()`'s own guard already treats that as
+      -- unrecoverable. `is_open()` reports closed either way; upgrade to an
+      -- explicit `M.close()` here if that leaked `st.buf` ever matters.
+      return
+    end
   end
   pcall(vim.api.nvim_win_set_cursor, st.win, cursor)
   local back = focused_pane and st.win or (st.status_buf and st.status_buf.win)
@@ -1061,7 +1077,12 @@ function M.open(status_buf)
   M._register_handlers(buf)
   st.buffer, st.buf = buf, buf.buf
 
-  if not M._place(M._horizontal()) then
+  -- Same throw hazard as `_reorient`: the status window's column group may
+  -- have no room, and `vim.cmd(...split)` raises rather than returning
+  -- false. pcall it so a throw takes the same delete-and-reset path as an
+  -- ordinary `false` return, instead of propagating out of `open()`.
+  local ok, placed = pcall(M._place, M._horizontal())
+  if not ok or not placed then
     pcall(vim.api.nvim_buf_delete, buf.buf, { force = true })
     M._reset_state()
     return
@@ -1120,7 +1141,11 @@ function M._restore_status()
   local win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(win, sb.buf)
   vim.bo[sb.buf].bufhidden = 'wipe'
-  sb.win = win
+  -- Not a bare `sb.win = win`: `_hide_status`'s close fired `BufWinLeave` on
+  -- the status buffer, which deleted `hint_augroup` — the augroup owning the
+  -- CursorMoved -> `follow_cursor` handler. `attach` re-registers it (and the
+  -- hint float) the same way a fresh `Buffer:open()` would.
+  sb:attach(win)
   M._apply_size()
 end
 
