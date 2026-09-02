@@ -1,5 +1,7 @@
 local M = {}
 
+local config = require('gitbutler.config')
+
 local HL = {
   file = 'GitButlerDetailFile',
   hunk = 'GitButlerDetailHunk',
@@ -333,6 +335,7 @@ end
 ---@field win? integer split window (mirrors buffer.win)
 ---@field status_buf? GitButlerBuffer the status view this pane hangs off
 ---@field full boolean fullscreen (status window hidden)
+---@field horizontal? boolean true when the pane is below the status window, not beside it
 ---@field width_pct integer 30..90
 ---@field entity? { cli_id?: string, kind?: string, sha?: string, meta?: table, scope?: string, ref?: string, subject?: string }
 ---@field data? table last decoded diff payload
@@ -446,15 +449,60 @@ function M._commit_rows(raw)
   return rows
 end
 
----ponytail: width is a share of the whole editor rather than of the status
----window's column group — correct for the common one-window-plus-pane layout,
----and the user has `+`/`-` when it isn't.
-function M._apply_width()
+---Narrowest pane worth putting beside the status window.
+---@param avail integer columns the status window's column group has
+---@param pct integer the pane's share of that group, 30–90
+---@param min_width integer
+---@return boolean
+function M._wants_horizontal(avail, pct, min_width)
+  return avail * pct / 100 < min_width
+end
+
+---Columns the status window's column group has to share. While a vertical
+---pane is open its width is part of that group and must be added back:
+---measuring the status window alone reports half the room a moment after the
+---pane opened, which would flip the pane to the bottom on the next resize.
+---
+---ponytail: the boundary is one column wide, because the separator exists in
+---only one of the two orientations, so a layout parked exactly on it can flip
+---on every resize event. Give `_wants_horizontal` a hysteresis band of about
+---five columns if that ever shows up.
+---@return integer
+function M._avail_width()
+  local st = M.win_state
+  local sb = st.status_buf
+  if not (sb and sb.win and vim.api.nvim_win_is_valid(sb.win)) then
+    return vim.o.columns
+  end
+  local w = vim.api.nvim_win_get_width(sb.win)
+  if M.is_open() and not st.horizontal and not st.full then
+    w = w + vim.api.nvim_win_get_width(st.win) + 1
+  end
+  return w
+end
+
+---@return boolean
+function M._horizontal()
+  local c = config.values.details or {}
+  return M._wants_horizontal(M._avail_width(), M.win_state.width_pct, c.min_width or 60)
+end
+
+---Size the pane to `width_pct` of the status window's column group, on
+---whichever axis it occupies.
+---
+---ponytail: the height is a share of the whole editor rather than of the
+---status window's row group — right for the common layout, and `+`/`-` cover
+---the rest.
+function M._apply_size()
   local st = M.win_state
   if not M.is_open() or st.full then
     return
   end
-  pcall(vim.api.nvim_win_set_width, st.win, math.max(10, math.floor(vim.o.columns * st.width_pct / 100)))
+  if st.horizontal then
+    pcall(vim.api.nvim_win_set_height, st.win, math.max(5, math.floor(vim.o.lines * st.width_pct / 100)))
+  else
+    pcall(vim.api.nvim_win_set_width, st.win, math.max(10, math.floor(M._avail_width() * st.width_pct / 100)))
+  end
 end
 
 --- Hunk cursor ---------------------------------------------------------------
@@ -889,46 +937,26 @@ local function set_keymap(buf)
   end
 end
 
----@param status_buf GitButlerBuffer
-function M.open(status_buf)
+---Open the pane window against the status window and put `st.buf` in it.
+---A split, not `wincmd J` / `wincmd L`: those pull the pane out of the status
+---window's column group to span the whole editor, rearranging unrelated user
+---windows — the same reason `_hide_status` refuses `:only`.
+---@param horizontal boolean
+---@return boolean placed
+function M._place(horizontal)
   local st = M.win_state
-  st.status_buf = status_buf or st.status_buf
-  if M.is_open() then
-    return
-  end
-
-  local src = status_buf and status_buf.win
-  if not src or not vim.api.nvim_win_is_valid(src) then
-    return
+  local src = st.status_buf and st.status_buf.win
+  if not (src and vim.api.nvim_win_is_valid(src)) then
+    return false
   end
 
   vim.api.nvim_set_current_win(src)
-  vim.cmd('rightbelow vsplit')
+  vim.cmd(horizontal and 'belowright split' or 'rightbelow vsplit')
   local win = vim.api.nvim_get_current_win()
-
-  local buf = require('gitbutler.ui.buffer').Buffer.new()
-  buf.view = 'details'
-  buf.buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf.buf].buftype = 'nofile'
-  vim.bo[buf.buf].bufhidden = 'wipe'
-  vim.bo[buf.buf].swapfile = false
-  vim.bo[buf.buf].filetype = 'gitbutler-details'
-  vim.api.nvim_win_set_buf(win, buf.buf)
-
-  M._register_handlers(buf)
-  buf:attach(win)
-
-  st.buffer, st.buf, st.win = buf, buf.buf, win
-  M._render(info_rows('  (no selection)', HL.dim))
-  M._apply_width()
-  set_keymap(buf)
-
-  vim.api.nvim_create_autocmd('CursorMoved', {
-    buffer = buf.buf,
-    callback = function()
-      M._sync_cursor()
-    end,
-  })
+  vim.api.nvim_win_set_buf(win, st.buf)
+  st.win, st.horizontal = win, horizontal
+  st.buffer:attach(win)
+  M._apply_size()
 
   -- The window going away by any route (`:q`, `<C-w>c`, a layout change) runs
   -- the full teardown, so a hidden status window always comes back and no
@@ -948,9 +976,51 @@ function M.open(status_buf)
       end)
     end,
   })
+  return true
+end
+
+---@param status_buf GitButlerBuffer
+function M.open(status_buf)
+  local st = M.win_state
+  st.status_buf = status_buf or st.status_buf
+  if M.is_open() then
+    return
+  end
+
+  local src = st.status_buf and st.status_buf.win
+  if not src or not vim.api.nvim_win_is_valid(src) then
+    return
+  end
+
+  local buf = require('gitbutler.ui.buffer').Buffer.new()
+  buf.view = 'details'
+  buf.buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[buf.buf].buftype = 'nofile'
+  vim.bo[buf.buf].bufhidden = 'wipe'
+  vim.bo[buf.buf].swapfile = false
+  vim.bo[buf.buf].filetype = 'gitbutler-details'
+
+  M._register_handlers(buf)
+  st.buffer, st.buf = buf, buf.buf
+
+  if not M._place(M._horizontal()) then
+    pcall(vim.api.nvim_buf_delete, buf.buf, { force = true })
+    M._reset_state()
+    return
+  end
+
+  M._render(info_rows('  (no selection)', HL.dim))
+  set_keymap(buf)
+
+  vim.api.nvim_create_autocmd('CursorMoved', {
+    buffer = buf.buf,
+    callback = function()
+      M._sync_cursor()
+    end,
+  })
 
   vim.api.nvim_set_current_win(src)
-  M.show_for_line(status_buf:get_cursor_line())
+  M.show_for_line(st.status_buf:get_cursor_line())
 end
 
 ---Close the status window without wiping its buffer, so fullscreen can put it
@@ -976,7 +1046,7 @@ function M._hide_status()
   return ok
 end
 
----Put the hidden status window back to the left of the details pane.
+---Put the hidden status window back beside (or above) the details pane.
 function M._restore_status()
   local sb = M.win_state.status_buf
   if not sb or not sb.buf or not vim.api.nvim_buf_is_valid(sb.buf) then
@@ -988,12 +1058,12 @@ function M._restore_status()
   if M.is_open() then
     vim.api.nvim_set_current_win(M.win_state.win)
   end
-  vim.cmd('leftabove vsplit')
+  vim.cmd(M.win_state.horizontal and 'aboveleft split' or 'leftabove vsplit')
   local win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(win, sb.buf)
   vim.bo[sb.buf].bufhidden = 'wipe'
   sb.win = win
-  M._apply_width()
+  M._apply_size()
 end
 
 function M.close()
@@ -1061,7 +1131,7 @@ end
 function M.resize(delta)
   local st = M.win_state
   st.width_pct = math.min(90, math.max(30, st.width_pct + delta))
-  M._apply_width()
+  M._apply_size()
 end
 
 ---Load and display the diff for `entity`. No-op when it is already showing.

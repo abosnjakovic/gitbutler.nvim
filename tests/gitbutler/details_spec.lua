@@ -1802,3 +1802,82 @@ h.test('status: the hint line is still exactly the mode hotbar, unaffected by th
   local actual = vim.api.nvim_buf_get_lines(buf.hint_buf, 0, -1, false)[1]
   h.assert_eq(expected, actual, 'status hint line byte-for-byte unchanged')
 end)
+
+-- The pane's share of the column group decides where it goes: a 60-column
+-- pane is the narrowest that reads, so at the default 50% share an editor
+-- under 120 columns puts it underneath instead.
+h.test('details: _wants_horizontal flips once the pane share drops under min_width', function()
+  h.assert_falsy(details._wants_horizontal(120, 50, 60), '60 columns is exactly wide enough')
+  h.assert_truthy(details._wants_horizontal(118, 50, 60))
+  -- The user's own width_pct is part of the rule, not just the editor size.
+  h.assert_truthy(details._wants_horizontal(160, 30, 60))
+  h.assert_falsy(details._wants_horizontal(160, 50, 60))
+end)
+
+-- A bare `vim.o.columns = n` never reflows existing windows in headless
+-- Neovim, with or without other windows present — `wincmd =` is what makes
+-- the new width actually take effect before it is measured.
+local function set_columns(n)
+  vim.o.columns = n
+  vim.cmd('wincmd =')
+end
+
+h.test('details: open places the pane beside a wide status window and below a narrow one', function()
+  local cols = vim.o.columns
+  h.after(function()
+    vim.o.columns = cols
+  end)
+
+  reset()
+  details.win_state.width_pct = 50 -- width survives reset by design; pin the default share the scenario assumes
+  set_columns(200)
+  local wide = mock_status_buf()
+  details.open(wide)
+  h.assert_falsy(details.win_state.horizontal, 'a 200-column editor split the pane downwards')
+  h.assert_eq(
+    vim.api.nvim_win_get_position(wide.win)[1],
+    vim.api.nvim_win_get_position(details.win_state.win)[1],
+    'the pane is not on the status window row'
+  )
+  details.close()
+  pcall(vim.api.nvim_buf_delete, wide.buf, { force = true })
+
+  reset()
+  details.win_state.width_pct = 50
+  set_columns(80)
+  local narrow = mock_status_buf()
+  details.open(narrow)
+  h.assert_truthy(details.win_state.horizontal, 'an 80-column editor split the pane sideways')
+  h.assert_truthy(
+    vim.api.nvim_win_get_position(details.win_state.win)[1] > vim.api.nvim_win_get_position(narrow.win)[1],
+    'the pane did not land below the status window'
+  )
+  details.close()
+  pcall(vim.api.nvim_buf_delete, narrow.buf, { force = true })
+end)
+
+-- Fullscreen closes the status window and splits it back on exit. That split
+-- has to match the orientation, or leaving `D` puts the status window beside
+-- a pane that belongs above it.
+h.test('details: leaving fullscreen restores the status window above a bottom pane', function()
+  local cols = vim.o.columns
+  h.after(function()
+    vim.o.columns = cols
+  end)
+  reset()
+  details.win_state.width_pct = 50
+  set_columns(80)
+  local sb = mock_status_buf()
+  details.open(sb)
+  h.assert_truthy(details.win_state.horizontal)
+
+  details.toggle_full(sb)
+  details.toggle_full(sb)
+
+  h.assert_truthy(
+    vim.api.nvim_win_get_position(sb.win)[1] < vim.api.nvim_win_get_position(details.win_state.win)[1],
+    'the status window came back beside the pane'
+  )
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
