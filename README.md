@@ -160,7 +160,7 @@ f/F      Toggle committed-file list (cursor commit / all commits)
 y        Copy sha / path / branch name to the clipboard
 :        Run an arbitrary but command
 !        Run an arbitrary shell command
-<Tab>    File list on commits, inline diff on files, fold toggle on branch headers
+<Tab>    File list on commits, toggle the details pane on files, fold toggle on branch headers
 <C-r>    Refresh
 q        Close
 ?        Help
@@ -217,7 +217,9 @@ Jump (`/`) prompts for a CLI id — exact match or unique prefix — and moves t
 
 ### Details pane (d)
 
-`d` toggles a details split beside the status view; `D` toggles it fullscreen (the status window is hidden and restored, never `:only`). `+` and `-` resize it in 5% steps between 30% and 90% of the screen. `l` or `<Right>` focuses the pane; `h`, `<Left>`, or `<Esc>` focuses back to the status window.
+`d` toggles the details pane; `D` toggles it fullscreen (the status window is hidden and restored, never `:only`). `+` and `-` resize it in 5% steps between 30% and 90%, on whichever axis it currently occupies. `l` or `<Right>` focuses the pane; `h`, `<Left>`, or `<Esc>` focuses back to the status window.
+
+The pane sits beside the status window, or below it when the status window's column group is too narrow to give the pane at least `min_width` columns (60 by default) — see Configuration. It moves live as the layout changes: resizing the terminal, or splitting another window into that column group, can flip it from one side to the other. Since `-` shrinks the pane's own share of the group, shrinking it far enough can also move it underneath.
 
 The pane follows the status cursor: whatever the cursor sits on — an uncommitted file, a commit, a file inside a commit, a branch, or the uncommitted area (`zz`) — is the diff that gets loaded. The lookup is debounced, so holding `j` doesn't spawn a CLI call per row.
 
@@ -388,6 +390,13 @@ require('gitbutler').setup({
   -- and applied when you return to normal mode.
   watch = true,
   watch_debounce = 1000,     -- ms between automatic refreshes
+
+  -- The details pane goes below the status window instead of beside it when
+  -- its share of the status window's column group would be narrower than
+  -- min_width columns.
+  details = {
+    min_width = 60,
+  },
 
   float = {
     relative = 'editor',
