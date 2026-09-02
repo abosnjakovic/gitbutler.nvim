@@ -1881,3 +1881,69 @@ h.test('details: leaving fullscreen restores the status window above a bottom pa
   details.close()
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
 end)
+
+-- Splitting Neovim under an open pane changes the room it has. The pane moves
+-- rather than being rebuilt: the same buffer keeps its rows, marks and hunk
+-- selection, and the cursor stays where it was.
+h.test('details: _reorient moves a live pane without recreating its buffer', function()
+  local cols = vim.o.columns
+  h.after(function()
+    vim.o.columns = cols
+  end)
+  reset()
+  set_columns(200)
+  local sb = mock_status_buf()
+  details.open(sb)
+  h.assert_falsy(details.win_state.horizontal, 'a 200-column editor split the pane downwards')
+  local buf = details.win_state.buf
+
+  set_columns(80)
+  details._reorient()
+
+  h.assert_truthy(details.win_state.horizontal, 'the pane stayed beside a narrow status window')
+  h.assert_eq(buf, details.win_state.buf, 'the pane buffer was recreated instead of moved')
+  h.assert_truthy(details.is_open(), 'the pane did not survive the move')
+  h.assert_truthy(
+    vim.api.nvim_win_get_position(details.win_state.win)[1] > vim.api.nvim_win_get_position(sb.win)[1],
+    'the pane did not land below the status window'
+  )
+  h.assert_eq(sb.win, vim.api.nvim_get_current_win(), 'focus did not return to the status window')
+
+  -- Idempotent: nothing to do when the orientation already fits.
+  local win = details.win_state.win
+  details._reorient()
+  h.assert_eq(win, details.win_state.win, 'a fitting pane was re-placed anyway')
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+h.test('details: an open pane watches for layout changes', function()
+  local cols = vim.o.columns
+  h.after(function()
+    vim.o.columns = cols
+  end)
+  reset()
+  set_columns(200)
+  local sb = mock_status_buf()
+  details.open(sb)
+  h.assert_falsy(details.win_state.horizontal, 'a 200-column editor split the pane downwards')
+
+  -- Fire the event the watcher listens for, rather than calling _reorient
+  -- directly: this is what proves the autocmd -- not just the function -- does
+  -- the re-place.
+  set_columns(80)
+  vim.api.nvim_exec_autocmds('VimResized', {})
+  vim.wait(200, function()
+    return details.win_state.horizontal == true
+  end)
+
+  h.assert_truthy(details.win_state.horizontal, 'the watcher did not re-place the pane')
+  h.assert_truthy(
+    vim.api.nvim_win_get_position(details.win_state.win)[1] > vim.api.nvim_win_get_position(sb.win)[1],
+    'the pane did not land below the status window'
+  )
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)

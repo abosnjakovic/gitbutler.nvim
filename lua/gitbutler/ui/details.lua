@@ -956,6 +956,7 @@ function M._place(horizontal)
   vim.api.nvim_win_set_buf(win, st.buf)
   st.win, st.horizontal = win, horizontal
   st.buffer:attach(win)
+  M._watch_layout()
   M._apply_size()
 
   -- The window going away by any route (`:q`, `<C-w>c`, a layout change) runs
@@ -977,6 +978,63 @@ function M._place(horizontal)
     end,
   })
   return true
+end
+
+---Re-place a live pane whose orientation no longer fits the layout. The
+---buffer is never recreated, so rows, marks and hunk selection survive; only
+---the window changes.
+function M._reorient()
+  local st = M.win_state
+  if not M.is_open() or st.full then
+    return
+  end
+  local want = M._horizontal()
+  if want == (st.horizontal or false) then
+    return
+  end
+
+  local old = st.win
+  local focused_pane = vim.api.nvim_get_current_win() == old
+  local cursor = vim.api.nvim_win_get_cursor(old)
+  -- `st.buf` is `bufhidden = 'wipe'`: closing its only window destroys it the
+  -- instant it goes windowless. Suspend that for the moment between this
+  -- close and `_place` giving the buffer a new window, or the re-place would
+  -- recreate the buffer instead of moving it.
+  local prev_bufhidden = vim.bo[st.buf].bufhidden
+  vim.bo[st.buf].bufhidden = 'hide'
+  -- `_place` reassigns `st.win` before the deferred WinClosed teardown for
+  -- `old` runs, so that handler's `win_state.win == win` guard drops the
+  -- event instead of tearing down the pane we just reopened.
+  pcall(vim.api.nvim_win_close, old, true)
+  local placed = M._place(want)
+  vim.bo[st.buf].bufhidden = prev_bufhidden
+  if not placed then
+    return
+  end
+  pcall(vim.api.nvim_win_set_cursor, st.win, cursor)
+  local back = focused_pane and st.win or (st.status_buf and st.status_buf.win)
+  if back and vim.api.nvim_win_is_valid(back) then
+    pcall(vim.api.nvim_set_current_win, back)
+  end
+end
+
+---Re-place the pane when the layout changes under it: `WinResized` catches a
+---Neovim split, `VimResized` the terminal. It goes in the Buffer's own hint
+---augroup, which `Buffer:attach` clears on every attach — so re-placing the
+---window cannot leak a second handler, and closing the pane needs no teardown
+---code of its own.
+---
+---The re-place itself fires `WinResized`; that pass finds the orientation
+---already fitting and returns, so this does not recurse.
+function M._watch_layout()
+  vim.api.nvim_create_autocmd({ 'WinResized', 'VimResized' }, {
+    group = M.win_state.buffer.hint_augroup,
+    callback = function()
+      vim.schedule(function()
+        M._reorient()
+      end)
+    end,
+  })
 end
 
 ---@param status_buf GitButlerBuffer
