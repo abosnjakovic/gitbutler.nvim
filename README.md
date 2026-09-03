@@ -217,7 +217,7 @@ Jump (`/`) prompts for a CLI id — exact match or unique prefix — and moves t
 
 ### Details pane (d)
 
-`d` toggles the details pane; `D` toggles it fullscreen (the status window is hidden and restored, never `:only`). `+` and `-` resize it in 5% steps between 30% and 90%, on whichever axis it currently occupies. `l` or `<Right>` focuses the pane; `h`, `<Left>`, or `<Esc>` focuses back to the status window.
+`d` toggles the details pane; `D` toggles it fullscreen (the status window is hidden and restored, never `:only`). `+` and `-` resize it in 5% steps between 30% and 90%, on whichever axis it currently occupies. `l` or `<Right>` focuses the pane; `h`, `<Left>`, or `<Esc>` focuses back to the status window. Those four keep working when the pane is underneath — they move between windows by name, not by direction, so there is nothing to relearn in the narrow layout.
 
 The pane sits beside the status window, or below it when the status window's column group is too narrow to give the pane at least `min_width` columns (60 by default) — see Configuration. It moves live as the layout changes: resizing the terminal, or splitting another window into that column group, can flip it from one side to the other. Since `-` shrinks the pane's own share of the group, shrinking it far enough can also move it underneath.
 

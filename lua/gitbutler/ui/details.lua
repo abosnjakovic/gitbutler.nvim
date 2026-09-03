@@ -467,6 +467,9 @@ end
 ---only one of the two orientations, so a layout parked exactly on it can flip
 ---on every resize event. Give `_wants_horizontal` a hysteresis band of about
 ---five columns if that ever shows up.
+---
+---Fullscreen needs no guard of its own: `_hide_status` nils `sb.win` before
+---setting `st.full`, so the check below has already returned by then.
 ---@return integer
 function M._avail_width()
   local st = M.win_state
@@ -474,8 +477,14 @@ function M._avail_width()
   if not (sb and sb.win and vim.api.nvim_win_is_valid(sb.win)) then
     return vim.o.columns
   end
+  -- A floating status view (`kind = 'float'`) is not in the split grid at all
+  -- — `vsplit` from it lands the pane in the main grid — so its own width
+  -- says nothing about the room the pane will have.
+  if vim.api.nvim_win_get_config(sb.win).relative ~= '' then
+    return vim.o.columns
+  end
   local w = vim.api.nvim_win_get_width(sb.win)
-  if M.is_open() and not st.horizontal and not st.full then
+  if M.is_open() and not st.horizontal then
     w = w + vim.api.nvim_win_get_width(st.win) + 1
   end
   return w
@@ -1020,13 +1029,22 @@ function M._reorient()
   if not ok or not placed then
     local fb_ok, fb_placed = pcall(M._place, not want)
     if not fb_ok or not fb_placed then
-      -- ponytail: both orientations failed, which only happens if the status
-      -- window itself is gone — `open()`'s own guard already treats that as
-      -- unrecoverable. `is_open()` reports closed either way; upgrade to an
-      -- explicit `M.close()` here if that leaked `st.buf` ever matters.
+      -- Both orientations failed, which only happens if the status window
+      -- itself is gone — `open()`'s own guard already treats that as
+      -- unrecoverable. Nothing leaks: `st.win` still names the window closed
+      -- above, so that window's deferred `WinClosed` teardown finds its
+      -- `win_state.win == win` guard true and runs the full `close()`. The
+      -- stale `st.win` is what makes this self-healing, so do not "tidy" it
+      -- to nil here — that would strand the buffer and the hidden status
+      -- window instead.
       return
     end
   end
+  -- Belt and braces: `_place` puts the same buffer back, and Neovim's own
+  -- per-buffer cursor memory usually reproduces this row on its own — which
+  -- is why the covering test cannot fail on this line being deleted, only on
+  -- it restoring the wrong row. Kept because the promise is ours, not
+  -- Neovim's, and the memory does not survive every path into `_place`.
   pcall(vim.api.nvim_win_set_cursor, st.win, cursor)
   local back = focused_pane and st.win or (st.status_buf and st.status_buf.win)
   if back and vim.api.nvim_win_is_valid(back) then

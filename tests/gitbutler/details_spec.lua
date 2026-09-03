@@ -2021,6 +2021,12 @@ end)
 -- The spec promises the cursor stays where it was across a re-place, but the
 -- pane cursor never leaves row 1 in the existing orientation tests, so
 -- nothing has ever exercised the restore.
+--
+-- Known limit: this pins the promise, not the line that keeps it. `_place`
+-- puts the same buffer back, and Neovim's own per-buffer cursor memory
+-- reproduces the row anyway, so deleting `_reorient`'s explicit
+-- `nvim_win_set_cursor` leaves this green. It does catch a restore that lands
+-- on the wrong row, which is the regression worth having.
 h.test('details: _reorient keeps the cursor row across a re-place', function()
   local cols = vim.o.columns
   h.after(function()
@@ -2229,4 +2235,29 @@ h.test('details: open survives a failed first placement (E36) instead of throwin
 
   h.assert_truthy(ok, 'a failed first placement threw out of open(): ' .. tostring(ok))
   h.assert_falsy(details.is_open(), 'a failed placement should leave the pane closed, not half-open')
+end)
+
+-- `kind = 'float'` opens the status view in a floating window, which is not
+-- in the split grid at all — `vsplit` from it lands the pane in the main
+-- grid, so the float's own width says nothing about the room the pane gets.
+h.test('details: _avail_width ignores a floating status window', function()
+  reset()
+  local sb = require('gitbutler.ui.buffer').Buffer.new()
+  sb.view = 'status'
+  sb.buf = vim.api.nvim_create_buf(false, true)
+  sb.win = vim.api.nvim_open_win(sb.buf, false, {
+    relative = 'editor',
+    width = 20,
+    height = 5,
+    row = 0,
+    col = 0,
+  })
+  h.after(function()
+    pcall(vim.api.nvim_win_close, sb.win, true)
+    pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+    details._reset_state()
+  end)
+  details.win_state.status_buf = sb
+
+  h.assert_eq(vim.o.columns, details._avail_width(), 'a 20-column float decided the pane placement')
 end)
