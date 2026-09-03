@@ -108,3 +108,53 @@ test('_parent_sha returns nil for an unknown sha or a payload without commits', 
   assert_eq(nil, log._parent_sha({}, 'deadbeef'))
   assert_eq(nil, log._parent_sha('nope', 'deadbeef'))
 end)
+
+-- The log view used to open its own `belowright split` and render raw
+-- `but diff` text — the third copy of a viewer the details pane already is.
+-- `<Tab>` on a file row now routes there, and repeating it on the commit the
+-- pane already shows closes it.
+test('log: <Tab> on a file row shows that commit in the details pane', function()
+  local details = require('gitbutler.ui.details')
+  local orig = { open = details.open, close = details.close, show = details.show_commit, is_open = details.is_open }
+  h.after(function()
+    details.open, details.close, details.show_commit, details.is_open = orig.open, orig.close, orig.show, orig.is_open
+  end)
+
+  local opened_from, shown, closed
+  details.open = function(b)
+    opened_from = b
+  end
+  details.show_commit = function(sha)
+    shown = sha
+  end
+  details.close = function()
+    closed = true
+  end
+
+  -- Pane shut: open it against the log buffer and load the commit.
+  details.is_open = function()
+    return false
+  end
+  details.win_state.entity = nil
+  local buf = mock_buf()
+  log._toggle_commit_details(buf, 'abc123')
+  assert_eq(buf, opened_from, 'the pane did not split from the log buffer')
+  assert_eq('abc123', shown)
+  assert_eq(nil, closed)
+
+  -- Pane already showing this commit: the same key closes it.
+  details.is_open = function()
+    return true
+  end
+  details.win_state.entity = { sha = 'abc123' }
+  log._toggle_commit_details(buf, 'abc123')
+  assert_truthy(closed, '<Tab> on the showing commit did not close the pane')
+
+  -- Pane showing a different commit: switch to this one, do not close.
+  closed, shown = nil, nil
+  details.win_state.entity = { sha = 'deadbeef' }
+  log._toggle_commit_details(buf, 'abc123')
+  assert_eq('abc123', shown, 'the pane did not switch commits')
+  assert_eq(nil, closed)
+  details.win_state.entity = nil
+end)

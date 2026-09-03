@@ -148,6 +148,23 @@ function M.build_lines(buf, data)
   return lines
 end
 
+---`<Tab>` on a file row: show that commit in the details pane, or close the
+---pane when it is already the one showing. The pane renders landed commits
+---through `git show`, which is what this key always showed here — the split
+---it replaced ran `but diff <commit_sha>`, never the file's own diff.
+---@param b GitButlerBuffer the log buffer the pane splits from
+---@param sha string
+function M._toggle_commit_details(b, sha)
+  local details = require('gitbutler.ui.details')
+  local showing = details.win_state.entity or {}
+  if details.is_open() and showing.sha == sha then
+    details.close()
+  else
+    details.open(b)
+    details.show_commit(sha)
+  end
+end
+
 ---Open the log view for a branch.
 ---@param branch_name string
 function M.open(branch_name)
@@ -185,37 +202,17 @@ function M.open(branch_name)
         return
       end
 
-      -- On file lines, show inline diff in a split below
+      -- File rows: the details pane owns diffs here too. It renders the whole
+      -- commit through `git show`, which is what this key always showed —
+      -- the split it replaces ran `but diff <commit_sha>`, never the file's
+      -- own diff. Pressing it again on the same commit closes the pane.
+      --
+      -- ponytail: the pane follows the cursor in the status view only
+      -- (`Buffer:attach` wires that for `view == 'status'`), so here it
+      -- refreshes on the keypress rather than as you move. Wire
+      -- `show_for_line` up to `log_file` rows if that starts to grate.
       if line.type == 'log_file' and line.data and line.data.commit_sha then
-        local commit_sha = line.data.commit_sha
-        local diff_err, diff_result = cli.run_sync({ 'diff', commit_sha })
-        if diff_err then
-          vim.notify('gitbutler diff: ' .. diff_err, vim.log.levels.ERROR)
-          return
-        end
-
-        local diff_lines = vim.split(tostring(diff_result), '\n')
-        vim.cmd('belowright split')
-        local diff_buf = vim.api.nvim_create_buf(false, true)
-        vim.api.nvim_win_set_buf(0, diff_buf)
-        vim.api.nvim_buf_set_lines(diff_buf, 0, -1, false, diff_lines)
-        vim.bo[diff_buf].buftype = 'nofile'
-        vim.bo[diff_buf].bufhidden = 'wipe'
-        vim.bo[diff_buf].filetype = 'gitbutler-diff'
-
-        local ns = vim.api.nvim_create_namespace('gitbutler-diff')
-        for i, l in ipairs(diff_lines) do
-          if l:match('│%+') then
-            vim.api.nvim_buf_add_highlight(diff_buf, ns, 'DiffAdd', i - 1, 0, -1)
-          elseif l:match('│%-') then
-            vim.api.nvim_buf_add_highlight(diff_buf, ns, 'DiffDelete', i - 1, 0, -1)
-          elseif l:match('^[─╮╯╭]') or l:match('^%s*[─╮╯╭]') then
-            vim.api.nvim_buf_add_highlight(diff_buf, ns, 'Comment', i - 1, 0, -1)
-          end
-        end
-
-        vim.keymap.set('n', 'q', '<cmd>close<CR>', { buffer = diff_buf })
-        vim.keymap.set('n', '<Tab>', '<cmd>close<CR>', { buffer = diff_buf })
+        M._toggle_commit_details(b, line.data.commit_sha)
         return
       end
 

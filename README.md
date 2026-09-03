@@ -309,7 +309,7 @@ q/Esc    Close
 Shows commit history with per-file stats. Commits are foldable to reveal the full message body and the changed files.
 
 ```
-<Tab>    Toggle file list / inline diff on files
+<Tab>    Toggle file list / details pane on files
 d        Reword commit message
 S        Squash the commit into the one below it (its parent)
 <CR>     Open file
