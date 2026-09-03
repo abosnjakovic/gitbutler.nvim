@@ -19,23 +19,6 @@ h.test('details: file header row per path, closing row after hunks', function()
   h.assert_truthy(closer.text:match('╯$'), closer.text)
 end)
 
--- Landed commits (below the base) can't be addressed by `but diff`, so `d`
--- renders `git show` output. The rows are read-only and classify message,
--- meta, and +/- diff lines for highlighting.
-h.test('details: _show_line_hl classifies git show lines', function()
-  -- File markers must win over the bare +/- diff-line rules.
-  h.assert_eq('GitButlerDetailFile', details._show_line_hl('--- a/foo.lua'))
-  h.assert_eq('GitButlerDetailFile', details._show_line_hl('+++ b/foo.lua'))
-  h.assert_eq('GitButlerDetailFile', details._show_line_hl('diff --git a/foo.lua b/foo.lua'))
-  h.assert_eq('DiffAdd', details._show_line_hl('+added line'))
-  h.assert_eq('DiffDelete', details._show_line_hl('-removed line'))
-  h.assert_eq('GitButlerDetailHunk', details._show_line_hl('@@ -1,2 +1,3 @@'))
-  h.assert_eq('GitButlerHelp', details._show_line_hl('Author: Adam <a@b.c>'))
-  -- Message body and context lines carry no highlight.
-  h.assert_eq(nil, details._show_line_hl('    a commit subject'))
-  h.assert_eq(nil, details._show_line_hl(' unchanged context'))
-end)
-
 -- A whole-commit details view prepends the same commit/Author/Date/message
 -- header the landed-history git-show view uses, so the two read consistently.
 h.test('details: build prepends commit meta header before the diff', function()
@@ -76,29 +59,6 @@ h.test('details: build prepends meta even when the commit has no changes', funct
     end
   end
   h.assert_truthy(saw_no_changes, 'still shows (no changes) after the header')
-end)
-
-h.test('details: _commit_rows is read-only and spans every classified line', function()
-  local raw = table.concat({
-    'commit deadbeef',
-    'Author: Adam <a@b.c>',
-    '',
-    '    subject line',
-    '',
-    'diff --git a/f.lua b/f.lua',
-    '@@ -1 +1 @@',
-    '-old',
-    '+new',
-  }, '\n')
-  local rows = details._commit_rows(raw)
-  h.assert_eq(9, #rows)
-  for _, r in ipairs(rows) do
-    h.assert_truthy(not r.selectable, 'landed commit rows are read-only')
-    h.assert_eq('commit_show', r.type)
-  end
-  h.assert_eq('-old', rows[8].text)
-  h.assert_eq('DiffDelete', rows[8].spans[1][3])
-  h.assert_eq('DiffAdd', rows[9].spans[1][3])
 end)
 
 h.test('details: hunk headers are selectable and carry hunk cli ids', function()
@@ -2262,32 +2222,169 @@ h.test('details: _avail_width ignores a floating status window', function()
   h.assert_eq(vim.o.columns, details._avail_width(), 'a 20-column float decided the pane placement')
 end)
 
--- `C` in a `git show` render used to say "put the cursor on a diff line",
--- which reads as a cursor problem. Nothing in that view is commentable: its
--- rows carry no path/side/line and its entity has no scope.
-h.test('details: C in a git show render says why, not "move the cursor"', function()
-  reset()
-  local warned
-  local orig_notify = vim.notify
-  h.after(function()
-    vim.notify = orig_notify
-  end)
-  vim.notify = function(msg)
-    warned = msg
+-- Landed commits used to take a second render path: raw `git show` text with
+-- no path/side/line, so nothing in that view could be commented on. The patch
+-- is now parsed into the shape `but diff --json` returns, and `build` renders
+-- it like every other diff.
+h.test('details: _parse_patch splits a multi-hunk patch into one change per hunk', function()
+  local raw = table.concat({
+    'diff --git a/src/auth.lua b/src/auth.lua',
+    'index 1111111..2222222 100644',
+    '--- a/src/auth.lua',
+    '+++ b/src/auth.lua',
+    '@@ -1,2 +1,3 @@',
+    ' local M = {}',
+    "+local jwt = require('jwt')",
+    ' return M',
+    '@@ -20,3 +21,3 @@ function M.login()',
+    '   return false',
+    '-  -- old note',
+    '+  -- new note',
+    'diff --git a/README.md b/README.md',
+    'index 3333333..4444444 100644',
+    '--- a/README.md',
+    '+++ b/README.md',
+    '@@ -7 +7 @@',
+    '-old',
+    '+new',
+    '',
+  }, '\n')
+
+  local data = details._parse_patch(raw)
+  h.assert_eq(3, #data.changes, 'expected one change entry per hunk')
+  h.assert_eq('src/auth.lua', data.changes[1].path)
+  h.assert_eq('modified', data.changes[1].status)
+  h.assert_eq(1, data.changes[1].diff.hunks[1].oldStart)
+  h.assert_eq(1, data.changes[1].diff.hunks[1].newStart)
+  h.assert_eq(20, data.changes[2].diff.hunks[1].oldStart)
+  h.assert_eq(21, data.changes[2].diff.hunks[1].newStart)
+  h.assert_eq('README.md', data.changes[3].path)
+  -- A single-line hunk header omits the count; it means one line.
+  h.assert_eq(7, data.changes[3].diff.hunks[1].newStart)
+
+  -- The hunk body carries the header line first, the way `but diff` returns
+  -- it — `build` pops that line for the hunk row.
+  local body = data.changes[1].diff.hunks[1].diff
+  h.assert_truthy(body:match('^@@ %-1,2 %+1,3 @@'), body)
+  h.assert_truthy(body:match('\n%+local jwt'), body)
+  -- The second hunk's `-  -- old note` is a removed line, not a file marker.
+  h.assert_truthy(data.changes[2].diff.hunks[1].diff:match('\n%-  %-%- old note'), 'a removed comment line was eaten')
+end)
+
+h.test('details: _parse_patch reads added, deleted, renamed and binary files', function()
+  local raw = table.concat({
+    'diff --git a/new.lua b/new.lua',
+    'new file mode 100644',
+    '--- /dev/null',
+    '+++ b/new.lua',
+    '@@ -0,0 +1 @@',
+    '+fresh',
+    'diff --git a/gone.lua b/gone.lua',
+    'deleted file mode 100644',
+    '--- a/gone.lua',
+    '+++ /dev/null',
+    '@@ -1 +0,0 @@',
+    '-bye',
+    'diff --git a/old/name.lua b/new/name.lua',
+    'similarity index 100%',
+    'rename from old/name.lua',
+    'rename to new/name.lua',
+    'diff --git a/logo.png b/logo.png',
+    'index 5555555..6666666 100644',
+    'Binary files a/logo.png and b/logo.png differ',
+    '',
+  }, '\n')
+
+  local by_path = {}
+  for _, c in ipairs(details._parse_patch(raw).changes) do
+    by_path[c.path] = c
   end
 
+  h.assert_eq('added', by_path['new.lua'].status)
+  h.assert_eq('patch', by_path['new.lua'].diff.type)
+  h.assert_eq('deleted', by_path['gone.lua'].status, 'a deleted file kept the /dev/null path')
+  h.assert_eq('renamed', by_path['new/name.lua'].status)
+  -- No hunks: `build` renders these as "(no text diff: <type>)" rather than
+  -- dropping the file off the list entirely.
+  h.assert_eq('rename', by_path['new/name.lua'].diff.type)
+  h.assert_eq('binary', by_path['logo.png'].diff.type)
+end)
+
+h.test('details: _parse_meta reads the commit header without parsing prose', function()
+  local meta = details._parse_meta(table.concat({
+    'abc123def',
+    'Ada Lovelace',
+    'ada@example.com',
+    '2026-09-03T11:20:00+10:00',
+    'fix(details): comment anywhere',
+    '',
+    'A body paragraph.',
+    '',
+  }, '\n'))
+  h.assert_eq('abc123def', meta.sha)
+  h.assert_eq('Ada Lovelace', meta.author)
+  h.assert_eq('ada@example.com', meta.email)
+  h.assert_eq('2026-09-03T11:20:00+10:00', meta.date)
+  h.assert_eq('fix(details): comment anywhere', meta.subject)
+  h.assert_truthy(meta.message:match('A body paragraph%.'), meta.message)
+end)
+
+-- End to end: a landed commit's rows are real diff rows, so `C` anchors to
+-- them and the comment survives a rebuild.
+h.test('details: a landed commit takes comments like any other diff', function()
+  local review = require('gitbutler.review')
+  h.after(review.clear)
+  reset()
   local st = details.win_state
-  st.entity = { sha = 'abc123' }
-  st.rows = details._commit_rows('commit abc123\n\n    subject\n\n+added line\n')
+  st.entity = { sha = 'abc123', scope = 'commit', ref = 'abc123', subject = 'a subject' }
+  st.data = details._parse_patch(table.concat({
+    'diff --git a/src/auth.lua b/src/auth.lua',
+    '--- a/src/auth.lua',
+    '+++ b/src/auth.lua',
+    '@@ -1,2 +1,3 @@',
+    ' local M = {}',
+    "+local jwt = require('jwt')",
+    '',
+  }, '\n'))
+  details._rebuild()
+
+  local target
+  for i, r in ipairs(st.rows) do
+    if r.type == 'detail_line' and r.data and r.data.line == 2 and r.data.side == 'new' then
+      target = i
+    end
+  end
+  h.assert_truthy(target, 'the landed commit rendered no commentable diff lines')
+
   local orig_row = details._cursor_row
   h.after(function()
     details._cursor_row = orig_row
   end)
   details._cursor_row = function()
-    return #st.rows
+    return target
+  end
+
+  local orig_input = require('gitbutler.ui.float').input
+  h.after(function()
+    require('gitbutler.ui.float').input = orig_input
+  end)
+  require('gitbutler.ui.float').input = function(opts)
+    opts.on_submit('needs a test')
   end
 
   details._comment_line()
-  h.assert_truthy(warned and warned:match('git show'), 'the warning did not name the render mode: ' .. tostring(warned))
-  h.assert_falsy(warned:match('put the cursor'), 'still blaming the cursor position')
+
+  local stored = review.get({ scope = 'commit', ref = 'abc123', path = 'src/auth.lua', side = 'new', line = 2 })
+  h.assert_truthy(stored, 'the comment was not anchored to the landed commit')
+  h.assert_eq('needs a test', stored.text)
+
+  -- And it renders back on the row it belongs to.
+  details._rebuild()
+  local commented = false
+  for _, r in ipairs(st.rows) do
+    if r.type == 'detail_comment' then
+      commented = true
+    end
+  end
+  h.assert_truthy(commented, 'the stored comment did not render after a rebuild')
 end)

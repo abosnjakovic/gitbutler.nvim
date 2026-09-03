@@ -397,56 +397,101 @@ local function info_rows(text, hl)
   return { { text = text, spans = { { 0, #text, hl } }, type = 'detail_info', graph = true, selectable = false } }
 end
 
----Classify a `git show` output line into a highlight group, or nil for plain
----message / context text. Order matters: `--- `/`+++ ` file markers must be
----tested before the bare `-`/`+` diff lines. Pure.
----@param l string
----@return string?
-function M._show_line_hl(l)
-  if
-    l:match('^commit ')
-    or l:match('^Author:')
-    or l:match('^Date:')
-    or l:match('^Merge:')
-    or l:match('^AuthorDate:')
-  then
-    return HL.dim
-  elseif
-    l:match('^diff %-%-git')
-    or l:match('^index ')
-    or l:match('^%-%-%- ')
-    or l:match('^%+%+%+ ')
-    or l:match('^new file')
-    or l:match('^deleted file')
-    or l:match('^similarity ')
-    or l:match('^rename ')
-  then
-    return HL.file
-  elseif l:match('^@@') then
-    return HL.hunk
-  elseif l:match('^%+') then
-    return HL.add
-  elseif l:match('^%-') then
-    return HL.del
+---A landed commit's patch, in the shape `but diff --json` returns, so `build`
+---renders it like every other diff — boxed file headers, hunk navigation,
+---marks and line comments included. One change entry per hunk: `build` groups
+---by path and relies on that.
+---
+---File-header lines are only read outside a hunk. Inside one, `--- old note`
+---is a removed line whose content starts with `--`, not a file marker, and
+---testing markers first would corrupt the body. Pure.
+---@param raw string `git show --format= --patch` output
+---@return { changes: table[] }
+function M._parse_patch(raw)
+  local changes = {}
+  local file, hunk
+
+  local function close_hunk()
+    if file and hunk then
+      table.insert(changes, {
+        path = file.path,
+        status = file.status,
+        diff = { type = 'patch', hunks = { hunk } },
+      })
+      file.hunks = file.hunks + 1
+      hunk = nil
+    end
   end
-  return nil
+
+  local function close_file()
+    close_hunk()
+    -- A file with no hunks is still a change: a pure rename, a mode change, a
+    -- binary blob. `build` renders it as "(no text diff: <type>)" rather than
+    -- dropping the path off the list.
+    if file and file.hunks == 0 then
+      table.insert(changes, { path = file.path, status = file.status, diff = { type = file.notext or 'no content' } })
+    end
+    file = nil
+  end
+
+  for _, line in ipairs(vim.split(tostring(raw or ''), '\n', { plain = true })) do
+    if line:match('^diff %-%-git ') then
+      close_file()
+      -- Paths with spaces arrive quoted, which this pattern misses; the
+      -- `--- a/` and `+++ b/` lines below correct the path when they do.
+      local a, b = line:match('^diff %-%-git a/(.+) b/(.+)$')
+      file = { path = b or a or '(unknown)', status = 'modified', hunks = 0 }
+    elseif file and line:match('^@@') then
+      close_hunk()
+      local old_start, old_lines, new_start, new_lines = line:match('^@@ %-(%d+),?(%d*) %+(%d+),?(%d*) @@')
+      hunk = {
+        oldStart = tonumber(old_start) or 0,
+        -- An omitted count in `@@ -7 +7 @@` means exactly one line.
+        oldLines = tonumber(old_lines) or 1,
+        newStart = tonumber(new_start) or 0,
+        newLines = tonumber(new_lines) or 1,
+        diff = line,
+      }
+    elseif hunk then
+      hunk.diff = hunk.diff .. '\n' .. line
+    elseif file then
+      if line:match('^new file mode') then
+        file.status = 'added'
+      elseif line:match('^deleted file mode') then
+        file.status = 'deleted'
+      elseif line:match('^rename to ') then
+        file.status, file.notext = 'renamed', 'rename'
+        file.path = line:match('^rename to (.+)$') or file.path
+      elseif line:match('^Binary files ') or line:match('^GIT binary patch') then
+        file.notext = 'binary'
+      elseif line:match('^%-%-%- a/') and file.status == 'deleted' then
+        file.path = line:match('^%-%-%- a/(.+)$') or file.path
+      elseif line:match('^%+%+%+ b/') then
+        file.path = line:match('^%+%+%+ b/(.+)$') or file.path
+      end
+    end
+  end
+  close_file()
+  return { changes = changes }
 end
 
----Build read-only detail rows from raw `git show` output (full message + patch).
----Used for landed-history commits, which `but diff` cannot address. Pure.
+---The commit header, read from `git show -s --format=%H%n%an%n%ae%n%aI%n%B`
+---rather than parsed out of `git show`'s prose. Everything from the fifth line
+---on is the message, whose first line is the subject a comment anchors to.
+---Pure.
 ---@param raw string
----@return DetailsRow[]
-function M._commit_rows(raw)
-  local rows = {}
-  for _, l in ipairs(vim.split(raw, '\n', { plain = true })) do
-    local hl = M._show_line_hl(l)
-    local r = { text = l, spans = {}, type = 'commit_show', graph = true, selectable = false }
-    if hl then
-      table.insert(r.spans, { 0, #l, hl })
-    end
-    table.insert(rows, r)
-  end
-  return rows
+---@return { sha: string, author: string, email: string, date: string, message: string, subject: string }
+function M._parse_meta(raw)
+  local lines = vim.split(tostring(raw or ''), '\n', { plain = true })
+  local message = table.concat(vim.list_slice(lines, 5), '\n'):gsub('%s+$', '')
+  return {
+    sha = lines[1] or '',
+    author = lines[2] or '',
+    email = lines[3] or '',
+    date = lines[4] or '',
+    message = message,
+    subject = lines[5] or '',
+  }
 end
 
 ---Narrowest pane worth putting beside the status window.
@@ -770,19 +815,7 @@ function M._comment_line()
   local at = M._cursor_row()
   local line = at and st.rows and st.rows[at]
   local entity = st.entity or {}
-  -- Two different refusals, and saying "put the cursor on a diff line" for
-  -- both is a lie half the time: a landed commit (and the log view's `<Tab>`)
-  -- renders `git show` output, whose rows carry no path/side/line and whose
-  -- entity has no scope, so every row in that view is uncommentable no matter
-  -- where the cursor sits.
-  if not entity.scope then
-    vim.notify(
-      'gitbutler: comments need a `but diff` view — this is a `git show` render, which has no anchors',
-      vim.log.levels.WARN
-    )
-    return
-  end
-  if not line or line.type ~= 'detail_line' or not line.data then
+  if not line or line.type ~= 'detail_line' or not line.data or not entity.scope then
     vim.notify('gitbutler: put the cursor on a diff line', vim.log.levels.WARN)
     return
   end
@@ -1299,7 +1332,9 @@ function M.show_commit(sha)
   if st.entity and st.entity.sha == sha then
     return
   end
-  st.entity = { sha = sha }
+  -- `scope`/`ref` are what make the rows commentable: `_rebuild` looks
+  -- comments up by them, and `_comment_line` refuses a scopeless entity.
+  st.entity = { sha = sha, scope = 'commit', ref = sha }
   st.hunks = {}
   st.marked = {}
   st.data = nil
@@ -1308,16 +1343,28 @@ function M.show_commit(sha)
   local gen = st.gen
   M._render(info_rows('  loading commit…', HL.dim))
 
-  vim.system({ 'git', 'show', '--no-color', sha }, { text = true }, function(res)
-    vim.schedule(function()
-      if gen ~= M.win_state.gen then
-        return
-      end
-      if res.code ~= 0 then
-        M._render(info_rows('  git show failed', HL.dim))
-        return
-      end
-      M._render(M._commit_rows(res.stdout or ''))
+  -- Two calls rather than one: `-s --format` hands over the metadata verbatim
+  -- instead of leaving `Author:` prose to be parsed back out, and
+  -- `--format= --patch` hands over the patch with no header in front of it.
+  vim.system({ 'git', 'show', '-s', '--format=%H%n%an%n%ae%n%aI%n%B', sha }, { text = true }, function(meta_res)
+    vim.system({ 'git', 'show', '--no-color', '--format=', '--patch', sha }, { text = true }, function(res)
+      vim.schedule(function()
+        if gen ~= M.win_state.gen then
+          return
+        end
+        if meta_res.code ~= 0 or res.code ~= 0 then
+          M._render(info_rows('  git show failed', HL.dim))
+          return
+        end
+        local meta = M._parse_meta(meta_res.stdout or '')
+        local entity = M.win_state.entity
+        entity.meta, entity.subject = meta, meta.subject
+        -- A merge commit's `git show` prints no patch, so this renders the
+        -- header and "(no changes)" — the same thing it always showed there.
+        M.win_state.data = M._parse_patch(res.stdout or '')
+        M._rebuild()
+        M._select_hunk(1)
+      end)
     end)
   end)
 end
