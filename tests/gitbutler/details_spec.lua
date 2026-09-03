@@ -2261,3 +2261,33 @@ h.test('details: _avail_width ignores a floating status window', function()
 
   h.assert_eq(vim.o.columns, details._avail_width(), 'a 20-column float decided the pane placement')
 end)
+
+-- `C` in a `git show` render used to say "put the cursor on a diff line",
+-- which reads as a cursor problem. Nothing in that view is commentable: its
+-- rows carry no path/side/line and its entity has no scope.
+h.test('details: C in a git show render says why, not "move the cursor"', function()
+  reset()
+  local warned
+  local orig_notify = vim.notify
+  h.after(function()
+    vim.notify = orig_notify
+  end)
+  vim.notify = function(msg)
+    warned = msg
+  end
+
+  local st = details.win_state
+  st.entity = { sha = 'abc123' }
+  st.rows = details._commit_rows('commit abc123\n\n    subject\n\n+added line\n')
+  local orig_row = details._cursor_row
+  h.after(function()
+    details._cursor_row = orig_row
+  end)
+  details._cursor_row = function()
+    return #st.rows
+  end
+
+  details._comment_line()
+  h.assert_truthy(warned and warned:match('git show'), 'the warning did not name the render mode: ' .. tostring(warned))
+  h.assert_falsy(warned:match('put the cursor'), 'still blaming the cursor position')
+end)

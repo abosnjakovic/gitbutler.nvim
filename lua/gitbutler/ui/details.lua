@@ -770,7 +770,19 @@ function M._comment_line()
   local at = M._cursor_row()
   local line = at and st.rows and st.rows[at]
   local entity = st.entity or {}
-  if not line or line.type ~= 'detail_line' or not line.data or not entity.scope then
+  -- Two different refusals, and saying "put the cursor on a diff line" for
+  -- both is a lie half the time: a landed commit (and the log view's `<Tab>`)
+  -- renders `git show` output, whose rows carry no path/side/line and whose
+  -- entity has no scope, so every row in that view is uncommentable no matter
+  -- where the cursor sits.
+  if not entity.scope then
+    vim.notify(
+      'gitbutler: comments need a `but diff` view — this is a `git show` render, which has no anchors',
+      vim.log.levels.WARN
+    )
+    return
+  end
+  if not line or line.type ~= 'detail_line' or not line.data then
     vim.notify('gitbutler: put the cursor on a diff line', vim.log.levels.WARN)
     return
   end
