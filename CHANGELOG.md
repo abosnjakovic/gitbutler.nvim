@@ -1,3 +1,60 @@
+## [3.1.0] - 2026-09-04
+
+### Features
+
+- feat(details): comment on landed commits, through the one diff renderer
+- feat(details): re-place the pane when the layout changes under it
+- feat(details): place the pane below the status window when it is narrow
+- feat(float): <CR> saves in normal mode, and Esc no longer discards
+- feat(help): generate the float per context from the registry
+- feat(hints): fall back to the view's own registry keys
+- feat(hotbar): take items from the registry
+- feat(keys): one registry for what every key does
+- feat(details): C comments a diff line and Y yanks the review
+- feat(details): thread the diff's scope and ref onto the entity
+- feat(float): let a caller opt into empty submits
+- feat(details): render line comments as rows with a stale check
+- feat(details): keep the side and line number the gutter computes
+- feat(review): format the collected comments for the clipboard
+- feat(review): comment store keyed on scope, ref, path, side and line
+- feat(config): rename watch_interval to watch_debounce and document it
+- feat(watch): wire filesystem and focus triggers to the view lifecycle
+- feat(watch): debounced refresh gate with mode and in-flight suppression
+- feat(views): add done and quiet options to the three refresh paths
+- feat(buffer): keep the cursor on its row identity across renders
+
+### Bug Fixes
+
+- fix(details): say why a git show render takes no comments
+- fix(details): measure the split grid, not a floating status window
+- fix(details): keep a failed re-place from throwing out of a resize handler
+- fix(spinner): stack concurrent operations in one float
+- fix(hotbar): one hint item per action, and open file ahead of the scroll keys
+- fix(keys): order the pane's curated keys so its core verbs survive truncation
+- fix(keys): surface the pane's verbs, guard the live bindings, drop dead lists
+- fix(tests): assert the yank writes both registers, not that the OS kept them
+- fix(details): tell nameless lanes apart when anchoring comments
+- fix(tests): stop the hunk-copy test clobbering the system clipboard
+- fix(review): share the row key, guard a NIL message, tighten the docs
+- fix(ui): make <Tab> and details navigation consistent across the graph
+- fix(cli): route spawn failures and hangs into the err convention
+
+### Other
+
+- refactor(log): show a commit in the details pane instead of a raw diff split
+- docs(details): document the pane's placement rule and min_width
+- refactor(details): route <Tab> on a file row to the details pane
+- docs(demo): record the review workflow, and stage GIF output while recording
+- refactor(keys): bind the details pane from the registry, drop both duplicates
+- refactor(details): the pane becomes a Buffer with its own view
+- refactor(buffer): split window creation from attachment
+- docs: document the review keys in the details pane
+- chore: wire strap harness (ledger + debug recipe lesson)
+- docs: retarget the demo tapes at the 0.22 amend keys
+- chore: ignore .serena/
+- docs: backfill the 3.0.1 changelog section
+- ci: list non-user-facing commits under Other in release notes
+
 ## [3.0.1] - 2026-08-08
 
 ### Other
