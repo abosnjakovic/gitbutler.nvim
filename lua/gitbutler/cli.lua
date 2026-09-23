@@ -74,8 +74,9 @@ function M.uncommitted_id()
   return M.uncommitted
 end
 
----Append the single targeting flag for `target`. but accepts exactly one per
----invocation, so the first field present wins.
+---Append the single targeting flag for `target`; the first field present wins.
+---0.22 accepts one flag per invocation. Newer but also lets `--branch` name the
+---branch that `--above`/`--below` creates, which this never sends.
 ---@param args string[]
 ---@param target { branch?: string, above?: string, below?: string, unstack?: boolean }
 local function append_target(args, target)
@@ -421,6 +422,9 @@ end
 ---Fast-forwards the target to the branch tip when possible (else a merge
 ---commit), pushes to the remote, and reconciles remaining applied branches —
 ---the whole "just push to the target" workflow in one call. Silent on success.
+---From 0.22.1 it also deletes the branch's remote copy, only when the target
+---contains the branch tip; a failed delete only warns. Newer but renames this
+---`merge` and keeps `land` as an alias; 0.22 has no `merge`, so stay on `land`.
 ---@param branch string Branch name or CLI ID to land
 ---@param callback fun(err?: string, result?: any)
 function M.land(branch, callback)

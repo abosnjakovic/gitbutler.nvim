@@ -363,7 +363,7 @@ The CI view shells out to `gh run list` / `gh run view` / `gh run rerun` via a p
 
 ### Commit straight to main (L)
 
-Solo flow: `L` in `:Butler` commits selected (or unassigned) files directly onto the target branch, no PR. The action commits to an ephemeral branch, then runs `but land`, which fast-forwards (or merges) the target, pushes to the remote, and reconciles the workspace in one step.
+Solo flow: `L` in `:Butler` commits selected (or unassigned) files directly onto the target branch, no PR. The action commits to an ephemeral branch, then runs `but land`, which fast-forwards (or merges) the target, pushes to the remote, and reconciles the workspace in one step. From but 0.22.1, landing also deletes the branch's remote copy, but only when the target contains its tip, so remote commits that did not land are never lost.
 
 Land failures — for example a branch protected against direct pushes — surface to `:messages` with the CLI's message.
 
