@@ -315,10 +315,16 @@ function M.diff_json(cli_id, callback)
 end
 
 ---Convenience: but discard <changes>... — one call, so one undoable oplog
----entry for the whole selection.
+---entry for the whole selection. An empty list calls back with an error and
+---runs nothing.
 ---@param ids string[] Branch/commit/file/hunk CLI IDs, all of the same kind
 ---@param callback fun(err?: string, result?: any)
 function M.discard(ids, callback)
+  -- A bare `but discard` discards every uncommitted change (0.22.1+).
+  if #ids == 0 then
+    callback('nothing to discard: no ids given')
+    return
+  end
   local args = { 'discard' }
   vim.list_extend(args, ids)
   table.insert(args, '--json')

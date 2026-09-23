@@ -181,6 +181,24 @@ test('discard: every id in one call', function()
   )
 end)
 
+-- Since but 0.22.1 a bare `but discard` discards every uncommitted change, so
+-- an id list that came up empty must never reach the process.
+test('discard: an empty id list errors instead of running but', function()
+  local ran, got_err = false, nil
+  local orig = cli.run
+  cli.run = function()
+    ran = true
+  end
+  h.after(function()
+    cli.run = orig
+  end)
+  cli.discard({}, function(err)
+    got_err = err
+  end)
+  assert_falsy(ran, 'bare `but discard` discards everything')
+  assert_truthy(got_err, 'the caller must hear why nothing was discarded')
+end)
+
 test('diff_json: includes the id when given', function()
   assert_eq(
     'diff xw:1 --json',
