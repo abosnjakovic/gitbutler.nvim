@@ -3,6 +3,11 @@ local buffer_mod = require('gitbutler.ui.buffer')
 local cli = require('gitbutler.cli')
 local status = require('gitbutler.ui.status')
 
+-- Answer the uncommitted-id probe up front so no test spawns `but amend --help`.
+-- `zz` rather than graph's `@` fallback, so a status render showing `zz` proves
+-- the probed id reaches the graph.
+cli.uncommitted = 'zz'
+
 local M = {}
 
 M.pass = 0

@@ -507,3 +507,50 @@ test('run: refuses a pre-0.22 CLI without spawning the command', function()
   assert_truthy(done, 'callback fired')
   assert_truthy(err and err:find(cli.MIN_VERSION, 1, true), 'callback got the unsupported error')
 end)
+
+-- but renamed the uncommitted area from `zz` to `@` after 0.22.3 and rejects
+-- `zz` from then on, so the id is asked of the CLI rather than hardcoded. Every
+-- 0.22 release names it `(zz)` in `amend --help`.
+
+---Run cli.uncommitted_id() twice against a stubbed vim.system answering with
+---`help`, or throwing when `help` is nil (a missing binary).
+---@param help? string
+---@return string first, string second, string[][] cmds everything spawned
+local function probe_uncommitted(help)
+  local cmds = {}
+  local orig, cached = vim.system, cli.uncommitted
+  vim.system = function(cmd)
+    table.insert(cmds, cmd)
+    if not help then
+      error('ENOENT: no such file or directory')
+    end
+    return {
+      wait = function()
+        return { code = 0, stdout = help }
+      end,
+    }
+  end
+  cli.uncommitted = nil
+  local first, second = cli.uncommitted_id(), cli.uncommitted_id()
+  vim.system, cli.uncommitted = orig, cached
+  return first, second, cmds
+end
+
+test('uncommitted_id: a 0.22 CLI names the uncommitted area zz', function()
+  assert_eq('zz', (probe_uncommitted('          If omitted, all changes in the uncommitted area (zz) are amended.')))
+end)
+
+test('uncommitted_id: a newer CLI names it @', function()
+  assert_eq('@', (probe_uncommitted('          If omitted, all changes in the uncommitted area (@) are amended.')))
+end)
+
+test('uncommitted_id: an unrunnable CLI falls back to @ instead of throwing', function()
+  assert_eq('@', (probe_uncommitted(nil)))
+end)
+
+test('uncommitted_id: probes amend --help once, then answers from the cache', function()
+  local first, second, cmds = probe_uncommitted('the uncommitted area (zz)')
+  assert_eq(first, second)
+  assert_eq(1, #cmds, 'one spawn for any number of calls')
+  assert_eq('amend --help', table.concat(cmds[1], ' ', 2))
+end)

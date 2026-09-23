@@ -55,6 +55,25 @@ local function supported()
   return M.supported
 end
 
+---Cached uncommitted-area id; set nil to force a re-probe.
+---@type string?
+M.uncommitted = nil
+
+---The CLI id naming the uncommitted area. but renamed it from `zz` to `@` after
+---0.22.3 and rejects `zz` from then on. Every 0.22 release names it `(zz)` in
+---`amend --help`; anything else, an unrunnable CLI included, gets `@`.
+---@return string
+function M.uncommitted_id()
+  if M.uncommitted == nil then
+    local ok, res = pcall(function()
+      return vim.system({ config.values.cmd, 'amend', '--help' }, { text = true }):wait(PROBE_TIMEOUT_MS)
+    end)
+    local help = ok and ((res.stdout or '') .. (res.stderr or '')) or ''
+    M.uncommitted = help:find('(zz)', 1, true) and 'zz' or '@'
+  end
+  return M.uncommitted
+end
+
 ---Append the single targeting flag for `target`. but accepts exactly one per
 ---invocation, so the first field present wins.
 ---@param args string[]
@@ -283,7 +302,7 @@ end
 
 ---Convenience: but amend -t <target> [<sources>...]
 ---@param target string Commit or branch to amend into (branch = its tip)
----@param sources? string[] Uncommitted file/hunk CLI IDs; omit to amend all of zz
+---@param sources? string[] Uncommitted file/hunk CLI IDs; omit to amend the whole uncommitted area
 ---@param callback fun(err?: string, result?: any)
 function M.amend(target, sources, callback)
   local args = { 'amend', '-t', target }

@@ -2,8 +2,10 @@ local fixtures = require('tests.gitbutler.fixtures')
 local graph = require('gitbutler.ui.graph')
 local h = require('tests.gitbutler.helpers')
 
-h.test('graph: uncommitted header first, with zz cli id', function()
-  local rows = graph.build(fixtures.status_full, {})
+-- The header shows and acts on whichever id the CLI speaks (`zz` on 0.22, `@`
+-- after), so a copied or typed id works in the terminal too.
+h.test('graph: uncommitted header first, with the cli id it is given', function()
+  local rows = graph.build(fixtures.status_full, { uncommitted_id = 'zz' })
   h.assert_eq('╭┄▾ zz [uncommitted]', rows[1].text)
   h.assert_eq('uncommitted_header', rows[1].type)
   h.assert_eq('zz', rows[1].data.cli_id)
@@ -21,7 +23,7 @@ end)
 
 h.test('graph: empty uncommitted area says (no changes)', function()
   local rows = graph.build(fixtures.status_empty, {})
-  h.assert_eq('╭┄▾ zz [uncommitted] (no changes)', rows[1].text)
+  h.assert_eq('╭┄▾ @ [uncommitted] (no changes)', rows[1].text)
 end)
 
 h.test('graph: branch header row with notch and name', function()
@@ -270,6 +272,7 @@ end)
 h.test('graph: folded headers render ▸, expanded render ▾', function()
   local rows = graph.build(fixtures.status_full, {
     fold_state = { unassigned = true, ['branch:feature-auth'] = true },
+    uncommitted_id = 'zz',
   })
   h.assert_eq('╭┄▸ zz [uncommitted]', rows[1].text)
   for _, r in ipairs(rows) do

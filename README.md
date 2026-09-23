@@ -201,7 +201,7 @@ On a landed-history row — the common base itself, or anything below it: `<Tab>
 
 There are two verb modes, and both work the same way: enter the mode on a source row (or a marked selection), move to a valid target — invalid rows are dimmed and skipped — and confirm with `<CR>`. Valid targets are commit and branch rows; a branch means its newest commit (its tip). A pill next to the target names the verb before you confirm.
 
-Amend (`a`) mirrors `but amend`: the source is uncommitted files or hunks, or the uncommitted area (`zz`), and the pill reads `amend into`. `R` enters the same mode with every unassigned file as the source. `a` inside the details pane starts an amend with the marked (or selected) hunks as the source — amend treats a hunk exactly like an uncommitted file.
+Amend (`a`) mirrors `but amend`: the source is uncommitted files or hunks, or the uncommitted area (`zz`, or `@` on a `but` that has renamed it), and the pill reads `amend into`. `R` enters the same mode with every unassigned file as the source. `a` inside the details pane starts an amend with the marked (or selected) hunks as the source — amend treats a hunk exactly like an uncommitted file.
 
 Squash (`S`) mirrors `but squash`: the source is commits, branches or committed files, and the pill reads `squash into`. Squashing a branch folds its commits into the target and removes the branch. The result always keeps the target's commit message (`but squash -u`); without that, `but` would open an editor to compose a new message, which cannot work from inside the plugin's async job. Reword afterwards with `<CR>` or `M` if you want a different message.
 
@@ -221,7 +221,7 @@ Jump (`/`) prompts for a CLI id — exact match or unique prefix — and moves t
 
 The pane sits beside the status window, or below it when the status window's column group is too narrow to give the pane at least `min_width` columns (60 by default) — see Configuration. It moves live as the layout changes: resizing the terminal, or splitting another window into that column group, can flip it from one side to the other. Since `-` shrinks the pane's own share of the group, shrinking it far enough can also move it underneath.
 
-The pane follows the status cursor: whatever the cursor sits on — an uncommitted file, a commit, a file inside a commit, a branch, or the uncommitted area (`zz`) — is the diff that gets loaded. The lookup is debounced, so holding `j` doesn't spawn a CLI call per row.
+The pane follows the status cursor: whatever the cursor sits on — an uncommitted file, a commit, a file inside a commit, a branch, or the uncommitted area (`zz` or `@`) — is the diff that gets loaded. The lookup is debounced, so holding `j` doesn't spawn a CLI call per row.
 
 Inside the pane:
 

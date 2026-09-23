@@ -387,7 +387,7 @@ function M.shell_command(_buf)
 end
 
 ---Clipboard text for a status row: commit sha / file path / branch name /
----'zz' for the uncommitted header; nil for rows with nothing copyable.
+---the uncommitted header's id; nil for rows with nothing copyable.
 function M._copy_text(line)
   if not line or not line.data then
     return nil
@@ -399,7 +399,7 @@ function M._copy_text(line)
   elseif line.type == 'branch' then
     return line.data.name
   elseif line.type == 'uncommitted_header' then
-    return 'zz'
+    return line.data.cli_id
   end
   return nil
 end

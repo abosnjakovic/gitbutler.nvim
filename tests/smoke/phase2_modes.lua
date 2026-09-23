@@ -12,8 +12,9 @@ status.open()
 H.wait_status(status)
 local buf = status.instance
 
--- Baseline (header carries a fold indicator: `╭┄▾ zz [uncommitted]`).
-if not buf.lines[1].text:match('zz %[uncommitted%]') then
+-- Baseline (header carries a fold indicator: `╭┄▾ zz [uncommitted]`, or `@`
+-- on a CLI that has renamed it).
+if not buf.lines[1].text:find(cli.uncommitted_id() .. ' [uncommitted]', 1, true) then
   H.fail('no uncommitted header: ' .. buf.lines[1].text)
 end
 H.ok('baseline: graph + normal mode (' .. modes.current() .. ')')
@@ -73,7 +74,7 @@ if file_row and amend_row then
 
   -- Put the workspace back. Amending rewrites a real commit, so unlike the old
   -- assign/unassign round-trip this leaves a trace; `but undo` reverses exactly
-  -- the operation we just made and returns the file to `zz`.
+  -- the operation we just made and returns the file to the uncommitted area.
   local undo_err, undone
   cli.undo(function(err)
     undo_err, undone = err, true
@@ -90,9 +91,15 @@ if file_row and amend_row then
   end
   if not back then
     local why = undo_err and (': ' .. undo_err) or ''
-    H.fail('but undo did not put ' .. scratch .. ' back in zz' .. why .. ' — the smoke amend is still committed')
+    H.fail(
+      'but undo did not put '
+        .. scratch
+        .. ' back in the uncommitted area'
+        .. why
+        .. ' — the smoke amend is still committed'
+    )
   end
-  H.ok('undo: the smoke amend is reverted, file back in zz')
+  H.ok('undo: the smoke amend is reverted, file back in the uncommitted area')
 else
   H.skip('no scratch file + non-integrated branch with commits for the amend round-trip')
 end

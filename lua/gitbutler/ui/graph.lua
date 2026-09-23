@@ -137,7 +137,7 @@ end
 
 ---Build graph rows from decoded `but status --json -f -v` output.
 ---@param data table
----@param state? { selected?: table<string,boolean>, fold_state?: table<string,boolean>, file_lists?: table<string,boolean>, show_all_files?: boolean, branch_suffix?: fun(stack: table, branch: table): {[1]:string,[2]:string?}[], base_history?: table, base_expanded?: table<string,boolean>, base_detail?: table<string,{ body?: string[], files?: table[] }>, base_more?: boolean, base_count?: integer }
+---@param state? { selected?: table<string,boolean>, fold_state?: table<string,boolean>, file_lists?: table<string,boolean>, show_all_files?: boolean, branch_suffix?: fun(stack: table, branch: table): {[1]:string,[2]:string?}[], base_history?: table, base_expanded?: table<string,boolean>, base_detail?: table<string,{ body?: string[], files?: table[] }>, base_more?: boolean, base_count?: integer, uncommitted_id?: string }
 ---@return GraphRow[]
 function M.build(data, state)
   state = state or {}
@@ -155,11 +155,13 @@ function M.build(data, state)
   if #unassigned == 0 then
     unassigned = list(data.unassignedChanges)
   end
-  local hdr = row('uncommitted_header', { cli_id = 'zz', fold_id = 'unassigned' }, true)
+  -- The CLI's id for the uncommitted area (see `cli.uncommitted_id`).
+  local uncommitted_id = state.uncommitted_id or '@'
+  local hdr = row('uncommitted_header', { cli_id = uncommitted_id, fold_id = 'unassigned' }, true)
   -- Buffer:toggle_fold only walks rows flagged foldable.
   hdr.foldable = true
   add(hdr, '╭┄' .. fold_marker(folds['unassigned']), HL.connector)
-  add(hdr, 'zz', HL.cli_id)
+  add(hdr, uncommitted_id, HL.cli_id)
   add(hdr, ' [uncommitted]', HL.section)
   if #unassigned == 0 then
     add(hdr, ' (no changes)', HL.dim)

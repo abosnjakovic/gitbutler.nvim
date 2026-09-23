@@ -310,9 +310,9 @@ h.test('actions._copy_text: branch row copies its name', function()
   h.assert_eq('feat', actions._copy_text({ type = 'branch', data = { name = 'feat' } }))
 end)
 
-h.test('actions._copy_text: uncommitted header always copies zz', function()
+h.test('actions._copy_text: uncommitted header copies the id the CLI speaks', function()
   local actions = require('gitbutler.actions')
-  h.assert_eq('zz', actions._copy_text({ type = 'uncommitted_header', data = { cli_id = 'zz' } }))
+  h.assert_eq('@', actions._copy_text({ type = 'uncommitted_header', data = { cli_id = '@' } }))
 end)
 
 h.test('actions._copy_text: rows with nothing copyable return nil', function()

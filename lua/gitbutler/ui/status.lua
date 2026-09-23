@@ -255,6 +255,7 @@ function M.rerender()
     base_detail = M._base.detail,
     base_more = M._base.more,
     base_count = #M._base.commits,
+    uncommitted_id = cli.uncommitted_id(),
   }))
 end
 
