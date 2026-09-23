@@ -22,6 +22,15 @@ local function notify_result(action, err, _result)
   end
 end
 
+---A failed push can still be partial: `but push` exits non-zero when any stack
+---fails, and the stacks that did push stay pushed, so refresh either way.
+local function notify_push(action, err, result)
+  notify_result(action, err, result)
+  if err then
+    refresh()
+  end
+end
+
 ---Resolve which file row `o`/open should act on: the cursor row when it is a
 ---file, else the first selected file. Pure.
 ---@param buf GitButlerBuffer
@@ -425,7 +434,7 @@ function M.push(buf)
       return
     end
     cli.push(name, function(err2, result2)
-      notify_result('push', err2, result2)
+      notify_push('push', err2, result2)
     end)
   end)
 end
@@ -670,7 +679,7 @@ function M.push_all(_buf)
       return
     end
     cli.push(nil, function(err2, result2)
-      notify_result('push all', err2, result2)
+      notify_push('push all', err2, result2)
     end)
   end)
 end

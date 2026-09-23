@@ -138,6 +138,72 @@ test('actions.push_all does a pull first', function()
   vim.notify = original_notify
 end)
 
+-- A failed push can be partial: since but 0.22.1 it exits non-zero when any
+-- stack fails, and the stacks that pushed stay pushed. The view must refresh
+-- to show them, or it keeps offering to push what is already on the remote.
+for _, case in ipairs({ { 'push', 'push' }, { 'push_all', 'push all' } }) do
+  local action, label = case[1], case[2]
+  test('actions.' .. action .. ' refreshes and reports the error after a failed push', function()
+    local status = require('gitbutler.ui.status')
+    local refreshed, errors = 0, {}
+    local orig_pull, orig_push, orig_refresh, orig_notify = cli.pull, cli.push, status.refresh, vim.notify
+    h.after(function()
+      cli.pull, cli.push, status.refresh, vim.notify = orig_pull, orig_push, orig_refresh, orig_notify
+    end)
+    cli.pull = function(cb)
+      cb(nil, 'pulled')
+    end
+    cli.push = function(_, cb)
+      cb('failed to push feat-b')
+    end
+    status.refresh = function()
+      refreshed = refreshed + 1
+    end
+    vim.notify = function(msg, level)
+      if level == vim.log.levels.ERROR then
+        table.insert(errors, msg)
+      end
+    end
+
+    local buf = h.mock_buffer()
+    buf.get_cursor_branch = function()
+      return { name = 'feat-b' }
+    end
+    actions[action](buf)
+
+    assert_eq(1, refreshed, 'the stacks that did push must show as pushed')
+    assert_eq(1, #errors, 'exactly one error notification')
+    assert_truthy(errors[1]:find(label .. ': failed to push feat-b', 1, true), 'the CLI error reaches the user')
+  end)
+
+  test('actions.' .. action .. ' refreshes once after a successful push', function()
+    local status = require('gitbutler.ui.status')
+    local refreshed = 0
+    local orig_pull, orig_push, orig_refresh, orig_notify = cli.pull, cli.push, status.refresh, vim.notify
+    h.after(function()
+      cli.pull, cli.push, status.refresh, vim.notify = orig_pull, orig_push, orig_refresh, orig_notify
+    end)
+    cli.pull = function(cb)
+      cb(nil, 'pulled')
+    end
+    cli.push = function(_, cb)
+      cb(nil, 'pushed')
+    end
+    status.refresh = function()
+      refreshed = refreshed + 1
+    end
+    vim.notify = function() end
+
+    local buf = h.mock_buffer()
+    buf.get_cursor_branch = function()
+      return { name = 'feat-b' }
+    end
+    actions[action](buf)
+
+    assert_eq(1, refreshed)
+  end)
+end
+
 -- ── Empty commit insertion (`n`) ───────────────
 
 test('insert_empty_commit anchors above the cursor commit or branch', function()
