@@ -181,6 +181,33 @@ test('discard: every id in one call', function()
   )
 end)
 
+-- `but split` takes committed files positionally and `-m` for the new commit;
+-- an empty message leaves `-m` off, which upstream turns into an empty-message
+-- commit rather than an editor.
+test('split: sources then the message, one call', function()
+  assert_eq(
+    'split c1:k1 c1:k2 -m extract --json',
+    table.concat(
+      capture(function()
+        cli.split({ 'c1:k1', 'c1:k2' }, 'extract', noop)
+      end),
+      ' '
+    )
+  )
+end)
+
+test('split: an empty message sends no -m', function()
+  assert_eq(
+    'split c1:k1 --json',
+    table.concat(
+      capture(function()
+        cli.split({ 'c1:k1' }, '', noop)
+      end),
+      ' '
+    )
+  )
+end)
+
 -- Since but 0.22.1 a bare `but discard` discards every uncommitted change, so
 -- an id list that came up empty must never reach the process.
 test('discard: an empty id list errors instead of running but', function()

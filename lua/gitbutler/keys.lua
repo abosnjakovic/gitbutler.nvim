@@ -84,6 +84,13 @@ M.contexts = {
       help = 'Uncommit the marked (or cursor) commits / committed files',
     },
     {
+      key = 'e',
+      action = 'split',
+      desc = 'split',
+      section = 'Modes',
+      help = 'Split the marked (or cursor) committed files into a new commit above',
+    },
+    {
       key = 'c',
       action = 'commit_mode_start',
       desc = 'commit',

@@ -1237,6 +1237,27 @@ function M.uncommit(buf)
   end)
 end
 
+---Split the marked (or cursor) committed files out of their commit into a new
+---commit directly above it, prompting for its message. No target, so no mode.
+function M.split(buf)
+  local source = capture_source(buf)
+  if not source or source.kind ~= 'committed_file' then
+    vim.notify('gitbutler: place the cursor on a file in a commit to split it out', vim.log.levels.WARN)
+    return
+  end
+  float.input({
+    title = 'Split ' .. source.label .. ' into a new commit',
+    allow_empty = true,
+    on_submit = function(message)
+      clear_marks(buf)
+      notify_start('split')
+      cli.split(source.ids, message, function(err, result)
+        notify_result('split ' .. source.label, err, result)
+      end)
+    end,
+  })
+end
+
 ---Pure scanner: from row `from`, move `count` selectable rows in `dir` (1/-1).
 ---Returns the destination row (stays put when no further selectable row exists).
 ---@param filter? fun(line: GitButlerLine, row: integer): boolean Extra qualifier (e.g. mode target filter)

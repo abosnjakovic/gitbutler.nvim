@@ -738,3 +738,61 @@ test('actions.toggle_fold on a file row toggles the details pane', function()
   assert_eq(buf, seen, 'toggle_fold did not hand the status buffer to the pane')
   assert_eq(before, #vim.api.nvim_list_wins(), 'toggle_fold opened a window of its own')
 end)
+
+-- ── Split (`e`) ───────────────
+
+---Run actions.split on `buf`, submitting `message` to the input float.
+---@return { ids: string[], message: string }[] calls
+---@return string[] warnings
+local function run_split(buf, message)
+  local float = require('gitbutler.ui.float')
+  local calls, warnings = {}, {}
+  local orig_split, orig_input, orig_notify = cli.split, float.input, vim.notify
+  h.after(function()
+    cli.split, float.input, vim.notify = orig_split, orig_input, orig_notify
+  end)
+  cli.split = function(ids, msg, cb)
+    table.insert(calls, { ids = ids, message = msg })
+    cb(nil, 'ok')
+  end
+  float.input = function(opts)
+    opts.on_submit(message)
+  end
+  vim.notify = function(msg, level)
+    if level == vim.log.levels.WARN then
+      table.insert(warnings, msg)
+    end
+  end
+  actions.split(buf)
+  return calls, warnings
+end
+
+-- Split pulls the marked committed files out into a new commit above their
+-- source, in one call so `u` reverts the whole split.
+test('actions.split sends the marked committed files and the message in one call', function()
+  local buf = h.mock_buffer()
+  buf.lines = {
+    { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua', commit_id = 'deadbeefcafe' } },
+    { type = 'committed_file', data = { cli_id = 'c1:k2', path = 'b.lua', commit_id = 'deadbeefcafe' } },
+  }
+  buf.selected = { ['c1:k1'] = true, ['c1:k2'] = true }
+
+  local calls = run_split(buf, 'extract the helpers')
+
+  assert_eq(1, #calls, 'one batched call')
+  assert_eq('c1:k1 c1:k2', table.concat(calls[1].ids, ' '))
+  assert_eq('extract the helpers', calls[1].message)
+end)
+
+test('actions.split warns on a row that is not a committed file', function()
+  local buf = h.mock_buffer()
+  buf.lines = { { type = 'commit', data = { cli_id = 'c1', sha = 'deadbeefcafe' } } }
+  buf.get_cursor_line = function(self)
+    return self.lines[1]
+  end
+
+  local calls, warnings = run_split(buf, 'x')
+
+  assert_eq(0, #calls, 'a commit row must not reach cli.split')
+  assert_eq(1, #warnings)
+end)

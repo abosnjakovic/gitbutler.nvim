@@ -322,6 +322,21 @@ function M.uncommit(sources, callback)
   M.run(args, callback)
 end
 
+---Convenience: but split <sources>... [-m <message>] — move committed files into
+---a new commit directly above their source commit. Newer than but 0.22.3.
+---@param sources string[] Committed-file CLI IDs, all from one commit
+---@param message string Message for the new commit; '' leaves it empty
+---@param callback fun(err?: string, result?: any)
+function M.split(sources, message, callback)
+  local args = { 'split' }
+  vim.list_extend(args, sources)
+  if message ~= '' then
+    vim.list_extend(args, { '-m', message })
+  end
+  table.insert(args, '--json')
+  M.run(args, callback)
+end
+
 ---Convenience: but diff [<cli_id>] --json. Omit the id for the whole worktree.
 ---@param cli_id? string
 ---@param callback fun(err?: string, result?: any)

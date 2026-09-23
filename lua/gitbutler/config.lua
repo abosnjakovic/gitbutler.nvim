@@ -89,6 +89,7 @@ M.defaults = {
       ['R'] = 'amend_all',
       ['S'] = 'squash_start',
       ['w'] = 'uncommit',
+      ['e'] = 'split',
       ['c'] = 'commit_mode_start',
       ['m'] = 'move_start',
       ['s'] = 'stack_start',

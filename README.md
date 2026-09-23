@@ -150,6 +150,8 @@ Operations (official but-tui keys):
 
 ```
 w        Uncommit the cursor/marked commits or committed files
+e        Split the cursor/marked committed files into a new commit above
+         theirs (but 0.22.3 and earlier have no split)
 n        Insert an empty commit after the cursor commit/branch
 b        Create a new branch
 x        Discard file changes (with confirmation); on committed files,
