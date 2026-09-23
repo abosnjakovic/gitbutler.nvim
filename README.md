@@ -142,7 +142,8 @@ R        Amend all: every unassigned file becomes the source
 S        Squash mode: cursor/marked commits, branches or committed files
          become the source
 c        Commit mode: pick where the new commit lands
-m        Move mode: reorder / retarget commits, unstack branches
+m        Move mode: reorder / retarget commits, unstack branches, or move
+         committed files into a new commit (needs but newer than 0.22.3)
 s        Stack mode: apply / unapply / move stacks
 ```
 
@@ -212,7 +213,7 @@ Uncommit (`w`) mirrors `but uncommit`: it sends the cursor (or marked) commits a
 
 Commit mode (`c`) picks where a new commit lands: move to a branch or commit row, `a` toggles inserting above/below the marker, `e` toggles an empty-message commit, `<CR>` confirms and prompts for the message.
 
-Move mode (`m`) reorders commits (`a` toggles above/below), moves them onto another branch, or unstacks a branch at the merge base.
+Move mode (`m`) reorders commits (`a` toggles above/below), moves them onto another branch, or unstacks a branch at the merge base. With committed files as the source, `<CR>` asks for a message and moves them into a new commit above or below the target commit, or onto the tip of the target branch. That needs a `but` newer than 0.22.3.
 
 Stack mode (`s`): `a` applies an unapplied branch (fuzzy picker), `u` unapplies the cursor branch (confirms when it has assigned changes), `m` switches to move mode with the cursor branch as source.
 

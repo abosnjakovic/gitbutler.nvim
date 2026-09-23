@@ -134,6 +134,22 @@ test('move: --unstack takes no value', function()
   assert_eq('move c1 --unstack --json', table.concat(args, ' '))
 end)
 
+-- Moving committed files makes a new commit; `-m` names it. Whole-commit and
+-- branch moves never get one: but rejects `-m` there.
+test('move: a message rides along as -m', function()
+  local args = capture(function()
+    cli.move({ 'c1:k1' }, { above = 'c2' }, noop, 'extract')
+  end)
+  assert_eq('move c1:k1 --above c2 -m extract --json', table.concat(args, ' '))
+end)
+
+test('move: an empty message sends no -m', function()
+  local args = capture(function()
+    cli.move({ 'c1:k1' }, { above = 'c2' }, noop, '')
+  end)
+  assert_eq('move c1:k1 --above c2 --json', table.concat(args, ' '))
+end)
+
 test('move: multiple sources are separate argv items, not comma-joined', function()
   local args = capture(function()
     cli.move({ 'c1', 'c2' }, { branch = 'br' }, noop)

@@ -472,6 +472,78 @@ h.test('modes: move confirm sends every source in one cli.move call and refreshe
   close_buffer(buf)
 end)
 
+-- Committed files moved to a commit or branch become a new commit, so confirm
+-- asks for its message; commit and branch moves keep their own and never ask.
+h.test('modes: move confirm asks committed-file sources for the new commit message', function()
+  local cli = require('gitbutler.cli')
+  local status = require('gitbutler.ui.status')
+  local float = require('gitbutler.ui.float')
+  local captured
+  local orig_move, orig_refresh, orig_input = cli.move, status.refresh, float.input
+  h.after(function()
+    cli.move, status.refresh, float.input = orig_move, orig_refresh, orig_input
+  end)
+  cli.move = function(sources, target, cb, message)
+    captured = { sources = sources, target = target, message = message }
+    cb(nil, {})
+  end
+  status.refresh = function() end
+  float.input = function(opts)
+    h.assert_truthy(opts.allow_empty, 'an empty message is a valid answer')
+    opts.on_submit('extract the helper')
+  end
+
+  local buf = mode_buffer({
+    { selectable = true, type = 'committed_file', data = { cli_id = 'aa:k1', path = 'a.lua' } },
+    { selectable = true, type = 'commit', data = { cli_id = 'cd', branch_name = 'feat' } },
+  })
+  h.after(function()
+    close_buffer(buf)
+  end)
+  modes.enter(buf, 'move', { kind = 'committed_file', ids = { 'aa:k1' }, rows = { 1 }, label = 'a.lua' }, {
+    above = true,
+  })
+  vim.api.nvim_win_set_cursor(buf.win, { 2, 0 })
+  modes._move_confirm(buf)
+
+  h.assert_eq('aa:k1', captured.sources[1])
+  h.assert_eq('cd', captured.target.above)
+  h.assert_eq('extract the helper', captured.message)
+end)
+
+h.test('modes: move confirm never asks a commit source for a message', function()
+  local cli = require('gitbutler.cli')
+  local status = require('gitbutler.ui.status')
+  local float = require('gitbutler.ui.float')
+  local captured
+  local orig_move, orig_refresh, orig_input = cli.move, status.refresh, float.input
+  h.after(function()
+    cli.move, status.refresh, float.input = orig_move, orig_refresh, orig_input
+  end)
+  cli.move = function(_, _, cb, message)
+    captured = { message = message }
+    cb(nil, {})
+  end
+  status.refresh = function() end
+  float.input = function()
+    error('a commit move keeps its message; no input float')
+  end
+
+  local buf = mode_buffer({
+    { selectable = true, type = 'commit', data = { cli_id = 'aa', branch_name = 'feat' } },
+    { selectable = true, type = 'commit', data = { cli_id = 'cd', branch_name = 'feat' } },
+  })
+  h.after(function()
+    close_buffer(buf)
+  end)
+  modes.enter(buf, 'move', { kind = 'commit', ids = { 'aa' }, rows = { 1 }, label = 'x' }, { above = false })
+  vim.api.nvim_win_set_cursor(buf.win, { 2, 0 })
+  modes._move_confirm(buf)
+
+  h.assert_truthy(captured, 'the move ran')
+  h.assert_falsy(captured.message)
+end)
+
 h.test('modes: squash confirm issues one cli.squash call with every source', function()
   local cli = require('gitbutler.cli')
   local status = require('gitbutler.ui.status')

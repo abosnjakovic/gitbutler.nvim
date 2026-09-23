@@ -104,7 +104,7 @@ M.contexts = {
       desc = 'move',
       hotbar = true,
       section = 'Modes',
-      help = 'Move mode (reorder / retarget commits)',
+      help = 'Move mode (reorder / retarget commits, or committed files into a new commit)',
     },
     {
       key = 's',

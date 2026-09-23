@@ -1192,7 +1192,8 @@ end
 ---Enter move mode with the marked commits (or the cursor commit/branch) as source.
 function M.move_start(buf)
   local source = capture_source(buf)
-  if not source or (source.kind ~= 'commit' and source.kind ~= 'branch') then
+  local movable = { commit = true, branch = true, committed_file = true }
+  if not source or not movable[source.kind] then
     vim.notify('gitbutler: nothing to move here', vim.log.levels.WARN)
     return
   end

@@ -279,14 +279,19 @@ function M.pull(callback)
   M.run({ 'pull', '--json' }, callback)
 end
 
----Convenience: but move <sources>... --above/--below/--branch/--unstack
+---Convenience: but move <sources>... --above/--below/--branch/--unstack [-m <message>]
 ---@param sources string[] Commit, committed-file or single-branch CLI IDs
 ---@param target { above?: string, below?: string, branch?: string, unstack?: boolean }
 ---@param callback fun(err?: string, result?: any)
-function M.move(sources, target, callback)
+---@param message? string Committed-file sources only: the new commit's message
+---(newer than but 0.22.3, which rejects `-m`); nil or '' sends none
+function M.move(sources, target, callback, message)
   local args = { 'move' }
   vim.list_extend(args, sources)
   append_target(args, target)
+  if message and message ~= '' then
+    vim.list_extend(args, { '-m', message })
+  end
   table.insert(args, '--json')
   M.run(args, callback)
 end

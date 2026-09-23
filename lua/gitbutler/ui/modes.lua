@@ -465,7 +465,8 @@ MODE_KEYS.commit['e'] = function(buf)
 end
 
 ---Confirm a move-mode target: exit the mode, then one `but move` call with
----every source and refresh.
+---every source and refresh. Committed files land in a new commit, so they ask
+---for its message first; commits and branches keep their own.
 ---@param buf GitButlerBuffer
 function M._move_confirm(buf)
   local state = M.state
@@ -481,15 +482,28 @@ function M._move_confirm(buf)
 
   state.busy = true
   local sources, target = M._move_args(state, line)
+  local source = state.source
   M.exit(buf)
 
   local status = require('gitbutler.ui.status')
-  require('gitbutler.cli').move(sources, target, function(err)
-    if err then
-      vim.notify('gitbutler move: ' .. err, vim.log.levels.ERROR)
-    end
-    status.refresh()
-  end)
+  local function move(message)
+    require('gitbutler.cli').move(sources, target, function(err)
+      if err then
+        vim.notify('gitbutler move: ' .. err, vim.log.levels.ERROR)
+      end
+      status.refresh()
+    end, message)
+  end
+
+  if source.kind ~= 'committed_file' then
+    move(nil)
+    return
+  end
+  require('gitbutler.ui.float').input({
+    title = 'Move ' .. source.label .. ' into a new commit',
+    allow_empty = true,
+    on_submit = move,
+  })
 end
 
 ---Stack mode `a` — apply: fuzzy-pick an unapplied branch, apply it, refresh.

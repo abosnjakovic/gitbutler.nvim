@@ -796,3 +796,29 @@ test('actions.split warns on a row that is not a committed file', function()
   assert_eq(0, #calls, 'a commit row must not reach cli.split')
   assert_eq(1, #warnings)
 end)
+
+-- ── Move (`m`) ───────────────
+
+test('actions.move_start takes committed files as a source', function()
+  local modes = require('gitbutler.ui.modes')
+  local entered
+  local orig_enter, orig_notify = modes.enter, vim.notify
+  h.after(function()
+    modes.enter, vim.notify = orig_enter, orig_notify
+  end)
+  modes.enter = function(_, mode, source)
+    entered = { mode = mode, source = source }
+  end
+  vim.notify = function() end
+
+  local buf = h.mock_buffer()
+  buf.lines = { { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua' } } }
+  buf.get_cursor_line = function(self)
+    return self.lines[1]
+  end
+  actions.move_start(buf)
+
+  assert_truthy(entered, 'move mode entered')
+  assert_eq('move', entered.mode)
+  assert_eq('committed_file', entered.source.kind)
+end)
