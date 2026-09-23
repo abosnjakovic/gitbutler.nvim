@@ -466,7 +466,8 @@ end
 
 ---Confirm a move-mode target: exit the mode, then one `but move` call with
 ---every source and refresh. Committed files land in a new commit, so they ask
----for its message first; commits and branches keep their own.
+---for its message first when the CLI can take one; commits and branches keep
+---their own.
 ---@param buf GitButlerBuffer
 function M._move_confirm(buf)
   local state = M.state
@@ -485,9 +486,10 @@ function M._move_confirm(buf)
   local source = state.source
   M.exit(buf)
 
+  local cli = require('gitbutler.cli')
   local status = require('gitbutler.ui.status')
   local function move(message)
-    require('gitbutler.cli').move(sources, target, function(err)
+    cli.move(sources, target, function(err)
       if err then
         vim.notify('gitbutler move: ' .. err, vim.log.levels.ERROR)
       end
@@ -495,7 +497,7 @@ function M._move_confirm(buf)
     end, message)
   end
 
-  if source.kind ~= 'committed_file' then
+  if source.kind ~= 'committed_file' or not cli.move_takes_message() then
     move(nil)
     return
   end

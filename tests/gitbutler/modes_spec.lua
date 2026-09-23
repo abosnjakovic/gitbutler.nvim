@@ -473,73 +473,90 @@ h.test('modes: move confirm sends every source in one cli.move call and refreshe
 end)
 
 -- Committed files moved to a commit or branch become a new commit, so confirm
--- asks for its message; commit and branch moves keep their own and never ask.
-h.test('modes: move confirm asks committed-file sources for the new commit message', function()
+-- asks for its message, but only when the CLI can take one: 0.22.3 moves them
+-- too and rejects `-m`. Commit and branch moves keep their own message.
+
+---Enter move mode with `source` over row 1, confirm onto the commit at row 2,
+---and report the cli.move call plus whether the message float opened.
+---@param source_row table
+---@param source { kind: string, ids: string[], label: string }
+---@param takes_message boolean what cli.move_takes_message answers
+---@param cancel? boolean close the message float without submitting
+---@return { sources: string[], target: table, message?: string }? captured
+---@return boolean asked
+local function run_move_confirm(source_row, source, takes_message, cancel)
   local cli = require('gitbutler.cli')
   local status = require('gitbutler.ui.status')
   local float = require('gitbutler.ui.float')
-  local captured
-  local orig_move, orig_refresh, orig_input = cli.move, status.refresh, float.input
+  local captured, asked = nil, false
+  local orig_move, orig_takes, orig_refresh, orig_input = cli.move, cli.move_takes_message, status.refresh, float.input
+  local buf = mode_buffer({
+    source_row,
+    { selectable = true, type = 'commit', data = { cli_id = 'cd', branch_name = 'feat' } },
+  })
   h.after(function()
-    cli.move, status.refresh, float.input = orig_move, orig_refresh, orig_input
+    cli.move, cli.move_takes_message, status.refresh, float.input = orig_move, orig_takes, orig_refresh, orig_input
+    close_buffer(buf)
   end)
   cli.move = function(sources, target, cb, message)
     captured = { sources = sources, target = target, message = message }
     cb(nil, {})
   end
+  cli.move_takes_message = function()
+    return takes_message
+  end
   status.refresh = function() end
   float.input = function(opts)
+    asked = true
     h.assert_truthy(opts.allow_empty, 'an empty message is a valid answer')
-    opts.on_submit('extract the helper')
+    if not cancel then
+      opts.on_submit('extract the helper')
+    end
   end
 
-  local buf = mode_buffer({
-    { selectable = true, type = 'committed_file', data = { cli_id = 'aa:k1', path = 'a.lua' } },
-    { selectable = true, type = 'commit', data = { cli_id = 'cd', branch_name = 'feat' } },
-  })
-  h.after(function()
-    close_buffer(buf)
-  end)
-  modes.enter(buf, 'move', { kind = 'committed_file', ids = { 'aa:k1' }, rows = { 1 }, label = 'a.lua' }, {
-    above = true,
-  })
+  source.rows = { 1 }
+  modes.enter(buf, 'move', source, { above = true })
   vim.api.nvim_win_set_cursor(buf.win, { 2, 0 })
   modes._move_confirm(buf)
+  return captured, asked
+end
 
+local committed_row = { selectable = true, type = 'committed_file', data = { cli_id = 'aa:k1', path = 'a.lua' } }
+local committed_source = { kind = 'committed_file', ids = { 'aa:k1' }, label = 'a.lua' }
+
+h.test('modes: move confirm asks committed-file sources for the new commit message', function()
+  local captured, asked = run_move_confirm(committed_row, committed_source, true)
+
+  h.assert_truthy(asked)
   h.assert_eq('aa:k1', captured.sources[1])
   h.assert_eq('cd', captured.target.above)
   h.assert_eq('extract the helper', captured.message)
 end)
 
+h.test('modes: move confirm skips the message on a CLI without move -m', function()
+  local captured, asked = run_move_confirm(committed_row, committed_source, false)
+
+  h.assert_falsy(asked, 'no message float when the CLI cannot take one')
+  h.assert_truthy(captured, 'the move still ran')
+  h.assert_falsy(captured.message)
+end)
+
+h.test('modes: cancelling the message float moves nothing', function()
+  local captured, asked = run_move_confirm(committed_row, committed_source, true, true)
+
+  h.assert_truthy(asked)
+  h.assert_falsy(captured, 'no cli.move without a submitted message')
+  h.assert_eq('normal', modes.current(), 'the mode is already gone')
+end)
+
 h.test('modes: move confirm never asks a commit source for a message', function()
-  local cli = require('gitbutler.cli')
-  local status = require('gitbutler.ui.status')
-  local float = require('gitbutler.ui.float')
-  local captured
-  local orig_move, orig_refresh, orig_input = cli.move, status.refresh, float.input
-  h.after(function()
-    cli.move, status.refresh, float.input = orig_move, orig_refresh, orig_input
-  end)
-  cli.move = function(_, _, cb, message)
-    captured = { message = message }
-    cb(nil, {})
-  end
-  status.refresh = function() end
-  float.input = function()
-    error('a commit move keeps its message; no input float')
-  end
-
-  local buf = mode_buffer({
+  local captured, asked = run_move_confirm(
     { selectable = true, type = 'commit', data = { cli_id = 'aa', branch_name = 'feat' } },
-    { selectable = true, type = 'commit', data = { cli_id = 'cd', branch_name = 'feat' } },
-  })
-  h.after(function()
-    close_buffer(buf)
-  end)
-  modes.enter(buf, 'move', { kind = 'commit', ids = { 'aa' }, rows = { 1 }, label = 'x' }, { above = false })
-  vim.api.nvim_win_set_cursor(buf.win, { 2, 0 })
-  modes._move_confirm(buf)
+    { kind = 'commit', ids = { 'aa' }, label = 'x' },
+    true
+  )
 
+  h.assert_falsy(asked, 'a commit keeps its message, even on a CLI that takes -m')
   h.assert_truthy(captured, 'the move ran')
   h.assert_falsy(captured.message)
 end)
