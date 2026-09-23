@@ -55,28 +55,55 @@ local function supported()
   return M.supported
 end
 
+---`but <cmd> --help` output per subcommand, read once; false when but answered
+---with an error (an unknown subcommand). Reset to re-probe.
+---@type table<string, string|false>
+M._help = {}
+
+---@param cmd string
+---@return string? help nil when `but <cmd> --help` did not succeed
+local function help_text(cmd)
+  if M._help[cmd] ~= nil then
+    return M._help[cmd] or nil
+  end
+  local ok, res = pcall(function()
+    return vim.system({ config.values.cmd, cmd, '--help' }, { text = true }):wait(PROBE_TIMEOUT_MS)
+  end)
+  local help = ok and res.code == 0 and (res.stdout or '') or false
+  -- Only an exit is an answer; a spawn failure or timeout is retried next time.
+  if ok and not (res.code == 124 and res.signal == 9) then
+    M._help[cmd] = help
+  end
+  return help or nil
+end
+
 ---Cached uncommitted-area id; set nil to force a re-probe.
 ---@type string?
 M.uncommitted = nil
 
----The CLI id naming the uncommitted area. but renamed it from `zz` to `@` after
----0.22.3 and rejects `zz` from then on. Every 0.22 release names it `(zz)` in
----`amend --help`; anything else, an unrunnable CLI included, gets `@`.
+---The CLI id naming the uncommitted area. Newer but names it `@` and rejects
+---`zz`; every 0.22 release prints `(zz)` in `amend --help`. A probe that could
+---not run falls back to `@` and says so, since on a 0.22 CLI that guess breaks
+---every header amend and diff.
 ---@return string
 function M.uncommitted_id()
   if M.uncommitted == nil then
-    local ok, res = pcall(function()
-      return vim.system({ config.values.cmd, 'amend', '--help' }, { text = true }):wait(PROBE_TIMEOUT_MS)
-    end)
-    local help = ok and ((res.stdout or '') .. (res.stderr or '')) or ''
-    M.uncommitted = help:find('(zz)', 1, true) and 'zz' or '@'
+    local help = help_text('amend')
+    if not help then
+      vim.notify(
+        "gitbutler: could not read '" .. config.values.cmd .. " amend --help'; assuming the uncommitted area is @",
+        vim.log.levels.WARN
+      )
+    end
+    M.uncommitted = help and help:find('(zz)', 1, true) and 'zz' or '@'
   end
   return M.uncommitted
 end
 
----Append the single targeting flag for `target`; the first field present wins.
----0.22 accepts one flag per invocation. Newer but also lets `--branch` name the
----branch that `--above`/`--below` creates, which this never sends.
+---Append the single targeting flag for `target`, checked in the order unstack,
+---branch, above, below; the first present wins. 0.22 accepts one flag per
+---invocation. Newer but also lets `--branch` name the branch that
+---`--above`/`--below` creates; this still sends one flag.
 ---@param args string[]
 ---@param target { branch?: string, above?: string, below?: string, unstack?: boolean }
 local function append_target(args, target)
@@ -279,12 +306,19 @@ function M.pull(callback)
   M.run({ 'pull', '--json' }, callback)
 end
 
+---Whether `but move` takes `-m` for the commit it creates from committed files
+---(0.22.3 and earlier do not, and leave that commit's message empty).
+---@return boolean
+function M.move_takes_message()
+  return (help_text('move') or ''):find('--message', 1, true) ~= nil
+end
+
 ---Convenience: but move <sources>... --above/--below/--branch/--unstack [-m <message>]
 ---@param sources string[] Commit, committed-file or single-branch CLI IDs
 ---@param target { above?: string, below?: string, branch?: string, unstack?: boolean }
 ---@param callback fun(err?: string, result?: any)
 ---@param message? string Committed-file sources only: the new commit's message
----(newer than but 0.22.3, which rejects `-m`); nil or '' sends none
+---(0.22.3 and earlier reject `-m`; see `move_takes_message`); nil or '' sends none
 function M.move(sources, target, callback, message)
   local args = { 'move' }
   vim.list_extend(args, sources)
@@ -327,9 +361,16 @@ function M.uncommit(sources, callback)
   M.run(args, callback)
 end
 
+---Whether this but has `split` (0.22.3 and earlier do not).
+---@return boolean
+function M.has_split()
+  return help_text('split') ~= nil
+end
+
 ---Convenience: but split <sources>... [-m <message>] — move committed files into
----a new commit directly above their source commit. Newer than but 0.22.3.
----@param sources string[] Committed-file CLI IDs, all from one commit
+---a new commit directly above their source commit. 0.22.3 and earlier have no
+---`split`; see `has_split`.
+---@param sources string[] Committed-file CLI IDs; but takes them from one commit
 ---@param message string Message for the new commit; '' leaves it empty
 ---@param callback fun(err?: string, result?: any)
 function M.split(sources, message, callback)

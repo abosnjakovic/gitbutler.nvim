@@ -551,49 +551,119 @@ test('run: refuses a pre-0.22 CLI without spawning the command', function()
   assert_truthy(err and err:find(cli.MIN_VERSION, 1, true), 'callback got the unsupported error')
 end)
 
--- but renamed the uncommitted area from `zz` to `@` after 0.22.3 and rejects
--- `zz` from then on, so the id is asked of the CLI rather than hardcoded. Every
--- 0.22 release names it `(zz)` in `amend --help`.
+-- Newer but renames the uncommitted area from `zz` to `@` and rejects `zz`, so
+-- the id is asked of the CLI rather than hardcoded. Every 0.22 release names it
+-- `(zz)` in `amend --help`.
 
----Run cli.uncommitted_id() twice against a stubbed vim.system answering with
----`help`, or throwing when `help` is nil (a missing binary).
----@param help? string
----@return string first, string second, string[][] cmds everything spawned
-local function probe_uncommitted(help)
-  local cmds = {}
-  local orig, cached = vim.system, cli.uncommitted
+---Stub vim.system so `but <cmd> --help` answers from `helps[cmd]`: a string is
+---the help text (exit 0), a table is the raw result, and nil means an unknown
+---subcommand (exit 2). `throw` makes every spawn throw, like a missing binary.
+---Clears the probe caches and restores everything when the test ends.
+---@param helps table<string, string|table>
+---@param throw? boolean
+---@return string[][] cmds everything spawned
+---@return string[] warnings
+local function stub_help(helps, throw)
+  local cmds, warnings = {}, {}
+  local orig_system, orig_notify = vim.system, vim.notify
+  local orig_id, orig_help = cli.uncommitted, cli._help
+  h.after(function()
+    vim.system, vim.notify = orig_system, orig_notify
+    cli.uncommitted, cli._help = orig_id, orig_help
+  end)
   vim.system = function(cmd)
     table.insert(cmds, cmd)
-    if not help then
+    if throw then
       error('ENOENT: no such file or directory')
     end
+    local help = helps[cmd[2]]
     return {
       wait = function()
-        return { code = 0, stdout = help }
+        if type(help) == 'table' then
+          return help
+        end
+        return help and { code = 0, stdout = help }
+          or { code = 2, stderr = "error: unrecognized subcommand '" .. cmd[2] .. "'" }
       end,
     }
   end
-  cli.uncommitted = nil
-  local first, second = cli.uncommitted_id(), cli.uncommitted_id()
-  vim.system, cli.uncommitted = orig, cached
-  return first, second, cmds
+  vim.notify = function(msg, level)
+    if level == vim.log.levels.WARN then
+      table.insert(warnings, msg)
+    end
+  end
+  cli.uncommitted, cli._help = nil, {}
+  return cmds, warnings
 end
 
 test('uncommitted_id: a 0.22 CLI names the uncommitted area zz', function()
-  assert_eq('zz', (probe_uncommitted('          If omitted, all changes in the uncommitted area (zz) are amended.')))
+  stub_help({ amend = '          If omitted, all changes in the uncommitted area (zz) are amended.' })
+  assert_eq('zz', cli.uncommitted_id())
 end)
 
 test('uncommitted_id: a newer CLI names it @', function()
-  assert_eq('@', (probe_uncommitted('          If omitted, all changes in the uncommitted area (@) are amended.')))
+  stub_help({ amend = '          If omitted, all changes in the uncommitted area (@) are amended.' })
+  assert_eq('@', cli.uncommitted_id())
 end)
 
-test('uncommitted_id: an unrunnable CLI falls back to @ instead of throwing', function()
-  assert_eq('@', (probe_uncommitted(nil)))
+-- A probe that never answered must not pass silently: the `@` fallback is a
+-- guess, and on a 0.22 CLI every header amend and diff would then fail.
+test('uncommitted_id: an unrunnable CLI falls back to @ and says so', function()
+  local _, warnings = stub_help({}, true)
+  assert_eq('@', cli.uncommitted_id())
+  assert_eq(1, #warnings, 'the guess is reported once')
+end)
+
+test('uncommitted_id: a timed-out probe falls back to @ and says so', function()
+  local _, warnings = stub_help({ amend = { code = 124, signal = 9 } })
+  assert_eq('@', cli.uncommitted_id())
+  assert_eq(1, #warnings)
 end)
 
 test('uncommitted_id: probes amend --help once, then answers from the cache', function()
-  local first, second, cmds = probe_uncommitted('the uncommitted area (zz)')
-  assert_eq(first, second)
+  local cmds = stub_help({ amend = 'the uncommitted area (zz)' })
+  cli.uncommitted_id()
+  cli.uncommitted_id()
   assert_eq(1, #cmds, 'one spawn for any number of calls')
   assert_eq('amend --help', table.concat(cmds[1], ' ', 2))
+end)
+
+-- `split` and `move -m` postdate 0.22.3. Asking the CLI up front lets the
+-- plugin refuse a split before a message is typed, and move committed files
+-- without a message on a CLI that has no `-m`.
+test('has_split: true only when `but split --help` succeeds', function()
+  stub_help({ split = 'Usage: but split [OPTIONS] <SOURCES>...' })
+  assert_truthy(cli.has_split())
+  stub_help({})
+  assert_falsy(cli.has_split(), 'an unknown subcommand means no split')
+end)
+
+test('move_takes_message: follows --message in `but move --help`', function()
+  stub_help({ move = '  -m, --message <MESSAGE>\n          The message for the new commit' })
+  assert_truthy(cli.move_takes_message())
+  stub_help({ move = '      --json\n          Output detailed information as JSON' })
+  assert_falsy(cli.move_takes_message(), '0.22.3 move has no -m')
+end)
+
+test('move_takes_message: false when the help probe fails', function()
+  stub_help({}, true)
+  assert_falsy(cli.move_takes_message())
+end)
+
+-- A hung `--help` is a hiccup, not an answer: caching it would make `e` claim
+-- the CLI has no split until Neovim restarts. A real exit is cached.
+test('help probes retry after a timeout instead of caching it', function()
+  local cmds = stub_help({ split = { code = 124, signal = 9 } })
+  assert_falsy(cli.has_split())
+  cli.has_split()
+  assert_eq(2, #cmds, 'the timed-out probe runs again')
+end)
+
+test('help probes share one spawn per subcommand', function()
+  local cmds = stub_help({ split = 'Usage: but split', move = '-m, --message' })
+  cli.has_split()
+  cli.has_split()
+  cli.move_takes_message()
+  cli.move_takes_message()
+  assert_eq(2, #cmds)
 end)
