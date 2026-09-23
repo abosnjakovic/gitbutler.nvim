@@ -1,7 +1,7 @@
 local actions = require('gitbutler.actions')
 local cli = require('gitbutler.cli')
 local h = require('tests.gitbutler.helpers')
-local test, assert_eq, assert_truthy = h.test, h.assert_eq, h.assert_truthy
+local test, assert_eq, assert_truthy, assert_falsy = h.test, h.assert_eq, h.assert_truthy, h.assert_falsy
 
 print('\n=== Action tests ===')
 
@@ -526,7 +526,67 @@ test('actions.discard leaves a committed file alone when the confirm is declined
     return self.lines[1]
   end
 
-  assert_eq(0, #run_discard(buf, 'No'))
+  local calls, prompt = run_discard(buf, 'No')
+  assert_truthy(prompt, 'a committed file reaches the confirm')
+  assert_eq(0, #calls)
+end)
+
+-- Marks keep to one kind, not one commit, while but takes committed files
+-- from a single commit per call. Refuse up front rather than confirm a prompt
+-- that names one commit and then fail on the other.
+test('actions.discard refuses committed files from more than one commit', function()
+  local buf = h.mock_buffer()
+  buf.lines = {
+    { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua', commit_id = 'aaaaaaa1' } },
+    { type = 'committed_file', data = { cli_id = 'c2:k1', path = 'b.lua', commit_id = 'bbbbbbb2' } },
+  }
+  buf.selected = { ['c1:k1'] = true, ['c2:k1'] = true }
+
+  local calls, prompt = run_discard(buf, 'Yes')
+
+  assert_falsy(prompt, 'no confirm for a discard but would reject')
+  assert_eq(0, #calls)
+end)
+
+test('actions.discard still confirms when the commit id is missing', function()
+  local buf = h.mock_buffer()
+  buf.lines = { { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua', commit_id = vim.NIL } } }
+  buf.get_cursor_line = function(self)
+    return self.lines[1]
+  end
+
+  local calls, prompt = run_discard(buf, 'Yes')
+
+  assert_truthy(prompt and not prompt:find('from commit', 1, true), 'no sha to name, and no crash')
+  assert_eq(1, #calls)
+end)
+
+-- The prompt lists every path; a row without an id would be listed but never
+-- discarded.
+test('actions.discard refuses a row with no CLI id', function()
+  local buf = h.mock_buffer()
+  buf.lines = { { type = 'file', data = { path = 'a.lua' } } }
+  buf.get_cursor_line = function(self)
+    return self.lines[1]
+  end
+
+  local calls, prompt = run_discard(buf, 'Yes')
+
+  assert_falsy(prompt)
+  assert_eq(0, #calls)
+end)
+
+test('actions.discard does not name a commit for uncommitted files', function()
+  local buf = h.mock_buffer()
+  buf.lines = { { type = 'file', data = { cli_id = 'f1', path = 'a.lua' } } }
+  buf.get_cursor_line = function(self)
+    return self.lines[1]
+  end
+
+  local calls, prompt = run_discard(buf, 'Yes')
+
+  assert_eq('Discard changes to a.lua?', prompt)
+  assert_eq('f1', calls[1][1])
 end)
 
 h.test('toggle_fold parks the cursor back on the fold header after rerender', function()
@@ -742,20 +802,27 @@ end)
 -- ── Split (`e`) ───────────────
 
 ---Run actions.split on `buf`, submitting `message` to the input float.
+---@param has_split? boolean false for a CLI without `split`
 ---@return { ids: string[], message: string }[] calls
 ---@return string[] warnings
-local function run_split(buf, message)
+---@return boolean asked whether the message float opened
+local function run_split(buf, message, has_split)
   local float = require('gitbutler.ui.float')
   local calls, warnings = {}, {}
-  local orig_split, orig_input, orig_notify = cli.split, float.input, vim.notify
+  local orig_split, orig_has, orig_input, orig_notify = cli.split, cli.has_split, float.input, vim.notify
   h.after(function()
-    cli.split, float.input, vim.notify = orig_split, orig_input, orig_notify
+    cli.split, cli.has_split, float.input, vim.notify = orig_split, orig_has, orig_input, orig_notify
   end)
+  cli.has_split = function()
+    return has_split ~= false
+  end
   cli.split = function(ids, msg, cb)
     table.insert(calls, { ids = ids, message = msg })
     cb(nil, 'ok')
   end
+  local asked = false
   float.input = function(opts)
+    asked = true
     opts.on_submit(message)
   end
   vim.notify = function(msg, level)
@@ -764,7 +831,7 @@ local function run_split(buf, message)
     end
   end
   actions.split(buf)
-  return calls, warnings
+  return calls, warnings, asked
 end
 
 -- Split pulls the marked committed files out into a new commit above their
@@ -797,6 +864,36 @@ test('actions.split warns on a row that is not a committed file', function()
   assert_eq(1, #warnings)
 end)
 
+-- A CLI without `split` must say so before a message is typed, not after.
+test('actions.split refuses up front on a CLI without split', function()
+  local buf = h.mock_buffer()
+  buf.lines = { { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua', commit_id = 'deadbeefcafe' } } }
+  buf.get_cursor_line = function(self)
+    return self.lines[1]
+  end
+
+  local calls, warnings, asked = run_split(buf, 'x', false)
+
+  assert_falsy(asked, 'no message float')
+  assert_eq(0, #calls)
+  assert_eq(1, #warnings)
+end)
+
+test('actions.split refuses committed files from more than one commit', function()
+  local buf = h.mock_buffer()
+  buf.lines = {
+    { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua', commit_id = 'aaaaaaa1' } },
+    { type = 'committed_file', data = { cli_id = 'c2:k1', path = 'b.lua', commit_id = 'bbbbbbb2' } },
+  }
+  buf.selected = { ['c1:k1'] = true, ['c2:k1'] = true }
+
+  local calls, warnings, asked = run_split(buf, 'x')
+
+  assert_falsy(asked)
+  assert_eq(0, #calls)
+  assert_eq(1, #warnings)
+end)
+
 -- ── Move (`m`) ───────────────
 
 test('actions.move_start takes committed files as a source', function()
@@ -821,4 +918,32 @@ test('actions.move_start takes committed files as a source', function()
   assert_truthy(entered, 'move mode entered')
   assert_eq('move', entered.mode)
   assert_eq('committed_file', entered.source.kind)
+end)
+
+test('actions.move_start refuses committed files from more than one commit', function()
+  local modes = require('gitbutler.ui.modes')
+  local entered, warnings = false, 0
+  local orig_enter, orig_notify = modes.enter, vim.notify
+  h.after(function()
+    modes.enter, vim.notify = orig_enter, orig_notify
+  end)
+  modes.enter = function()
+    entered = true
+  end
+  vim.notify = function(_, level)
+    if level == vim.log.levels.WARN then
+      warnings = warnings + 1
+    end
+  end
+
+  local buf = h.mock_buffer()
+  buf.lines = {
+    { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua', commit_id = 'aaaaaaa1' } },
+    { type = 'committed_file', data = { cli_id = 'c2:k1', path = 'b.lua', commit_id = 'bbbbbbb2' } },
+  }
+  buf.selected = { ['c1:k1'] = true, ['c2:k1'] = true }
+  actions.move_start(buf)
+
+  assert_falsy(entered)
+  assert_eq(1, warnings)
 end)

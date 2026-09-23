@@ -832,6 +832,22 @@ function M.branch_new(_buf)
   })
 end
 
+---Whether committed-file rows come from more than one commit. Marks keep to one
+---kind, not one commit, while but takes committed files from a single commit
+---per call. Warns when they do.
+---@param lines GitButlerLine[]
+---@return boolean
+local function spans_commits(lines)
+  local first = lines[1] and lines[1].data and lines[1].data.commit_id
+  for _, l in ipairs(lines) do
+    if l.type == 'committed_file' and l.data.commit_id ~= first then
+      vim.notify('gitbutler: the marked committed files must all come from one commit', vim.log.levels.WARN)
+      return true
+    end
+  end
+  return false
+end
+
 ---Discard changes for file(s) under cursor or selected: uncommitted files, or
 ---committed files, which `but discard` drops from their commit. Marks are
 ---homogeneous, so the targets are all one kind.
@@ -849,13 +865,22 @@ function M.discard(buf)
     targets = { line }
   end
 
-  local paths = {}
+  if spans_commits(targets) then
+    return
+  end
+
+  local paths, ids = {}, {}
   for _, t in ipairs(targets) do
+    if not t.data.cli_id then
+      vim.notify('gitbutler: row has no CLI id', vim.log.levels.WARN)
+      return
+    end
     table.insert(paths, t.data.path or t.data.cli_id)
+    table.insert(ids, t.data.cli_id)
   end
   local prompt = 'Discard changes to ' .. table.concat(paths, ', ')
   local commit_id = targets[1].type == 'committed_file' and targets[1].data.commit_id
-  if commit_id then
+  if type(commit_id) == 'string' then
     -- Dropping committed changes rewrites the commit; say which.
     prompt = prompt .. ' from commit ' .. commit_id:sub(1, 7)
   end
@@ -866,10 +891,6 @@ function M.discard(buf)
       return
     end
     notify_start('discard')
-    local ids = {}
-    for _, t in ipairs(targets) do
-      table.insert(ids, t.data.cli_id)
-    end
     cli.discard(ids, function(err, _)
       buf:clear_selection()
       if err then
@@ -1122,7 +1143,7 @@ end
 ---must carry a CLI id, and the kind is taken from the first row — marks are
 ---homogeneous, so that speaks for the whole selection.
 ---@param buf GitButlerBuffer
----@return { kind: string, ids: string[], rows: integer[], label: string }?
+---@return { kind: string, ids: string[], rows: integer[], lines: GitButlerLine[], label: string }?
 local function capture_source(buf)
   local sources = buf:get_selected_lines()
   if #sources == 0 then
@@ -1153,6 +1174,7 @@ local function capture_source(buf)
     kind = sources[1].type,
     ids = ids,
     rows = rows,
+    lines = sources,
     label = source_label(sources[1]) .. (#sources > 1 and (' +' .. (#sources - 1)) or ''),
   }
 end
@@ -1189,12 +1211,15 @@ function M.squash_start(buf)
   verb_start(buf, 'squash')
 end
 
----Enter move mode with the marked commits (or the cursor commit/branch) as source.
+---Enter move mode with the marked (or cursor) commits, committed files or branch as source.
 function M.move_start(buf)
   local source = capture_source(buf)
   local movable = { commit = true, branch = true, committed_file = true }
   if not source or not movable[source.kind] then
     vim.notify('gitbutler: nothing to move here', vim.log.levels.WARN)
+    return
+  end
+  if spans_commits(source.lines) then
     return
   end
   clear_marks(buf)
@@ -1244,6 +1269,14 @@ function M.split(buf)
   local source = capture_source(buf)
   if not source or source.kind ~= 'committed_file' then
     vim.notify('gitbutler: place the cursor on a file in a commit to split it out', vim.log.levels.WARN)
+    return
+  end
+  if spans_commits(source.lines) then
+    return
+  end
+  -- Before the message float, so a message is never typed only to be refused.
+  if not cli.has_split() then
+    vim.notify('gitbutler: this but has no split (0.22.3 and earlier); update but to use it', vim.log.levels.WARN)
     return
   end
   float.input({
