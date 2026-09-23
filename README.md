@@ -152,7 +152,8 @@ Operations (official but-tui keys):
 w        Uncommit the cursor/marked commits or committed files
 n        Insert an empty commit after the cursor commit/branch
 b        Create a new branch
-x        Discard file changes (with confirmation)
+x        Discard file changes (with confirmation); on committed files,
+         drops them from their commit
 u/U      Undo / redo last operation (with confirmation)
 <CR>     Describe: reword a commit or rename a branch (float)
 M        Reword the commit in an editor split (full message)

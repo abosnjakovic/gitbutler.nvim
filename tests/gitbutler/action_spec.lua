@@ -463,6 +463,72 @@ test('actions.uncommit makes one call with the marked ids and enters no mode', f
   modes.enter, modes.enter_verb = original_enter, original_enter_verb
 end)
 
+-- ── Discard (`x`) ───────────────
+
+---Run actions.discard on `buf`, answering the confirm with `answer`.
+---@return string[][] calls ids per cli.discard call
+---@return string? prompt
+local function run_discard(buf, answer)
+  local calls, prompt = {}, nil
+  local orig_discard, orig_select, orig_notify = cli.discard, vim.ui.select, vim.notify
+  h.after(function()
+    cli.discard, vim.ui.select, vim.notify = orig_discard, orig_select, orig_notify
+  end)
+  cli.discard = function(ids, cb)
+    table.insert(calls, ids)
+    cb(nil, 'ok')
+  end
+  vim.ui.select = function(_, opts, on_choice)
+    prompt = opts.prompt
+    on_choice(answer)
+  end
+  vim.notify = function() end
+  actions.discard(buf)
+  return calls, prompt
+end
+
+-- `but discard` drops committed files from their commit too. Marks are
+-- homogeneous, so a marked set of committed files goes out in one call — one
+-- undoable oplog entry — and the prompt names the commit being rewritten.
+test('actions.discard drops the marked committed files in one call, naming their commit', function()
+  local buf = h.mock_buffer()
+  buf.lines = {
+    { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua', commit_id = 'deadbeefcafe' } },
+    { type = 'committed_file', data = { cli_id = 'c1:k2', path = 'b.lua', commit_id = 'deadbeefcafe' } },
+    { type = 'committed_file', data = { cli_id = 'c1:k3', path = 'c.lua', commit_id = 'deadbeefcafe' } },
+  }
+  buf.selected = { ['c1:k1'] = true, ['c1:k3'] = true }
+
+  local calls, prompt = run_discard(buf, 'Yes')
+
+  assert_eq(1, #calls, 'one batched call')
+  assert_eq('c1:k1 c1:k3', table.concat(calls[1], ' '))
+  assert_truthy(prompt and prompt:find('deadbee', 1, true), 'the prompt must say which commit is rewritten')
+end)
+
+test('actions.discard drops the committed file under the cursor', function()
+  local buf = h.mock_buffer()
+  buf.lines = { { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua', commit_id = 'deadbeefcafe' } } }
+  buf.get_cursor_line = function(self)
+    return self.lines[1]
+  end
+
+  local calls = run_discard(buf, 'Yes')
+
+  assert_eq(1, #calls)
+  assert_eq('c1:k1', calls[1][1])
+end)
+
+test('actions.discard leaves a committed file alone when the confirm is declined', function()
+  local buf = h.mock_buffer()
+  buf.lines = { { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua', commit_id = 'deadbeefcafe' } } }
+  buf.get_cursor_line = function(self)
+    return self.lines[1]
+  end
+
+  assert_eq(0, #run_discard(buf, 'No'))
+end)
+
 h.test('toggle_fold parks the cursor back on the fold header after rerender', function()
   local buf = h.mock_buffer()
   buf.buf = vim.api.nvim_create_buf(false, true)

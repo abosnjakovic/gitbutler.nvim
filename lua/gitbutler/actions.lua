@@ -832,16 +832,18 @@ function M.branch_new(_buf)
   })
 end
 
----Discard changes for file(s) under cursor or selected.
+---Discard changes for file(s) under cursor or selected: uncommitted files, or
+---committed files, which `but discard` drops from their commit. Marks are
+---homogeneous, so the targets are all one kind.
 function M.discard(buf)
-  local selected = buf:get_selected_lines({ 'file' })
+  local selected = buf:get_selected_lines({ 'file', 'committed_file' })
   local targets
   if #selected > 0 then
     targets = selected
   else
     local line = buf:get_cursor_line()
-    if not line or line.type ~= 'file' or not line.data then
-      vim.notify('gitbutler: place the cursor on an uncommitted file to discard', vim.log.levels.WARN)
+    if not line or (line.type ~= 'file' and line.type ~= 'committed_file') or not line.data then
+      vim.notify('gitbutler: place the cursor on a file to discard', vim.log.levels.WARN)
       return
     end
     targets = { line }
@@ -851,7 +853,13 @@ function M.discard(buf)
   for _, t in ipairs(targets) do
     table.insert(paths, t.data.path or t.data.cli_id)
   end
-  local prompt = 'Discard changes to ' .. table.concat(paths, ', ') .. '?'
+  local prompt = 'Discard changes to ' .. table.concat(paths, ', ')
+  local commit_id = targets[1].type == 'committed_file' and targets[1].data.commit_id
+  if commit_id then
+    -- Dropping committed changes rewrites the commit; say which.
+    prompt = prompt .. ' from commit ' .. commit_id:sub(1, 7)
+  end
+  prompt = prompt .. '?'
 
   vim.ui.select({ 'Yes', 'No' }, { prompt = prompt }, function(choice)
     if choice ~= 'Yes' then
