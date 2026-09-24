@@ -152,6 +152,52 @@ function M.rerun(check_id, callback)
   end)
 end
 
+---The repo's web page for an origin remote, SSH or HTTPS: `git@github.com:o/r.git`
+---and `https://github.com/o/r` both give `https://github.com/o/r`. Pure.
+---@param remote? string
+---@return string?
+function M.web_url(remote)
+  if type(remote) ~= 'string' then
+    return nil
+  end
+  local path = remote:match('github%.com[:/](.+)$')
+  if not path then
+    return nil
+  end
+  path = path:gsub('/$', ''):gsub('%.git$', '')
+  local owner, repo = path:match('^([^/]+)/([^/]+)$')
+  if not owner then
+    return nil
+  end
+  return 'https://github.com/' .. owner .. '/' .. repo
+end
+
+---Read a PR's title, body and state. `state` is gh's OPEN, MERGED or CLOSED.
+---@param number integer
+---@param callback fun(err?: string, pr?: { title: string, body: string, draft: boolean, state: string })
+function M.view_pr(number, callback)
+  if not require_gh(callback) then
+    return
+  end
+  local args = { 'gh', 'pr', 'view', tostring(number), '--json', 'title,body,isDraft,state' }
+  vim.system(args, { text = true }, function(result)
+    vim.schedule(function()
+      if result.code ~= 0 then
+        local msg = (result.stderr and result.stderr ~= '') and result.stderr
+          or ('gh pr view exited with code ' .. result.code)
+        callback(vim.trim(msg))
+        return
+      end
+      local ok, pr = pcall(vim.json.decode, result.stdout or '')
+      if not ok or type(pr) ~= 'table' then
+        callback('gh pr view returned unreadable JSON')
+        return
+      end
+      callback(nil, { title = pr.title, body = pr.body, draft = pr.isDraft == true, state = pr.state })
+    end)
+  end)
+end
+
 ---@param url string
 function M.open_in_browser(url)
   if vim.ui and vim.ui.open then
