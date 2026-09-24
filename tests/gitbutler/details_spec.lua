@@ -1032,6 +1032,50 @@ h.test('details: a commit still opens parked on hunk 1', function()
   h.assert_eq(1, details.win_state.selected)
 end)
 
+-- CI moves on while the pane sits on a branch; every status refresh carries
+-- the new state, so the header follows it without moving off the row.
+local function status_with(branch)
+  return { stacks = { { branches = { branch } } } }
+end
+
+h.test('details: a status refresh redraws the shown branch header with new CI', function()
+  reset()
+  local fetches = stub_branch_show()
+  details.show(branch_entity('b1', 31))
+  fetches[1].cb(nil, { title = 'Keep pace', body = '', state = 'OPEN' })
+
+  details.update_branch_meta(status_with({
+    name = 'b1',
+    reviewId = '(#31)',
+    commits = { {} },
+    ci = { passingCheckTitles = {}, pendingCheckTitles = {}, failingCheckTitles = { 'Lint' } },
+  }))
+
+  h.assert_eq('PR #31 · Keep pace', details.win_state.rows[1].text, 'the gh answer survives')
+  h.assert_eq('CI   ✗ 1 failing', details.win_state.rows[2].text)
+  h.assert_eq(1, #fetches, 'new CI is no reason to ask gh again')
+end)
+
+-- Opening a PR with `v` turns the branch line into a PR header on the next refresh.
+h.test('details: a status refresh that brings a new PR fetches it', function()
+  reset()
+  local fetches = stub_branch_show()
+  details.show(branch_entity('b1', nil))
+  details.update_branch_meta(status_with({ name = 'b1', reviewId = '(#40)', commits = { {} } }))
+  h.assert_eq(1, #fetches)
+  h.assert_eq(40, fetches[1].number)
+  h.assert_eq('PR #40 · loading PR…', details.win_state.rows[1].text)
+end)
+
+h.test('details: a status refresh leaves a non-branch pane alone', function()
+  reset()
+  stub_branch_show()
+  details.show({ cli_id = 'aa', kind = 'file' })
+  local before = details.win_state.rows
+  details.update_branch_meta(status_with({ name = 'aa', reviewId = '(#1)' }))
+  h.assert_eq(before, details.win_state.rows, 'the file diff was redrawn')
+end)
+
 h.test('details: showing a different entity clears the marks', function()
   reset()
   local orig = cli.diff_json

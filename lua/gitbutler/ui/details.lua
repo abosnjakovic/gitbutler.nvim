@@ -1447,6 +1447,36 @@ local function load_pr(meta)
   end)
 end
 
+---Bring a shown branch header up to date with a fresh `but status`, so its CI
+---line follows the checks without moving off the row. The gh answer is kept
+---while the PR number holds; a new PR (opened with `v`) is fetched.
+---@param data table decoded `but status`
+function M.update_branch_meta(data)
+  local entity = M.win_state.entity
+  local meta = entity and entity.meta
+  if not (meta and meta.kind == 'branch') then
+    return
+  end
+  for _, stack in ipairs(list(type(data) == 'table' and data.stacks)) do
+    for _, branch in ipairs(list(stack.branches)) do
+      if scalar(branch.name, nil) == meta.name then
+        local fresh = M._branch_meta(branch, meta.web)
+        if fresh.pr == meta.pr then
+          fresh.pr_info = meta.pr_info
+        end
+        if not vim.deep_equal(fresh, meta) then
+          entity.meta = fresh
+          if fresh.pr and not fresh.pr_info then
+            load_pr(fresh)
+          end
+          M._rebuild()
+        end
+        return
+      end
+    end
+  end
+end
+
 ---Load and display the diff for `entity`. No-op when it is already showing.
 ---@param entity { cli_id: string, kind?: string, meta?: table }
 function M.show(entity)
