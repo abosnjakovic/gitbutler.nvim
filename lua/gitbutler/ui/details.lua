@@ -1395,6 +1395,58 @@ function M.resize(delta)
   M._apply_size()
 end
 
+---PR title, body and state per PR number, as `view_pr` answered, errors
+---included, kept for the session: a broken `gh` costs one call per PR, not one
+---per cursor move. `clear_pr_cache` is how a PR is read again.
+---@type table<integer, table>
+M._pr_cache = {}
+local pr_inflight = {}
+
+---@param number? integer one PR, or every PR when nil
+function M.clear_pr_cache(number)
+  if number then
+    M._pr_cache[number] = nil
+  else
+    M._pr_cache = {}
+  end
+end
+
+---Fetch a PR's details through the remote's forge adapter. A seam for tests.
+---@param number integer
+---@param callback fun(err?: string, pr?: table)
+function M._fetch_pr(number, callback)
+  local adapter = require('gitbutler.forge').detect_from_remote()
+  if not (adapter and adapter.view_pr) then
+    callback('no forge adapter for this remote')
+    return
+  end
+  adapter.view_pr(number, callback)
+end
+
+---Fill a branch header's `pr_info` from the cache, or fetch it once. The answer
+---is drawn only if the pane still shows that PR by then.
+---@param meta table
+local function load_pr(meta)
+  local n = meta.pr
+  if M._pr_cache[n] then
+    meta.pr_info = M._pr_cache[n]
+    return
+  end
+  if pr_inflight[n] then
+    return
+  end
+  pr_inflight[n] = true
+  M._fetch_pr(n, function(err, pr)
+    pr_inflight[n] = nil
+    M._pr_cache[n] = err and { err = err } or pr
+    local cur = M.win_state.entity
+    if cur and cur.meta and cur.meta.kind == 'branch' and cur.meta.pr == n then
+      cur.meta.pr_info = M._pr_cache[n]
+      M._rebuild()
+    end
+  end)
+end
+
 ---Load and display the diff for `entity`. No-op when it is already showing.
 ---@param entity { cli_id: string, kind?: string, meta?: table }
 function M.show(entity)
@@ -1416,6 +1468,10 @@ function M.show(entity)
   st.gen = st.gen + 1
   local gen = st.gen
   M._render(info_rows('  loading diff…', HL.dim))
+  local branch = entity.meta and entity.meta.kind == 'branch'
+  if branch and entity.meta.pr then
+    load_pr(entity.meta)
+  end
 
   require('gitbutler.cli').diff_json(entity.cli_id, function(err, data)
     -- A newer show() has since fired; this payload is for the wrong entity.
@@ -1428,6 +1484,16 @@ function M.show(entity)
     end
     -- Kept so selection/mark changes can re-render without another CLI call.
     M.win_state.data = data
+    if branch then
+      -- A long PR body would scroll the header away if the cursor parked on
+      -- hunk 1, so open at the top with no hunk selected; ]c goes to hunk 1.
+      M.win_state.selected = 0
+      M._rebuild()
+      if M.is_open() then
+        pcall(vim.api.nvim_win_set_cursor, M.win_state.win, { 1, 0 })
+      end
+      return
+    end
     M._rebuild()
     -- Park the cursor on hunk 1 too, or cursorline and the `▌` bar disagree and
     -- the first `j` skips to hunk 2. No-ops when the diff has no hunks.

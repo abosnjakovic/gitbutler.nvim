@@ -905,6 +905,133 @@ h.test('details: a failed discard keeps the marks so the rest can be retried', f
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
 end)
 
+-- The PR title and body are the one part of a branch header that waits on the
+-- network, so they are fetched once per PR and cached, and a late answer only
+-- lands on a pane still showing that PR.
+
+---Stub the diff and PR fetch for show(); PR fetches queue until answered.
+---@return { number: integer, cb: function }[] fetches
+local function stub_branch_show()
+  local fetches = {}
+  local orig_diff, orig_fetch = cli.diff_json, details._fetch_pr
+  h.after(function()
+    cli.diff_json, details._fetch_pr = orig_diff, orig_fetch
+    details.clear_pr_cache()
+  end)
+  details.clear_pr_cache()
+  cli.diff_json = function(_, cb)
+    cb(nil, fixtures.diff_json)
+  end
+  details._fetch_pr = function(number, cb)
+    table.insert(fetches, { number = number, cb = cb })
+  end
+  return fetches
+end
+
+local function branch_entity(id, pr)
+  return { cli_id = id, kind = 'branch', meta = { kind = 'branch', name = id, commits = 1, pr = pr } }
+end
+
+h.test('details: a PR branch fetches its title once and fills the header in', function()
+  reset()
+  local fetches = stub_branch_show()
+  details.show(branch_entity('b1', 31))
+  h.assert_eq(1, #fetches)
+  h.assert_eq(31, fetches[1].number)
+  h.assert_eq('PR #31 · loading PR…', details.win_state.rows[1].text)
+
+  fetches[1].cb(nil, { title = 'Keep pace', body = 'Body', draft = false, state = 'OPEN' })
+  h.assert_eq('PR #31 · Keep pace', details.win_state.rows[1].text)
+
+  -- Back to the same PR later: served from the cache, no second fetch.
+  details.show(branch_entity('other', nil))
+  details.show(branch_entity('b1', 31))
+  h.assert_eq(1, #fetches)
+  h.assert_eq('PR #31 · Keep pace', details.win_state.rows[1].text)
+end)
+
+h.test('details: a PR answer that arrives after the pane moved on is cached but not drawn', function()
+  reset()
+  local fetches = stub_branch_show()
+  details.show(branch_entity('b1', 31))
+  details.show({ cli_id = 'aa', kind = 'file' })
+  local before = details.win_state.rows[1].text
+
+  fetches[1].cb(nil, { title = 'Late', body = '', state = 'OPEN' })
+
+  h.assert_eq('aa', details.win_state.entity.cli_id)
+  h.assert_eq(before, details.win_state.rows[1].text, 'the file diff was redrawn with a PR header')
+  h.assert_eq('Late', details._pr_cache[31].title)
+end)
+
+h.test('details: a PR fetch in flight is not repeated, and its answer reaches a re-shown branch', function()
+  reset()
+  local fetches = stub_branch_show()
+  details.show(branch_entity('b1', 31))
+  details.show({ cli_id = 'aa', kind = 'file' })
+  details.show(branch_entity('b1', 31))
+  h.assert_eq(1, #fetches)
+
+  fetches[1].cb(nil, { title = 'Once', body = '', state = 'OPEN' })
+  h.assert_eq('PR #31 · Once', details.win_state.rows[1].text)
+end)
+
+-- A broken gh costs one call per PR per session, not one per cursor move.
+h.test('details: a failed PR fetch is cached and shown', function()
+  reset()
+  local fetches = stub_branch_show()
+  details.show(branch_entity('b1', 31))
+  fetches[1].cb('gh not installed')
+  h.assert_eq('PR #31 · (title and body need gh)', details.win_state.rows[1].text)
+  details.show(branch_entity('other', nil))
+  details.show(branch_entity('b1', 31))
+  h.assert_eq(1, #fetches)
+end)
+
+h.test('details: clear_pr_cache drops one PR or all of them', function()
+  details.clear_pr_cache()
+  details._pr_cache[31] = { title = 'a' }
+  details._pr_cache[32] = { title = 'b' }
+  details.clear_pr_cache(31)
+  h.assert_falsy(details._pr_cache[31])
+  h.assert_truthy(details._pr_cache[32])
+  details.clear_pr_cache()
+  h.assert_falsy(next(details._pr_cache))
+end)
+
+-- A long PR body would scroll the header away if the cursor parked on hunk 1,
+-- so a branch opens at the top with no hunk selected; ]c then goes to hunk 1.
+h.test('details: a branch opens at the top with no hunk selected, and ]c selects hunk 1', function()
+  reset()
+  stub_branch_show()
+  local sb = mock_status_buf()
+  h.after(function()
+    details.close()
+    pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+  end)
+  details.open(sb)
+  details.show(branch_entity('b1', nil))
+  local st = details.win_state
+
+  h.assert_eq(0, st.selected)
+  h.assert_eq(1, vim.api.nvim_win_get_cursor(st.win)[1])
+  details._select_hunk(details._next_hunk(st.hunks, st.selected, 1))
+  h.assert_eq(1, st.selected)
+end)
+
+h.test('details: a commit still opens parked on hunk 1', function()
+  reset()
+  stub_branch_show()
+  local sb = mock_status_buf()
+  h.after(function()
+    details.close()
+    pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+  end)
+  details.open(sb)
+  details.show({ cli_id = 'c1', kind = 'commit', meta = { sha = 'abc', message = 'm' } })
+  h.assert_eq(1, details.win_state.selected)
+end)
+
 h.test('details: showing a different entity clears the marks', function()
   reset()
   local orig = cli.diff_json
