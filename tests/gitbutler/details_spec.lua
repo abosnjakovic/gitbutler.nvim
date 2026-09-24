@@ -132,6 +132,47 @@ h.test('details: a PR header without a known forge has no link, and no CI when i
   h.assert_eq('', rows[2].text, 'the body follows the title straight away')
 end)
 
+-- The body is Markdown. It stays plain rows, but gets the colours Neovim's own
+-- markdown parsers give it: headings, inline code, fenced code and so on.
+---The row whose text is `text`, and whether any span on it names a group
+---matching `pattern` over bytes `from`..`to` (0-based, end exclusive).
+local function span_on(rows, text, pattern, from, to)
+  for _, r in ipairs(rows) do
+    if r.text == text then
+      for _, sp in ipairs(r.spans) do
+        if sp[3]:match(pattern) and (not from or (sp[1] == from and sp[2] == to)) then
+          return true
+        end
+      end
+      return false
+    end
+  end
+  error('no row ' .. text)
+end
+
+h.test('details: the PR body gets markdown highlights, row by row', function()
+  local rows = details._branch_meta_rows(pr_meta({
+    pr_info = { title = 'T', state = 'OPEN', body = '## Summary\n\nUse `but diff` here\n\n```lua\nx = 1\n```' },
+  }))
+  h.assert_truthy(span_on(rows, '## Summary', '^@markup%.heading'), 'heading')
+  h.assert_truthy(span_on(rows, 'Use `but diff` here', '^@markup%.raw', 4, 14), 'inline code over its backticks')
+  h.assert_truthy(span_on(rows, '```lua', '^@markup%.raw%.block'), 'code fence')
+  h.assert_falsy(span_on(rows, '## Summary', 'spell'), 'spell and conceal are not colours')
+end)
+
+h.test('details: without a markdown parser the body is plain text', function()
+  local orig = vim.treesitter.get_string_parser
+  h.after(function()
+    vim.treesitter.get_string_parser = orig
+  end)
+  vim.treesitter.get_string_parser = function()
+    error('no parser for markdown')
+  end
+  local rows = details._branch_meta_rows(pr_meta({ pr_info = { title = 'T', state = 'OPEN', body = '## Summary' } }))
+  h.assert_eq('## Summary', rows[#rows - 1].text)
+  h.assert_eq(0, #rows[#rows - 1].spans)
+end)
+
 -- A branch without a PR gets one line; nothing on the remote means no link.
 h.test('details: a branch without a PR gets its name, commits, push state and link', function()
   local pushed = details._branch_meta_rows(pr_meta({ pr = false, pr_info = false, commits = 3 }))
