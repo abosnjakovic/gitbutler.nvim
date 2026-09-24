@@ -365,6 +365,8 @@ function M.refresh(opts)
     end
     M.data = data
     M.rerender()
+    -- A branch header in the details pane follows the new CI state.
+    require('gitbutler.ui.details').update_branch_meta(data)
     -- Fetch the landed history below the common base (async), then re-render.
     local mb = type(data.mergeBase) == 'table' and data.mergeBase.commitId or nil
     if mb and mb ~= vim.NIL then
