@@ -733,9 +733,9 @@ function M.refresh(_buf)
   refresh()
 end
 
----Toggle draft/ready state of the PR for the branch under cursor.
----State is read from `branch.reviewState` when present; otherwise the action
----calls `set-draft` first and the user can press D again to flip if needed.
+---Toggle draft/ready state of the PR for the branch under cursor. The state
+---comes from gh: the details header's cached answer, else a fresh read.
+---`but status` sends no `reviewState`, so without gh this sets draft.
 function M.pr_toggle_draft(buf)
   local branch = buf:get_cursor_branch()
   local name = branch and branch.name or nil
@@ -757,17 +757,29 @@ function M.pr_toggle_draft(buf)
     end
     notify_result(action, err, nil)
   end
-  local is_draft = branch.reviewState == 'draft'
-  if is_draft then
-    notify_start('pr set-ready')
-    cli.pr_set_ready(name, function(err, _)
-      done('pr set-ready', err)
+  local function toggle(is_draft)
+    if is_draft then
+      notify_start('pr set-ready')
+      cli.pr_set_ready(name, function(err, _)
+        done('pr set-ready', err)
+      end)
+    else
+      notify_start('pr set-draft')
+      cli.pr_set_draft(name, function(err, _)
+        done('pr set-draft', err)
+      end)
+    end
+  end
+
+  local cached = number and details._pr_cache[number]
+  if cached and not cached.err then
+    toggle(cached.draft)
+  elseif number then
+    details._fetch_pr(number, function(err, pr)
+      toggle(not err and pr and pr.draft or branch.reviewState == 'draft')
     end)
   else
-    notify_start('pr set-draft')
-    cli.pr_set_draft(name, function(err, _)
-      done('pr set-draft', err)
-    end)
+    toggle(branch.reviewState == 'draft')
   end
 end
 
