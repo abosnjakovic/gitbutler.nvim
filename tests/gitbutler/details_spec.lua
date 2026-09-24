@@ -44,6 +44,143 @@ h.test('details: build prepends commit meta header before the diff', function()
   h.assert_truthy(not rows[1].selectable)
 end)
 
+-- A branch row's header: the PR and its link (a plain URL, last on the line, so
+-- `gx` opens it), the title, CI, then the whole body, before the branch diff.
+---@param rows DetailsRow[]
+---@return string[]
+local function texts(rows)
+  local out = {}
+  for _, r in ipairs(rows) do
+    table.insert(out, r.text)
+  end
+  return out
+end
+
+local function pr_meta(over)
+  return vim.tbl_extend('force', {
+    kind = 'branch',
+    name = 'fix/compat',
+    commits = 10,
+    push = 'pushed',
+    pr = 31,
+    web = 'https://github.com/o/r',
+    ci = { passingCheckTitles = { 'Lint', 'Format' }, pendingCheckTitles = {}, failingCheckTitles = {} },
+    pr_info = { title = 'Keep pace', body = '## Summary\r\n\r\nText', draft = true, state = 'OPEN' },
+  }, over or {})
+end
+
+h.test('details: a PR branch header shows the link, title, CI and the whole body', function()
+  local rows = details._branch_meta_rows(pr_meta())
+  h.assert_eq(
+    table.concat({
+      'https://github.com/o/r/pull/31',
+      'PR #31 · Keep pace (draft)',
+      'CI   ✓ 2 passing',
+      '',
+      '## Summary',
+      '',
+      'Text',
+      '',
+    }, '\n'),
+    table.concat(texts(rows), '\n')
+  )
+  for _, r in ipairs(rows) do
+    h.assert_eq('detail_meta', r.type)
+    h.assert_falsy(r.selectable, 'header rows are read-only')
+  end
+end)
+
+-- Passing checks are only counted; the ones needing attention are named.
+h.test('details: CI names failing and pending checks and counts the passing ones', function()
+  local rows = details._branch_meta_rows(pr_meta({
+    ci = { passingCheckTitles = { 'A', 'B' }, pendingCheckTitles = { 'Lint' }, failingCheckTitles = { 'Test mac' } },
+    pr_info = { title = 'T', body = '', draft = false, state = 'OPEN' },
+  }))
+  h.assert_eq(
+    table.concat({
+      'https://github.com/o/r/pull/31',
+      'PR #31 · T',
+      'CI   ✗ 1 failing · ● 1 pending · ✓ 2 passing',
+      '     ✗ Test mac',
+      '     ● Lint',
+      '',
+    }, '\n'),
+    table.concat(texts(rows), '\n')
+  )
+end)
+
+h.test('details: a PR header says merged or closed, and waits for gh', function()
+  local function second(over)
+    return details._branch_meta_rows(pr_meta(over))[2].text
+  end
+  h.assert_eq('PR #31 · T (merged)', second({ pr_info = { title = 'T', state = 'MERGED' } }))
+  h.assert_eq('PR #31 · T (closed)', second({ pr_info = { title = 'T', state = 'CLOSED' } }))
+  h.assert_eq('PR #31 · loading PR…', second({ pr_info = false }))
+end)
+
+h.test('details: without gh the header says what is missing, and still shows the rest', function()
+  local rows = details._branch_meta_rows(pr_meta({ pr_info = { err = 'gh not installed' } }))
+  h.assert_eq('https://github.com/o/r/pull/31', rows[1].text)
+  h.assert_eq('PR #31 · (title and body need gh)', rows[2].text)
+  h.assert_eq('CI   ✓ 2 passing', rows[3].text)
+  h.assert_eq('PR #31 · HTTP 401', details._branch_meta_rows(pr_meta({ pr_info = { err = 'HTTP 401' } }))[2].text)
+end)
+
+h.test('details: a PR header without a known forge has no link, and no CI when it is null', function()
+  local rows = details._branch_meta_rows(pr_meta({ web = false, ci = false }))
+  h.assert_eq('PR #31 · Keep pace (draft)', rows[1].text)
+  h.assert_eq('', rows[2].text, 'the body follows the title straight away')
+end)
+
+-- A branch without a PR gets one line; nothing on the remote means no link.
+h.test('details: a branch without a PR gets its name, commits, push state and link', function()
+  local pushed = details._branch_meta_rows(pr_meta({ pr = false, pr_info = false, commits = 3 }))
+  h.assert_eq('https://github.com/o/r/tree/fix/compat', pushed[1].text)
+  h.assert_eq('branch  fix/compat · 3 commits · pushed', pushed[2].text)
+  h.assert_eq(3, #pushed, 'the link, the branch line and a blank row')
+  local local_only =
+    details._branch_meta_rows(pr_meta({ pr = false, pr_info = false, commits = 1, push = 'not pushed' }))
+  h.assert_eq('branch  fix/compat · 1 commit · not pushed', local_only[1].text)
+end)
+
+-- The pane opens with the cursor at column 0 of row 1, and Neovim's `gx` opens
+-- the <cfile> under the cursor. A link that led its own line is what `gx` finds
+-- there; one at the end of a `PR #31 · ...` line made `gx` open `PR`.
+h.test('details: the header link is alone on the first row, so gx from column 0 opens it', function()
+  for _, meta in ipairs({ pr_meta(), pr_meta({ pr = false, pr_info = false }) }) do
+    local first = details._branch_meta_rows(meta)[1].text
+    h.assert_truthy(first:match('^https://github%.com/o/r/%S+$'), first)
+  end
+end)
+
+h.test('details: _branch_meta reads the PR number, push state and CI from but status', function()
+  local meta = details._branch_meta({
+    name = 'fix/compat',
+    commits = { {}, {} },
+    branchStatus = 'unpushedCommitsRequiringForce',
+    reviewId = '(#31)',
+    ci = { passingCheckTitles = {} },
+  }, 'https://github.com/o/r')
+  h.assert_eq('branch', meta.kind)
+  h.assert_eq(31, meta.pr)
+  h.assert_eq(2, meta.commits)
+  h.assert_eq('needs force push', meta.push)
+  h.assert_eq('https://github.com/o/r', meta.web)
+  h.assert_truthy(meta.ci)
+
+  local bare = details._branch_meta({ name = 'x', reviewId = vim.NIL, ci = vim.NIL, branchStatus = vim.NIL }, nil)
+  h.assert_falsy(bare.pr)
+  h.assert_falsy(bare.ci)
+  h.assert_falsy(bare.push)
+end)
+
+h.test('details: build puts the branch header above the diff, and hunks below it', function()
+  local rows, hunks = details.build(fixtures.diff_json, { meta = pr_meta() })
+  local _, plain = details.build(fixtures.diff_json, {})
+  h.assert_eq('https://github.com/o/r/pull/31', rows[1].text)
+  h.assert_eq(plain[1].row + 8, hunks[1].row, 'hunk rows shift by the 8 header rows')
+end)
+
 h.test('details: build without meta is unchanged (no header rows)', function()
   local rows = details.build(fixtures.diff_json, {})
   h.assert_eq('detail_file', rows[1].type)
