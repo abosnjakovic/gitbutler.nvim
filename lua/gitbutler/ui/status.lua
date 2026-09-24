@@ -294,9 +294,7 @@ function M.open()
   buf:on('pr_toggle_draft', actions.pr_toggle_draft)
   buf:on('pull', actions.pull)
   buf:on('close', actions.close)
-  buf:on('refresh', function()
-    M.refresh()
-  end)
+  buf:on('refresh', actions.refresh)
   buf:on('branch_new', actions.branch_new)
   buf:on('discard', actions.discard)
   buf:on('toggle_fold', actions.toggle_fold)
@@ -365,6 +363,8 @@ function M.refresh(opts)
     end
     M.data = data
     M.rerender()
+    -- A branch header in the details pane follows the new CI state.
+    require('gitbutler.ui.details').update_branch_meta(data)
     -- Fetch the landed history below the common base (async), then re-render.
     local mb = type(data.mergeBase) == 'table' and data.mergeBase.commitId or nil
     if mb and mb ~= vim.NIL then

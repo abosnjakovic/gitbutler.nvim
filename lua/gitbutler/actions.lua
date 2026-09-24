@@ -717,9 +717,16 @@ function M.pr_create(buf)
   })
 end
 
----Toggle draft/ready state of the PR for the branch under cursor.
----State is read from `branch.reviewState` when present; otherwise the action
----calls `set-draft` first and the user can press D again to flip if needed.
+---`<C-r>`: re-read everything, the cached PR titles and bodies in the details
+---pane included. The watcher's own refreshes keep that cache.
+function M.refresh(_buf)
+  require('gitbutler.ui.details').clear_pr_cache()
+  refresh()
+end
+
+---Toggle draft/ready state of the PR for the branch under cursor. The state
+---comes from gh: the details header's cached answer, else a fresh read.
+---`but status` sends no `reviewState`, so without gh this sets draft.
 function M.pr_toggle_draft(buf)
   local branch = buf:get_cursor_branch()
   local name = branch and branch.name or nil
@@ -732,17 +739,38 @@ function M.pr_toggle_draft(buf)
     return
   end
 
-  local is_draft = branch.reviewState == 'draft'
-  if is_draft then
-    notify_start('pr set-ready')
-    cli.pr_set_ready(name, function(err, _)
-      notify_result('pr set-ready', err, nil)
+  -- The details pane's header shows the draft state; read it again once it moves.
+  local details = require('gitbutler.ui.details')
+  local number = details._branch_meta(branch).pr
+  local function done(action, err)
+    if not err and number then
+      details.clear_pr_cache(number)
+    end
+    notify_result(action, err, nil)
+  end
+  local function toggle(is_draft)
+    if is_draft then
+      notify_start('pr set-ready')
+      cli.pr_set_ready(name, function(err, _)
+        done('pr set-ready', err)
+      end)
+    else
+      notify_start('pr set-draft')
+      cli.pr_set_draft(name, function(err, _)
+        done('pr set-draft', err)
+      end)
+    end
+  end
+
+  local cached = number and details._pr_cache[number]
+  if cached and not cached.err then
+    toggle(cached.draft)
+  elseif number then
+    details._fetch_pr(number, function(err, pr)
+      toggle(not err and pr and pr.draft or branch.reviewState == 'draft')
     end)
   else
-    notify_start('pr set-draft')
-    cli.pr_set_draft(name, function(err, _)
-      notify_result('pr set-draft', err, nil)
-    end)
+    toggle(branch.reviewState == 'draft')
   end
 end
 

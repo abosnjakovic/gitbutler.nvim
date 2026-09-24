@@ -107,4 +107,7 @@ function M.summary()
   return M.pass, M.fail, M.errors
 end
 
+-- Seed the forge web base so no test runs `git remote get-url origin`.
+require('gitbutler.forge')._web_base = false
+
 return M

@@ -44,6 +44,184 @@ h.test('details: build prepends commit meta header before the diff', function()
   h.assert_truthy(not rows[1].selectable)
 end)
 
+-- A branch row's header: the PR and its link (a plain URL, last on the line, so
+-- `gx` opens it), the title, CI, then the whole body, before the branch diff.
+---@param rows DetailsRow[]
+---@return string[]
+local function texts(rows)
+  local out = {}
+  for _, r in ipairs(rows) do
+    table.insert(out, r.text)
+  end
+  return out
+end
+
+local function pr_meta(over)
+  return vim.tbl_extend('force', {
+    kind = 'branch',
+    name = 'fix/compat',
+    commits = 10,
+    push = 'pushed',
+    pr = 31,
+    web = 'https://github.com/o/r',
+    ci = { passingCheckTitles = { 'Lint', 'Format' }, pendingCheckTitles = {}, failingCheckTitles = {} },
+    pr_info = { title = 'Keep pace', body = '## Summary\r\n\r\nText', draft = true, state = 'OPEN' },
+  }, over or {})
+end
+
+h.test('details: a PR branch header shows the link, title, CI and the whole body', function()
+  local rows = details._branch_meta_rows(pr_meta())
+  h.assert_eq(
+    table.concat({
+      'https://github.com/o/r/pull/31',
+      'PR #31 · Keep pace (draft)',
+      'CI   ✓ 2 passing',
+      '',
+      '## Summary',
+      '',
+      'Text',
+      '',
+    }, '\n'),
+    table.concat(texts(rows), '\n')
+  )
+  for _, r in ipairs(rows) do
+    h.assert_eq('detail_meta', r.type)
+    h.assert_falsy(r.selectable, 'header rows are read-only')
+  end
+end)
+
+-- Passing checks are only counted; the ones needing attention are named.
+h.test('details: CI names failing and pending checks and counts the passing ones', function()
+  local rows = details._branch_meta_rows(pr_meta({
+    ci = { passingCheckTitles = { 'A', 'B' }, pendingCheckTitles = { 'Lint' }, failingCheckTitles = { 'Test mac' } },
+    pr_info = { title = 'T', body = '', draft = false, state = 'OPEN' },
+  }))
+  h.assert_eq(
+    table.concat({
+      'https://github.com/o/r/pull/31',
+      'PR #31 · T',
+      'CI   ✗ 1 failing · ● 1 pending · ✓ 2 passing',
+      '     ✗ Test mac',
+      '     ● Lint',
+      '',
+    }, '\n'),
+    table.concat(texts(rows), '\n')
+  )
+end)
+
+h.test('details: a PR header says merged or closed, and waits for gh', function()
+  local function second(over)
+    return details._branch_meta_rows(pr_meta(over))[2].text
+  end
+  h.assert_eq('PR #31 · T (merged)', second({ pr_info = { title = 'T', state = 'MERGED' } }))
+  h.assert_eq('PR #31 · T (closed)', second({ pr_info = { title = 'T', state = 'CLOSED' } }))
+  h.assert_eq('PR #31 · loading PR…', second({ pr_info = false }))
+end)
+
+h.test('details: without gh the header says what is missing, and still shows the rest', function()
+  local rows = details._branch_meta_rows(pr_meta({ pr_info = { err = 'gh not installed' } }))
+  h.assert_eq('https://github.com/o/r/pull/31', rows[1].text)
+  h.assert_eq('PR #31 · (title and body need gh)', rows[2].text)
+  h.assert_eq('CI   ✓ 2 passing', rows[3].text)
+  h.assert_eq('PR #31 · HTTP 401', details._branch_meta_rows(pr_meta({ pr_info = { err = 'HTTP 401' } }))[2].text)
+end)
+
+h.test('details: a PR header without a known forge has no link, and no CI when it is null', function()
+  local rows = details._branch_meta_rows(pr_meta({ web = false, ci = false }))
+  h.assert_eq('PR #31 · Keep pace (draft)', rows[1].text)
+  h.assert_eq('', rows[2].text, 'the body follows the title straight away')
+end)
+
+-- The body is Markdown. It stays plain rows, but gets the colours Neovim's own
+-- markdown parsers give it: headings, inline code, fenced code and so on.
+---The row whose text is `text`, and whether any span on it names a group
+---matching `pattern` over bytes `from`..`to` (0-based, end exclusive).
+local function span_on(rows, text, pattern, from, to)
+  for _, r in ipairs(rows) do
+    if r.text == text then
+      for _, sp in ipairs(r.spans) do
+        if sp[3]:match(pattern) and (not from or (sp[1] == from and sp[2] == to)) then
+          return true
+        end
+      end
+      return false
+    end
+  end
+  error('no row ' .. text)
+end
+
+h.test('details: the PR body gets markdown highlights, row by row', function()
+  local rows = details._branch_meta_rows(pr_meta({
+    pr_info = { title = 'T', state = 'OPEN', body = '## Summary\n\nUse `but diff` here\n\n```lua\nx = 1\n```' },
+  }))
+  h.assert_truthy(span_on(rows, '## Summary', '^@markup%.heading'), 'heading')
+  h.assert_truthy(span_on(rows, 'Use `but diff` here', '^@markup%.raw', 4, 14), 'inline code over its backticks')
+  h.assert_truthy(span_on(rows, '```lua', '^@markup%.raw%.block'), 'code fence')
+  h.assert_falsy(span_on(rows, '## Summary', 'spell'), 'spell and conceal are not colours')
+end)
+
+h.test('details: without a markdown parser the body is plain text', function()
+  local orig = vim.treesitter.get_string_parser
+  h.after(function()
+    vim.treesitter.get_string_parser = orig
+  end)
+  vim.treesitter.get_string_parser = function()
+    error('no parser for markdown')
+  end
+  local rows = details._branch_meta_rows(pr_meta({ pr_info = { title = 'T', state = 'OPEN', body = '## Summary' } }))
+  h.assert_eq('## Summary', rows[#rows - 1].text)
+  h.assert_eq(0, #rows[#rows - 1].spans)
+end)
+
+-- A branch without a PR gets one line; nothing on the remote means no link.
+h.test('details: a branch without a PR gets its name, commits, push state and link', function()
+  local pushed = details._branch_meta_rows(pr_meta({ pr = false, pr_info = false, commits = 3 }))
+  h.assert_eq('https://github.com/o/r/tree/fix/compat', pushed[1].text)
+  h.assert_eq('branch  fix/compat · 3 commits · pushed', pushed[2].text)
+  h.assert_eq(3, #pushed, 'the link, the branch line and a blank row')
+  local local_only =
+    details._branch_meta_rows(pr_meta({ pr = false, pr_info = false, commits = 1, push = 'not pushed' }))
+  h.assert_eq('branch  fix/compat · 1 commit · not pushed', local_only[1].text)
+end)
+
+-- The pane opens with the cursor at column 0 of row 1, and Neovim's `gx` opens
+-- the <cfile> under the cursor. A link that led its own line is what `gx` finds
+-- there; one at the end of a `PR #31 · ...` line made `gx` open `PR`.
+h.test('details: the header link is alone on the first row, so gx from column 0 opens it', function()
+  for _, meta in ipairs({ pr_meta(), pr_meta({ pr = false, pr_info = false }) }) do
+    local first = details._branch_meta_rows(meta)[1].text
+    h.assert_truthy(first:match('^https://github%.com/o/r/%S+$'), first)
+  end
+end)
+
+h.test('details: _branch_meta reads the PR number, push state and CI from but status', function()
+  local meta = details._branch_meta({
+    name = 'fix/compat',
+    commits = { {}, {} },
+    branchStatus = 'unpushedCommitsRequiringForce',
+    reviewId = '(#31)',
+    ci = { passingCheckTitles = {} },
+  }, 'https://github.com/o/r')
+  h.assert_eq('branch', meta.kind)
+  h.assert_eq(31, meta.pr)
+  h.assert_eq(2, meta.commits)
+  h.assert_eq('needs force push', meta.push)
+  h.assert_eq('https://github.com/o/r', meta.web)
+  h.assert_truthy(meta.ci)
+
+  local bare = details._branch_meta({ name = 'x', reviewId = vim.NIL, ci = vim.NIL, branchStatus = vim.NIL }, nil)
+  h.assert_falsy(bare.pr)
+  h.assert_falsy(bare.ci)
+  h.assert_falsy(bare.push)
+end)
+
+h.test('details: build puts the branch header above the diff, and hunks below it', function()
+  local rows, hunks = details.build(fixtures.diff_json, { meta = pr_meta() })
+  local _, plain = details.build(fixtures.diff_json, {})
+  h.assert_eq('https://github.com/o/r/pull/31', rows[1].text)
+  h.assert_eq(plain[1].row + 8, hunks[1].row, 'hunk rows shift by the 8 header rows')
+end)
+
 h.test('details: build without meta is unchanged (no header rows)', function()
   local rows = details.build(fixtures.diff_json, {})
   h.assert_eq('detail_file', rows[1].type)
@@ -766,6 +944,177 @@ h.test('details: a failed discard keeps the marks so the rest can be retried', f
 
   details.close()
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- The PR title and body are the one part of a branch header that waits on the
+-- network, so they are fetched once per PR and cached, and a late answer only
+-- lands on a pane still showing that PR.
+
+---Stub the diff and PR fetch for show(); PR fetches queue until answered.
+---@return { number: integer, cb: function }[] fetches
+local function stub_branch_show()
+  local fetches = {}
+  local orig_diff, orig_fetch = cli.diff_json, details._fetch_pr
+  h.after(function()
+    cli.diff_json, details._fetch_pr = orig_diff, orig_fetch
+    details.clear_pr_cache()
+  end)
+  details.clear_pr_cache()
+  cli.diff_json = function(_, cb)
+    cb(nil, fixtures.diff_json)
+  end
+  details._fetch_pr = function(number, cb)
+    table.insert(fetches, { number = number, cb = cb })
+  end
+  return fetches
+end
+
+local function branch_entity(id, pr)
+  return { cli_id = id, kind = 'branch', meta = { kind = 'branch', name = id, commits = 1, pr = pr } }
+end
+
+h.test('details: a PR branch fetches its title once and fills the header in', function()
+  reset()
+  local fetches = stub_branch_show()
+  details.show(branch_entity('b1', 31))
+  h.assert_eq(1, #fetches)
+  h.assert_eq(31, fetches[1].number)
+  h.assert_eq('PR #31 · loading PR…', details.win_state.rows[1].text)
+
+  fetches[1].cb(nil, { title = 'Keep pace', body = 'Body', draft = false, state = 'OPEN' })
+  h.assert_eq('PR #31 · Keep pace', details.win_state.rows[1].text)
+
+  -- Back to the same PR later: served from the cache, no second fetch.
+  details.show(branch_entity('other', nil))
+  details.show(branch_entity('b1', 31))
+  h.assert_eq(1, #fetches)
+  h.assert_eq('PR #31 · Keep pace', details.win_state.rows[1].text)
+end)
+
+h.test('details: a PR answer that arrives after the pane moved on is cached but not drawn', function()
+  reset()
+  local fetches = stub_branch_show()
+  details.show(branch_entity('b1', 31))
+  details.show({ cli_id = 'aa', kind = 'file' })
+  local before = details.win_state.rows[1].text
+
+  fetches[1].cb(nil, { title = 'Late', body = '', state = 'OPEN' })
+
+  h.assert_eq('aa', details.win_state.entity.cli_id)
+  h.assert_eq(before, details.win_state.rows[1].text, 'the file diff was redrawn with a PR header')
+  h.assert_eq('Late', details._pr_cache[31].title)
+end)
+
+h.test('details: a PR fetch in flight is not repeated, and its answer reaches a re-shown branch', function()
+  reset()
+  local fetches = stub_branch_show()
+  details.show(branch_entity('b1', 31))
+  details.show({ cli_id = 'aa', kind = 'file' })
+  details.show(branch_entity('b1', 31))
+  h.assert_eq(1, #fetches)
+
+  fetches[1].cb(nil, { title = 'Once', body = '', state = 'OPEN' })
+  h.assert_eq('PR #31 · Once', details.win_state.rows[1].text)
+end)
+
+-- A broken gh costs one call per PR per session, not one per cursor move.
+h.test('details: a failed PR fetch is cached and shown', function()
+  reset()
+  local fetches = stub_branch_show()
+  details.show(branch_entity('b1', 31))
+  fetches[1].cb('gh not installed')
+  h.assert_eq('PR #31 · (title and body need gh)', details.win_state.rows[1].text)
+  details.show(branch_entity('other', nil))
+  details.show(branch_entity('b1', 31))
+  h.assert_eq(1, #fetches)
+end)
+
+h.test('details: clear_pr_cache drops one PR or all of them', function()
+  details.clear_pr_cache()
+  details._pr_cache[31] = { title = 'a' }
+  details._pr_cache[32] = { title = 'b' }
+  details.clear_pr_cache(31)
+  h.assert_falsy(details._pr_cache[31])
+  h.assert_truthy(details._pr_cache[32])
+  details.clear_pr_cache()
+  h.assert_falsy(next(details._pr_cache))
+end)
+
+-- A long PR body would scroll the header away if the cursor parked on hunk 1,
+-- so a branch opens at the top with no hunk selected; ]c then goes to hunk 1.
+h.test('details: a branch opens at the top with no hunk selected, and ]c selects hunk 1', function()
+  reset()
+  stub_branch_show()
+  local sb = mock_status_buf()
+  h.after(function()
+    details.close()
+    pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+  end)
+  details.open(sb)
+  details.show(branch_entity('b1', nil))
+  local st = details.win_state
+
+  h.assert_eq(0, st.selected)
+  h.assert_eq(1, vim.api.nvim_win_get_cursor(st.win)[1])
+  details._select_hunk(details._next_hunk(st.hunks, st.selected, 1))
+  h.assert_eq(1, st.selected)
+end)
+
+h.test('details: a commit still opens parked on hunk 1', function()
+  reset()
+  stub_branch_show()
+  local sb = mock_status_buf()
+  h.after(function()
+    details.close()
+    pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+  end)
+  details.open(sb)
+  details.show({ cli_id = 'c1', kind = 'commit', meta = { sha = 'abc', message = 'm' } })
+  h.assert_eq(1, details.win_state.selected)
+end)
+
+-- CI moves on while the pane sits on a branch; every status refresh carries
+-- the new state, so the header follows it without moving off the row.
+local function status_with(branch)
+  return { stacks = { { branches = { branch } } } }
+end
+
+h.test('details: a status refresh redraws the shown branch header with new CI', function()
+  reset()
+  local fetches = stub_branch_show()
+  details.show(branch_entity('b1', 31))
+  fetches[1].cb(nil, { title = 'Keep pace', body = '', state = 'OPEN' })
+
+  details.update_branch_meta(status_with({
+    name = 'b1',
+    reviewId = '(#31)',
+    commits = { {} },
+    ci = { passingCheckTitles = {}, pendingCheckTitles = {}, failingCheckTitles = { 'Lint' } },
+  }))
+
+  h.assert_eq('PR #31 · Keep pace', details.win_state.rows[1].text, 'the gh answer survives')
+  h.assert_eq('CI   ✗ 1 failing', details.win_state.rows[2].text)
+  h.assert_eq(1, #fetches, 'new CI is no reason to ask gh again')
+end)
+
+-- Opening a PR with `v` turns the branch line into a PR header on the next refresh.
+h.test('details: a status refresh that brings a new PR fetches it', function()
+  reset()
+  local fetches = stub_branch_show()
+  details.show(branch_entity('b1', nil))
+  details.update_branch_meta(status_with({ name = 'b1', reviewId = '(#40)', commits = { {} } }))
+  h.assert_eq(1, #fetches)
+  h.assert_eq(40, fetches[1].number)
+  h.assert_eq('PR #40 · loading PR…', details.win_state.rows[1].text)
+end)
+
+h.test('details: a status refresh leaves a non-branch pane alone', function()
+  reset()
+  stub_branch_show()
+  details.show({ cli_id = 'aa', kind = 'file' })
+  local before = details.win_state.rows
+  details.update_branch_meta(status_with({ name = 'aa', reviewId = '(#1)' }))
+  h.assert_eq(before, details.win_state.rows, 'the file diff was redrawn')
 end)
 
 h.test('details: showing a different entity clears the marks', function()

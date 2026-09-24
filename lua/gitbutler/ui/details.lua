@@ -163,6 +163,169 @@ function M._commit_meta_rows(meta)
   return rows
 end
 
+---`branchStatus` from `but status` as the branch line says it.
+local PUSH_LABEL = {
+  nothingToPush = 'pushed',
+  unpushedCommits = 'unpushed commits',
+  unpushedCommitsRequiringForce = 'needs force push',
+  completelyUnpushed = 'not pushed',
+  integrated = 'integrated',
+}
+
+---The header meta for a branch row, from its `but status` JSON. `web` is the
+---repo's web page (`forge.web_base()`), nil when the remote is not a known
+---forge. Pure.
+---@param branch table
+---@param web? string
+---@return table
+function M._branch_meta(branch, web)
+  local review = scalar(branch.reviewId, '')
+  return {
+    kind = 'branch',
+    name = scalar(branch.name, '?'),
+    commits = #list(branch.commits),
+    push = PUSH_LABEL[scalar(branch.branchStatus, '')],
+    pr = tonumber(tostring(review):match('%d+')),
+    web = web,
+    ci = type(branch.ci) == 'table' and branch.ci or nil,
+  }
+end
+
+---Captures in the markdown queries that name no colour.
+local NOT_A_COLOUR = { spell = true, nospell = true, conceal = true }
+
+---Highlight spans for Markdown `lines`, keyed by 0-based line: `{ start, end,
+---group }` in bytes, from Neovim's own markdown parsers (injections included,
+---so a fenced ```lua block gets Lua colours). Empty when no parser is there.
+---@param lines string[]
+---@return table<integer, { [1]: integer, [2]: integer, [3]: string }[]>
+local function markdown_spans(lines)
+  local out = {}
+  local text = table.concat(lines, '\n')
+  local ok, parser = pcall(vim.treesitter.get_string_parser, text, 'markdown')
+  if not ok or not parser or not pcall(parser.parse, parser, true) then
+    return out
+  end
+  parser:for_each_tree(function(tree, ltree)
+    local lang = ltree:lang()
+    local qok, query = pcall(vim.treesitter.query.get, lang, 'highlights')
+    if not qok or not query then
+      return
+    end
+    for id, node in query:iter_captures(tree:root(), text, 0, -1) do
+      local name = query.captures[id]
+      if not NOT_A_COLOUR[name] and name:sub(1, 1) ~= '_' then
+        local sr, sc, er, ec = node:range()
+        for r = sr, er do
+          local from = r == sr and sc or 0
+          local to = r == er and ec or #(lines[r + 1] or '')
+          if to > from then
+            out[r] = out[r] or {}
+            table.insert(out[r], { from, to, '@' .. name .. '.' .. lang })
+          end
+        end
+      end
+    end
+  end)
+  return out
+end
+
+---Body highlights per `gh` answer. The pane rebuilds on every hunk move, and
+---parsing a longer body costs a few milliseconds each time; the answer never
+---changes, so its spans don't either. Weak keys: an answer dropped from the PR
+---cache takes its spans with it.
+local md_memo = setmetatable({}, { __mode = 'k' })
+
+---Header rows for a branch's diff. With a PR: its link, `PR #n · <title>`, CI,
+---then the whole body; without one, the branch's link and a summary line. The
+---link is alone on the first row: the pane opens with the cursor at column 0
+---there, and Neovim's `gx` opens the <cfile> under the cursor. Pure.
+---@param meta table from `_branch_meta`, plus `pr_info` once `gh` has answered
+---@return DetailsRow[]
+function M._branch_meta_rows(meta)
+  local rows = {}
+  local function line(text, hl)
+    local r = { text = text, spans = {}, type = 'detail_meta', graph = true, selectable = false }
+    if hl and #text > 0 then
+      table.insert(r.spans, { 0, #text, hl })
+    end
+    table.insert(rows, r)
+    return r
+  end
+
+  if not meta.pr then
+    if meta.web and meta.push ~= 'not pushed' then
+      line(meta.web .. '/tree/' .. meta.name, HL.dim)
+    end
+    local n = meta.commits or 0
+    local text = 'branch  ' .. meta.name .. ' · ' .. n .. (n == 1 and ' commit' or ' commits')
+    if meta.push then
+      text = text .. ' · ' .. meta.push
+    end
+    line(text, HL.dim)
+    line('', nil)
+    return rows
+  end
+
+  if meta.web then
+    line(meta.web .. '/pull/' .. meta.pr, HL.dim)
+  end
+  local prefix = 'PR #' .. meta.pr .. ' · '
+  local info = meta.pr_info
+  if not info then
+    line(prefix .. 'loading PR…', HL.dim)
+  elseif info.err then
+    line(prefix .. (info.err == 'gh not installed' and '(title and body need gh)' or info.err), HL.dim)
+  else
+    local state = info.state == 'MERGED' and ' (merged)'
+      or info.state == 'CLOSED' and ' (closed)'
+      or info.draft and ' (draft)'
+      or ''
+    -- The title reads as text, like a commit message; only the prefix is dim.
+    local r = line(prefix .. scalar(info.title, '') .. state, nil)
+    table.insert(r.spans, { 0, #prefix, HL.dim })
+  end
+
+  local ci = meta.ci
+  if ci then
+    local failing, pending = list(ci.failingCheckTitles), list(ci.pendingCheckTitles)
+    local passing = #list(ci.passingCheckTitles)
+    local parts = {}
+    if #failing > 0 then
+      table.insert(parts, '✗ ' .. #failing .. ' failing')
+    end
+    if #pending > 0 then
+      table.insert(parts, '● ' .. #pending .. ' pending')
+    end
+    if passing > 0 then
+      table.insert(parts, '✓ ' .. passing .. ' passing')
+    end
+    if #parts > 0 then
+      line('CI   ' .. table.concat(parts, ' · '), HL.dim)
+    end
+    for _, title in ipairs(failing) do
+      line('     ✗ ' .. title, HL.dim)
+    end
+    for _, title in ipairs(pending) do
+      line('     ● ' .. title, HL.dim)
+    end
+  end
+
+  line('', nil)
+  local body = info and not info.err and scalar(info.body, '') or ''
+  if body ~= '' then
+    local body_lines = split_lines((body:gsub('\r\n', '\n')))
+    md_memo[info] = md_memo[info] or markdown_spans(body_lines)
+    local spans = md_memo[info]
+    for i, bl in ipairs(body_lines) do
+      local r = line(bl, nil)
+      vim.list_extend(r.spans, spans[i - 1] or {})
+    end
+    line('', nil)
+  end
+  return rows
+end
+
 ---Build detail rows from decoded `but diff <id> --format=json`.
 ---
 ---Not quite pure: it writes `.stale` onto each comment record in
@@ -187,9 +350,10 @@ function M.build(data, state)
     return #rows
   end
 
-  -- Commit meta first (when showing a whole commit) so hunk row indices, which
-  -- are recorded from push() below, already account for the header height.
-  for _, r in ipairs(M._commit_meta_rows(state.meta)) do
+  -- Commit or branch meta first so hunk row indices, which are recorded from
+  -- push() below, already account for the header height.
+  local meta = state.meta
+  for _, r in ipairs(meta and meta.kind == 'branch' and M._branch_meta_rows(meta) or M._commit_meta_rows(meta)) do
     push(r)
   end
 
@@ -1280,6 +1444,88 @@ function M.resize(delta)
   M._apply_size()
 end
 
+---PR title, body and state per PR number, as `view_pr` answered, errors
+---included, kept for the session: a broken `gh` costs one call per PR, not one
+---per cursor move. `clear_pr_cache` is how a PR is read again.
+---@type table<integer, table>
+M._pr_cache = {}
+local pr_inflight = {}
+
+---@param number? integer one PR, or every PR when nil
+function M.clear_pr_cache(number)
+  if number then
+    M._pr_cache[number] = nil
+  else
+    M._pr_cache = {}
+  end
+end
+
+---Fetch a PR's details through the remote's forge adapter. A seam for tests.
+---@param number integer
+---@param callback fun(err?: string, pr?: table)
+function M._fetch_pr(number, callback)
+  local adapter = require('gitbutler.forge').detect_from_remote()
+  if not (adapter and adapter.view_pr) then
+    callback('no forge adapter for this remote')
+    return
+  end
+  adapter.view_pr(number, callback)
+end
+
+---Fill a branch header's `pr_info` from the cache, or fetch it once. The answer
+---is drawn only if the pane still shows that PR by then.
+---@param meta table
+local function load_pr(meta)
+  local n = meta.pr
+  if M._pr_cache[n] then
+    meta.pr_info = M._pr_cache[n]
+    return
+  end
+  if pr_inflight[n] then
+    return
+  end
+  pr_inflight[n] = true
+  M._fetch_pr(n, function(err, pr)
+    pr_inflight[n] = nil
+    M._pr_cache[n] = err and { err = err } or pr
+    local cur = M.win_state.entity
+    if cur and cur.meta and cur.meta.kind == 'branch' and cur.meta.pr == n then
+      cur.meta.pr_info = M._pr_cache[n]
+      M._rebuild()
+    end
+  end)
+end
+
+---Bring a shown branch header up to date with a fresh `but status`, so its CI
+---line follows the checks without moving off the row. The gh answer is kept
+---while the PR number holds; a new PR (opened with `v`) is fetched.
+---@param data table decoded `but status`
+function M.update_branch_meta(data)
+  local entity = M.win_state.entity
+  local meta = entity and entity.meta
+  if not (meta and meta.kind == 'branch') then
+    return
+  end
+  for _, stack in ipairs(list(type(data) == 'table' and data.stacks)) do
+    for _, branch in ipairs(list(stack.branches)) do
+      if scalar(branch.name, nil) == meta.name then
+        local fresh = M._branch_meta(branch, meta.web)
+        if fresh.pr == meta.pr then
+          fresh.pr_info = meta.pr_info
+        end
+        if not vim.deep_equal(fresh, meta) then
+          entity.meta = fresh
+          if fresh.pr and not fresh.pr_info then
+            load_pr(fresh)
+          end
+          M._rebuild()
+        end
+        return
+      end
+    end
+  end
+end
+
 ---Load and display the diff for `entity`. No-op when it is already showing.
 ---@param entity { cli_id: string, kind?: string, meta?: table }
 function M.show(entity)
@@ -1301,6 +1547,10 @@ function M.show(entity)
   st.gen = st.gen + 1
   local gen = st.gen
   M._render(info_rows('  loading diff…', HL.dim))
+  local branch = entity.meta and entity.meta.kind == 'branch'
+  if branch and entity.meta.pr then
+    load_pr(entity.meta)
+  end
 
   require('gitbutler.cli').diff_json(entity.cli_id, function(err, data)
     -- A newer show() has since fired; this payload is for the wrong entity.
@@ -1313,6 +1563,16 @@ function M.show(entity)
     end
     -- Kept so selection/mark changes can re-render without another CLI call.
     M.win_state.data = data
+    if branch then
+      -- A long PR body would scroll the header away if the cursor parked on
+      -- hunk 1, so open at the top with no hunk selected; ]c goes to hunk 1.
+      M.win_state.selected = 0
+      M._rebuild()
+      if M.is_open() then
+        pcall(vim.api.nvim_win_set_cursor, M.win_state.win, { 1, 0 })
+      end
+      return
+    end
     M._rebuild()
     -- Park the cursor on hunk 1 too, or cursorline and the `▌` bar disagree and
     -- the first `j` skips to hunk 2. No-ops when the diff has no hunks.
@@ -1423,9 +1683,12 @@ function M.show_for_line(line)
     return
   end
   -- A whole-commit row gets the same commit/Author/Date/message header the
-  -- landed-history view shows, prepended to its structured diff.
+  -- landed-history view shows, prepended to its structured diff; a branch row
+  -- gets its PR, link and CI.
   local meta
-  if line.type == 'commit' then
+  if line.type == 'branch' then
+    meta = M._branch_meta(line.data.branch or {}, require('gitbutler.forge').web_base())
+  elseif line.type == 'commit' then
     local c = line.data.commit or {}
     meta = {
       sha = line.data.sha,
