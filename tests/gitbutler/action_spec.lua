@@ -227,6 +227,64 @@ test('actions.pr_toggle_draft drops that PR from the cache once the toggle lands
   assert_truthy(details._pr_cache[32], 'other PRs keep their cache')
 end)
 
+-- `but status` never sends `reviewState`, so V used to set draft every time.
+-- The draft state comes from gh instead: the header's cached answer when there
+-- is one, else a fresh read.
+
+---Run V on PR #31 and report which toggle ran.
+---@param cached? table what the PR cache holds for #31
+---@param fetched? table what a fresh gh read answers
+---@return string? toggle 'ready' or 'draft', integer fetches
+local function run_toggle(cached, fetched)
+  local details = require('gitbutler.ui.details')
+  local status = require('gitbutler.ui.status')
+  local ran, fetches = nil, 0
+  local orig = { cli.pr_set_draft, cli.pr_set_ready, vim.notify, status.refresh, details._fetch_pr }
+  h.after(function()
+    cli.pr_set_draft, cli.pr_set_ready, vim.notify, status.refresh, details._fetch_pr = unpack(orig)
+    details.clear_pr_cache()
+  end)
+  cli.pr_set_draft = function(_, cb)
+    ran = 'draft'
+    cb(nil, {})
+  end
+  cli.pr_set_ready = function(_, cb)
+    ran = 'ready'
+    cb(nil, {})
+  end
+  details._fetch_pr = function(_, cb)
+    fetches = fetches + 1
+    cb(nil, fetched)
+  end
+  vim.notify = function() end
+  status.refresh = function() end
+  details.clear_pr_cache()
+  details._pr_cache[31] = cached
+
+  local buf = h.mock_buffer()
+  buf.get_cursor_branch = function()
+    return { name = 'feat', reviewId = '(#31)' }
+  end
+  actions.pr_toggle_draft(buf)
+  return ran, fetches
+end
+
+test('actions.pr_toggle_draft marks a cached draft PR ready', function()
+  local ran, fetches = run_toggle({ title = 't', draft = true })
+  assert_eq('ready', ran)
+  assert_eq(0, fetches, 'the cached answer is enough')
+end)
+
+test('actions.pr_toggle_draft sets a cached ready PR to draft', function()
+  assert_eq('draft', (run_toggle({ title = 't', draft = false })))
+end)
+
+test('actions.pr_toggle_draft asks gh when nothing is cached', function()
+  local ran, fetches = run_toggle(nil, { title = 't', draft = true })
+  assert_eq('ready', ran)
+  assert_eq(1, fetches)
+end)
+
 -- ── Undo / redo confirm gating ───────────────
 
 test('actions.undo does not call cli.undo when the user declines the confirm', function()
