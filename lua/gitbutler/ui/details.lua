@@ -191,6 +191,51 @@ function M._branch_meta(branch, web)
   }
 end
 
+---Captures in the markdown queries that name no colour.
+local NOT_A_COLOUR = { spell = true, nospell = true, conceal = true }
+
+---Highlight spans for Markdown `lines`, keyed by 0-based line: `{ start, end,
+---group }` in bytes, from Neovim's own markdown parsers (injections included,
+---so a fenced ```lua block gets Lua colours). Empty when no parser is there.
+---@param lines string[]
+---@return table<integer, { [1]: integer, [2]: integer, [3]: string }[]>
+local function markdown_spans(lines)
+  local out = {}
+  local text = table.concat(lines, '\n')
+  local ok, parser = pcall(vim.treesitter.get_string_parser, text, 'markdown')
+  if not ok or not parser or not pcall(parser.parse, parser, true) then
+    return out
+  end
+  parser:for_each_tree(function(tree, ltree)
+    local lang = ltree:lang()
+    local qok, query = pcall(vim.treesitter.query.get, lang, 'highlights')
+    if not qok or not query then
+      return
+    end
+    for id, node in query:iter_captures(tree:root(), text, 0, -1) do
+      local name = query.captures[id]
+      if not NOT_A_COLOUR[name] and name:sub(1, 1) ~= '_' then
+        local sr, sc, er, ec = node:range()
+        for r = sr, er do
+          local from = r == sr and sc or 0
+          local to = r == er and ec or #(lines[r + 1] or '')
+          if to > from then
+            out[r] = out[r] or {}
+            table.insert(out[r], { from, to, '@' .. name .. '.' .. lang })
+          end
+        end
+      end
+    end
+  end)
+  return out
+end
+
+---Body highlights per `gh` answer. The pane rebuilds on every hunk move, and
+---parsing a longer body costs a few milliseconds each time; the answer never
+---changes, so its spans don't either. Weak keys: an answer dropped from the PR
+---cache takes its spans with it.
+local md_memo = setmetatable({}, { __mode = 'k' })
+
 ---Header rows for a branch's diff. With a PR: its link, `PR #n · <title>`, CI,
 ---then the whole body; without one, the branch's link and a summary line. The
 ---link is alone on the first row: the pane opens with the cursor at column 0
@@ -269,8 +314,12 @@ function M._branch_meta_rows(meta)
   line('', nil)
   local body = info and not info.err and scalar(info.body, '') or ''
   if body ~= '' then
-    for _, bl in ipairs(split_lines((body:gsub('\r\n', '\n')))) do
-      line(bl, nil)
+    local body_lines = split_lines((body:gsub('\r\n', '\n')))
+    md_memo[info] = md_memo[info] or markdown_spans(body_lines)
+    local spans = md_memo[info]
+    for i, bl in ipairs(body_lines) do
+      local r = line(bl, nil)
+      vim.list_extend(r.spans, spans[i - 1] or {})
     end
     line('', nil)
   end
