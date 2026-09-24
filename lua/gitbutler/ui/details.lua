@@ -163,6 +163,120 @@ function M._commit_meta_rows(meta)
   return rows
 end
 
+---`branchStatus` from `but status` as the branch line says it.
+local PUSH_LABEL = {
+  nothingToPush = 'pushed',
+  unpushedCommits = 'unpushed commits',
+  unpushedCommitsRequiringForce = 'needs force push',
+  completelyUnpushed = 'not pushed',
+  integrated = 'integrated',
+}
+
+---The header meta for a branch row, from its `but status` JSON. `web` is the
+---repo's web page (`forge.web_base()`), nil when the remote is not a known
+---forge. Pure.
+---@param branch table
+---@param web? string
+---@return table
+function M._branch_meta(branch, web)
+  local review = scalar(branch.reviewId, '')
+  return {
+    kind = 'branch',
+    name = scalar(branch.name, '?'),
+    commits = #list(branch.commits),
+    push = PUSH_LABEL[scalar(branch.branchStatus, '')],
+    pr = tonumber(tostring(review):match('%d+')),
+    web = web,
+    ci = type(branch.ci) == 'table' and branch.ci or nil,
+  }
+end
+
+---Header rows for a branch's diff. With a PR: its link, `PR #n · <title>`, CI,
+---then the whole body; without one, the branch's link and a summary line. The
+---link is alone on the first row: the pane opens with the cursor at column 0
+---there, and Neovim's `gx` opens the <cfile> under the cursor. Pure.
+---@param meta table from `_branch_meta`, plus `pr_info` once `gh` has answered
+---@return DetailsRow[]
+function M._branch_meta_rows(meta)
+  local rows = {}
+  local function line(text, hl)
+    local r = { text = text, spans = {}, type = 'detail_meta', graph = true, selectable = false }
+    if hl and #text > 0 then
+      table.insert(r.spans, { 0, #text, hl })
+    end
+    table.insert(rows, r)
+    return r
+  end
+
+  if not meta.pr then
+    if meta.web and meta.push ~= 'not pushed' then
+      line(meta.web .. '/tree/' .. meta.name, HL.dim)
+    end
+    local n = meta.commits or 0
+    local text = 'branch  ' .. meta.name .. ' · ' .. n .. (n == 1 and ' commit' or ' commits')
+    if meta.push then
+      text = text .. ' · ' .. meta.push
+    end
+    line(text, HL.dim)
+    line('', nil)
+    return rows
+  end
+
+  if meta.web then
+    line(meta.web .. '/pull/' .. meta.pr, HL.dim)
+  end
+  local prefix = 'PR #' .. meta.pr .. ' · '
+  local info = meta.pr_info
+  if not info then
+    line(prefix .. 'loading PR…', HL.dim)
+  elseif info.err then
+    line(prefix .. (info.err == 'gh not installed' and '(title and body need gh)' or info.err), HL.dim)
+  else
+    local state = info.state == 'MERGED' and ' (merged)'
+      or info.state == 'CLOSED' and ' (closed)'
+      or info.draft and ' (draft)'
+      or ''
+    -- The title reads as text, like a commit message; only the prefix is dim.
+    local r = line(prefix .. scalar(info.title, '') .. state, nil)
+    table.insert(r.spans, { 0, #prefix, HL.dim })
+  end
+
+  local ci = meta.ci
+  if ci then
+    local failing, pending = list(ci.failingCheckTitles), list(ci.pendingCheckTitles)
+    local passing = #list(ci.passingCheckTitles)
+    local parts = {}
+    if #failing > 0 then
+      table.insert(parts, '✗ ' .. #failing .. ' failing')
+    end
+    if #pending > 0 then
+      table.insert(parts, '● ' .. #pending .. ' pending')
+    end
+    if passing > 0 then
+      table.insert(parts, '✓ ' .. passing .. ' passing')
+    end
+    if #parts > 0 then
+      line('CI   ' .. table.concat(parts, ' · '), HL.dim)
+    end
+    for _, title in ipairs(failing) do
+      line('     ✗ ' .. title, HL.dim)
+    end
+    for _, title in ipairs(pending) do
+      line('     ● ' .. title, HL.dim)
+    end
+  end
+
+  line('', nil)
+  local body = info and not info.err and scalar(info.body, '') or ''
+  if body ~= '' then
+    for _, bl in ipairs(split_lines((body:gsub('\r\n', '\n')))) do
+      line(bl, nil)
+    end
+    line('', nil)
+  end
+  return rows
+end
+
 ---Build detail rows from decoded `but diff <id> --format=json`.
 ---
 ---Not quite pure: it writes `.stale` onto each comment record in
@@ -187,9 +301,10 @@ function M.build(data, state)
     return #rows
   end
 
-  -- Commit meta first (when showing a whole commit) so hunk row indices, which
-  -- are recorded from push() below, already account for the header height.
-  for _, r in ipairs(M._commit_meta_rows(state.meta)) do
+  -- Commit or branch meta first so hunk row indices, which are recorded from
+  -- push() below, already account for the header height.
+  local meta = state.meta
+  for _, r in ipairs(meta and meta.kind == 'branch' and M._branch_meta_rows(meta) or M._commit_meta_rows(meta)) do
     push(r)
   end
 
@@ -1423,9 +1538,12 @@ function M.show_for_line(line)
     return
   end
   -- A whole-commit row gets the same commit/Author/Date/message header the
-  -- landed-history view shows, prepended to its structured diff.
+  -- landed-history view shows, prepended to its structured diff; a branch row
+  -- gets its PR, link and CI.
   local meta
-  if line.type == 'commit' then
+  if line.type == 'branch' then
+    meta = M._branch_meta(line.data.branch or {}, require('gitbutler.forge').web_base())
+  elseif line.type == 'commit' then
     local c = line.data.commit or {}
     meta = {
       sha = line.data.sha,
