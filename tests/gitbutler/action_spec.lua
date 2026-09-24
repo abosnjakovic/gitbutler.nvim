@@ -177,6 +177,56 @@ test('insert_empty_commit anchors above the cursor commit or branch', function()
   vim.notify = original_notify
 end)
 
+-- ── PR header cache ───────────────
+
+-- `<C-r>` is how a user asks for fresh data, so it drops every cached PR title
+-- and body; the watcher's own refreshes leave them alone.
+test('actions.refresh drops the cached PR details and refreshes the view', function()
+  local details = require('gitbutler.ui.details')
+  local status = require('gitbutler.ui.status')
+  local refreshed = 0
+  local orig_refresh = status.refresh
+  h.after(function()
+    status.refresh = orig_refresh
+    details.clear_pr_cache()
+  end)
+  status.refresh = function()
+    refreshed = refreshed + 1
+  end
+  details._pr_cache[31] = { title = 'stale' }
+
+  actions.refresh(h.mock_buffer())
+
+  h.assert_falsy(details._pr_cache[31])
+  assert_eq(1, refreshed)
+end)
+
+test('actions.pr_toggle_draft drops that PR from the cache once the toggle lands', function()
+  local details = require('gitbutler.ui.details')
+  local orig_draft, orig_notify, orig_refresh = cli.pr_set_draft, vim.notify, require('gitbutler.ui.status').refresh
+  h.after(function()
+    cli.pr_set_draft, vim.notify = orig_draft, orig_notify
+    require('gitbutler.ui.status').refresh = orig_refresh
+    details.clear_pr_cache()
+  end)
+  cli.pr_set_draft = function(_, cb)
+    cb(nil, {})
+  end
+  vim.notify = function() end
+  require('gitbutler.ui.status').refresh = function() end
+  details._pr_cache[31] = { title = 't', draft = false }
+  details._pr_cache[32] = { title = 'other' }
+
+  local buf = h.mock_buffer()
+  buf.get_cursor_branch = function()
+    return { name = 'feat', reviewId = '(#31)' }
+  end
+  actions.pr_toggle_draft(buf)
+
+  h.assert_falsy(details._pr_cache[31], 'the toggled PR is read again')
+  assert_truthy(details._pr_cache[32], 'other PRs keep their cache')
+end)
+
 -- ── Undo / redo confirm gating ───────────────
 
 test('actions.undo does not call cli.undo when the user declines the confirm', function()
