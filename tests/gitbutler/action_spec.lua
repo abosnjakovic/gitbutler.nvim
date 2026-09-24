@@ -141,35 +141,42 @@ end)
 -- A failed push can be partial: since but 0.22.1 it exits non-zero when any
 -- stack fails, and the stacks that pushed stay pushed. The view must refresh
 -- to show them, or it keeps offering to push what is already on the remote.
+---Run a push action whose pull succeeds and whose push answers `push_err`.
+---@return integer refreshed status refreshes, string[] errors ERROR notifications
+local function run_push(action, push_err)
+  local status = require('gitbutler.ui.status')
+  local refreshed, errors = 0, {}
+  local orig_pull, orig_push, orig_refresh, orig_notify = cli.pull, cli.push, status.refresh, vim.notify
+  h.after(function()
+    cli.pull, cli.push, status.refresh, vim.notify = orig_pull, orig_push, orig_refresh, orig_notify
+  end)
+  cli.pull = function(cb)
+    cb(nil, 'pulled')
+  end
+  cli.push = function(_, cb)
+    cb(push_err, not push_err and 'pushed' or nil)
+  end
+  status.refresh = function()
+    refreshed = refreshed + 1
+  end
+  vim.notify = function(msg, level)
+    if level == vim.log.levels.ERROR then
+      table.insert(errors, msg)
+    end
+  end
+
+  local buf = h.mock_buffer()
+  buf.get_cursor_branch = function()
+    return { name = 'feat-b' }
+  end
+  actions[action](buf)
+  return refreshed, errors
+end
+
 for _, case in ipairs({ { 'push', 'push' }, { 'push_all', 'push all' } }) do
   local action, label = case[1], case[2]
   test('actions.' .. action .. ' refreshes and reports the error after a failed push', function()
-    local status = require('gitbutler.ui.status')
-    local refreshed, errors = 0, {}
-    local orig_pull, orig_push, orig_refresh, orig_notify = cli.pull, cli.push, status.refresh, vim.notify
-    h.after(function()
-      cli.pull, cli.push, status.refresh, vim.notify = orig_pull, orig_push, orig_refresh, orig_notify
-    end)
-    cli.pull = function(cb)
-      cb(nil, 'pulled')
-    end
-    cli.push = function(_, cb)
-      cb('failed to push feat-b')
-    end
-    status.refresh = function()
-      refreshed = refreshed + 1
-    end
-    vim.notify = function(msg, level)
-      if level == vim.log.levels.ERROR then
-        table.insert(errors, msg)
-      end
-    end
-
-    local buf = h.mock_buffer()
-    buf.get_cursor_branch = function()
-      return { name = 'feat-b' }
-    end
-    actions[action](buf)
+    local refreshed, errors = run_push(action, 'failed to push feat-b')
 
     assert_eq(1, refreshed, 'the stacks that did push must show as pushed')
     assert_eq(1, #errors, 'exactly one error notification')
@@ -177,30 +184,7 @@ for _, case in ipairs({ { 'push', 'push' }, { 'push_all', 'push all' } }) do
   end)
 
   test('actions.' .. action .. ' refreshes once after a successful push', function()
-    local status = require('gitbutler.ui.status')
-    local refreshed = 0
-    local orig_pull, orig_push, orig_refresh, orig_notify = cli.pull, cli.push, status.refresh, vim.notify
-    h.after(function()
-      cli.pull, cli.push, status.refresh, vim.notify = orig_pull, orig_push, orig_refresh, orig_notify
-    end)
-    cli.pull = function(cb)
-      cb(nil, 'pulled')
-    end
-    cli.push = function(_, cb)
-      cb(nil, 'pushed')
-    end
-    status.refresh = function()
-      refreshed = refreshed + 1
-    end
-    vim.notify = function() end
-
-    local buf = h.mock_buffer()
-    buf.get_cursor_branch = function()
-      return { name = 'feat-b' }
-    end
-    actions[action](buf)
-
-    assert_eq(1, refreshed)
+    assert_eq(1, (run_push(action, nil)))
   end)
 end
 
@@ -896,9 +880,11 @@ end)
 
 -- ── Move (`m`) ───────────────
 
-test('actions.move_start takes committed files as a source', function()
+---Run actions.move_start on `buf` with modes.enter stubbed.
+---@return { mode: string, source: table }? entered, integer warnings
+local function run_move_start(buf)
   local modes = require('gitbutler.ui.modes')
-  local entered
+  local entered, warnings = nil, 0
   local orig_enter, orig_notify = modes.enter, vim.notify
   h.after(function()
     modes.enter, vim.notify = orig_enter, orig_notify
@@ -906,14 +892,23 @@ test('actions.move_start takes committed files as a source', function()
   modes.enter = function(_, mode, source)
     entered = { mode = mode, source = source }
   end
-  vim.notify = function() end
+  vim.notify = function(_, level)
+    if level == vim.log.levels.WARN then
+      warnings = warnings + 1
+    end
+  end
+  actions.move_start(buf)
+  return entered, warnings
+end
 
+test('actions.move_start takes committed files as a source', function()
   local buf = h.mock_buffer()
   buf.lines = { { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua' } } }
   buf.get_cursor_line = function(self)
     return self.lines[1]
   end
-  actions.move_start(buf)
+
+  local entered = run_move_start(buf)
 
   assert_truthy(entered, 'move mode entered')
   assert_eq('move', entered.mode)
@@ -921,28 +916,14 @@ test('actions.move_start takes committed files as a source', function()
 end)
 
 test('actions.move_start refuses committed files from more than one commit', function()
-  local modes = require('gitbutler.ui.modes')
-  local entered, warnings = false, 0
-  local orig_enter, orig_notify = modes.enter, vim.notify
-  h.after(function()
-    modes.enter, vim.notify = orig_enter, orig_notify
-  end)
-  modes.enter = function()
-    entered = true
-  end
-  vim.notify = function(_, level)
-    if level == vim.log.levels.WARN then
-      warnings = warnings + 1
-    end
-  end
-
   local buf = h.mock_buffer()
   buf.lines = {
     { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua', commit_id = 'aaaaaaa1' } },
     { type = 'committed_file', data = { cli_id = 'c2:k1', path = 'b.lua', commit_id = 'bbbbbbb2' } },
   }
   buf.selected = { ['c1:k1'] = true, ['c2:k1'] = true }
-  actions.move_start(buf)
+
+  local entered, warnings = run_move_start(buf)
 
   assert_falsy(entered)
   assert_eq(1, warnings)

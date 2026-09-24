@@ -52,8 +52,9 @@ if vim.api.nvim_get_current_win() ~= details.win_state.win then
 end
 H.ok('focus: l -> details window')
 
--- Hunk cursor + selection bar.
-H.press(dbuf, 'j')
+-- Hunk cursor + selection bar. j/k are native motions in the pane; ]c is the
+-- hunk key.
+H.press(dbuf, ']c')
 local bar = 0
 for _, l in ipairs(vim.api.nvim_buf_get_lines(dbuf, 0, -1, false)) do
   if l:match('^▌') then
