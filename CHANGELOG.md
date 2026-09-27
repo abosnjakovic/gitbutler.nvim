@@ -1,3 +1,32 @@
+## [3.2.0] - 2026-09-27
+
+### Features
+
+- feat(details): colour the PR body as Markdown
+- feat(details): the branch header follows CI on every status refresh
+- feat(actions): refresh and draft toggle re-read the PR header
+- feat(details): fetch the PR title and body once, and open branches at the top
+- feat(details): a branch header above the branch diff
+- feat(forge): build GitHub web URLs and read a PR's title and body
+- feat(modes): move committed files into a new commit
+- feat(status): e splits committed files out into a new commit
+- feat(status): x discards committed files from their commit
+
+### Bug Fixes
+
+- fix(actions): V reads the PR's draft state from gh
+- fix(modes): move committed files without a message on a CLI that takes none
+- fix(actions): refuse committed files from several commits, and split on a CLI without it
+- fix(cli): read each subcommand's help once, and say when the id probe fails
+- fix(cli): ask but for the uncommitted-area id instead of hardcoding zz
+- fix(actions): refresh after a failed push, which may be partial
+- fix(cli): refuse a discard with no ids
+
+### Other
+
+- test: press ]c in smoke phase 3, and share the push and move_start setup
+- docs: note that land deletes the remote copy and is now merge upstream
+
 ## [3.1.0] - 2026-09-04
 
 ### Features
