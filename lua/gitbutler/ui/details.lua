@@ -699,9 +699,15 @@ function M._avail_width()
   return w
 end
 
+---`placement` pins the orientation; 'auto' (the default) measures the room.
 ---@return boolean
 function M._horizontal()
   local c = config.values.details or {}
+  if c.placement == 'below' then
+    return true
+  elseif c.placement == 'right' then
+    return false
+  end
   return M._wants_horizontal(M._avail_width(), M.win_state.width_pct, c.min_width or 60)
 end
 
