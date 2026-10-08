@@ -1,3 +1,9 @@
+## [3.3.0] - 2026-10-08
+
+### Features
+
+- feat(details): pin the pane's orientation with details.placement
+
 ## [3.2.0] - 2026-09-27
 
 ### Features
