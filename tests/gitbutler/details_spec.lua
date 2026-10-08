@@ -2401,6 +2401,38 @@ h.test('details: config.values.details.min_width changes the orientation decisio
   pcall(vim.api.nvim_buf_delete, sb2.buf, { force = true })
 end)
 
+-- `placement` has to beat the measurement, not merely tilt it: both halves
+-- below pick the orientation the width rule would have rejected.
+h.test('details: config.values.details.placement pins the orientation', function()
+  local config = require('gitbutler.config')
+  local orig = config.values.details.placement
+  local cols = vim.o.columns
+  h.after(function()
+    config.values.details.placement = orig
+    vim.o.columns = cols
+  end)
+
+  reset()
+  details.win_state.width_pct = 50
+  set_columns(200)
+  config.values.details.placement = 'below'
+  local sb = mock_status_buf()
+  details.open(sb)
+  h.assert_truthy(details.win_state.horizontal, "placement 'below' still split a 200-column editor sideways")
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+
+  reset()
+  details.win_state.width_pct = 50
+  set_columns(80)
+  config.values.details.placement = 'right'
+  local sb2 = mock_status_buf()
+  details.open(sb2)
+  h.assert_falsy(details.win_state.horizontal, "placement 'right' let an 80-column editor push the pane below")
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb2.buf, { force = true })
+end)
+
 -- In fullscreen `status_buf.win` is nil, so a re-place would close the pane's
 -- own window and then fail to reopen it (no status window to split off).
 -- `_reorient` must stay out of the way entirely while `win_state.full` is

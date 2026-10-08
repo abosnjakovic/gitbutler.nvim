@@ -60,9 +60,11 @@ M.defaults = {
   -- The details pane sits beside the status window, or below it when that
   -- column group is too narrow to give the pane at least `min_width` columns.
   -- At the default 50% share, 60 means an editor under 120 columns puts the
-  -- pane underneath.
+  -- pane underneath. `placement` pins the orientation instead: 'below' or
+  -- 'right' ignores min_width and the layout entirely.
   details = {
     min_width = 60,
+    placement = 'auto', -- 'auto' | 'below' | 'right'
   },
 
   -- Keymaps for status buffer (set to false to disable)
