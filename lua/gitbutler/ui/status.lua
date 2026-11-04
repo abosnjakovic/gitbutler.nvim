@@ -168,11 +168,12 @@ end
 
 ---Look up the cached CI aggregate glyph for a stack. All branches in a
 ---stack share the head's PR, so all rows in the stack get the same glyph.
----@param stack table
+---A worktree branch has no stack, and so no aggregate.
+---@param stack table?
 ---@return string glyph
 ---@return string? highlight
 local function stack_ci_suffix(stack)
-  local head = stack.branches and stack.branches[1] or nil
+  local head = stack and stack.branches and stack.branches[1] or nil
   if not head or not head.name then
     return '', nil
   end
@@ -255,7 +256,6 @@ function M.rerender()
     base_detail = M._base.detail,
     base_more = M._base.more,
     base_count = #M._base.commits,
-    uncommitted_id = cli.uncommitted_id(),
   }))
 end
 
@@ -273,6 +273,7 @@ function M.open()
   local actions = require('gitbutler.actions')
   buf:on('open_file', actions.open_file)
   buf:on('stack_start', actions.stack_start)
+  buf:on('worktree_start', actions.worktree_start)
   buf:on('goto_branch', actions.goto_branch)
   buf:on('absorb', actions.absorb)
   buf:on('commit_mode_start', actions.commit_mode_start)

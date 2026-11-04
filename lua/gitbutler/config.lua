@@ -95,6 +95,7 @@ M.defaults = {
       ['c'] = 'commit_mode_start',
       ['m'] = 'move_start',
       ['s'] = 'stack_start',
+      ['W'] = 'worktree_start',
       -- operations (official keys)
       ['n'] = 'insert_empty_commit',
       ['b'] = 'branch_new',

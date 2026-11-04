@@ -7,7 +7,7 @@ local M = {}
 M.supported = nil
 
 ---Minimum `but` this plugin speaks, and the error shown when it is older.
-M.MIN_VERSION = '0.22.0'
+M.MIN_VERSION = '0.23.0'
 local UNSUPPORTED = 'gitbutler.nvim requires but ' .. M.MIN_VERSION .. ' or newer (this one is older)'
 
 ---Why the CLI is unusable, when the reason is not the version (missing binary,
@@ -20,19 +20,19 @@ M.unusable = nil
 local PROBE_TIMEOUT_MS = 5000
 local SYNC_TIMEOUT_MS = 30000
 
----Whether the CLI speaks the 0.22 surface. 0.22 replaced `--format=json` with a
----boolean `--json` in the same release that retired `but rub` and re-cut
----commit/squash/move, so a CLI still advertising `--format` cannot run any of
----our mutations. Probe the help text once — cheaper and steadier than parsing
----version numbers — and say so plainly instead of letting every action fail on
----retired syntax.
+---Whether the CLI speaks the 0.23 surface. 0.23 added worktrees — a section of
+---the status payload this plugin renders — and renamed `land` to `merge`, so a
+---CLI without `but worktree` cannot be driven from here. Probe that subcommand
+---once (it answers outside a repository too) rather than parsing version
+---numbers, and say so plainly instead of letting every action fail on retired
+---syntax.
 ---@return boolean
 local function supported()
   if M.supported == nil then
     -- vim.system throws on a missing/non-executable cmd instead of returning a
     -- code; catch it so :Butler* commands report via vim.notify, not a stacktrace.
     local ok, res = pcall(function()
-      return vim.system({ config.values.cmd, 'status', '--help' }, { text = true }):wait(PROBE_TIMEOUT_MS)
+      return vim.system({ config.values.cmd, 'worktree', '--help' }, { text = true }):wait(PROBE_TIMEOUT_MS)
     end)
     if not ok then
       M.unusable = ("gitbutler.nvim cannot run '%s' (%s) — install but or point config cmd at it"):format(
@@ -41,67 +41,21 @@ local function supported()
       )
       M.supported = false
     elseif res.code == 124 and res.signal == 9 then
-      M.unusable = ("gitbutler.nvim: '%s status --help' timed out after %dms"):format(
+      M.unusable = ("gitbutler.nvim: '%s worktree --help' timed out after %dms"):format(
         config.values.cmd,
         PROBE_TIMEOUT_MS
       )
       M.supported = false
     else
-      local help = (res.stdout or '') .. (res.stderr or '')
-      M.supported = not help:find('--format', 1, true)
+      M.supported = res.code == 0
       M.unusable = nil
     end
   end
   return M.supported
 end
 
----`but <cmd> --help` output per subcommand, read once; false when but answered
----with an error (an unknown subcommand). Reset to re-probe.
----@type table<string, string|false>
-M._help = {}
-
----@param cmd string
----@return string? help nil when `but <cmd> --help` did not succeed
-local function help_text(cmd)
-  if M._help[cmd] ~= nil then
-    return M._help[cmd] or nil
-  end
-  local ok, res = pcall(function()
-    return vim.system({ config.values.cmd, cmd, '--help' }, { text = true }):wait(PROBE_TIMEOUT_MS)
-  end)
-  local help = ok and res.code == 0 and (res.stdout or '') or false
-  -- Only an exit is an answer; a spawn failure or timeout is retried next time.
-  if ok and not (res.code == 124 and res.signal == 9) then
-    M._help[cmd] = help
-  end
-  return help or nil
-end
-
----Cached uncommitted-area id; set nil to force a re-probe.
----@type string?
-M.uncommitted = nil
-
----The CLI id naming the uncommitted area. Newer but names it `@` and rejects
----`zz`; every 0.22 release prints `(zz)` in `amend --help`. A probe that could
----not run falls back to `@` and says so, since on a 0.22 CLI that guess breaks
----every header amend and diff.
----@return string
-function M.uncommitted_id()
-  if M.uncommitted == nil then
-    local help = help_text('amend')
-    if not help then
-      vim.notify(
-        "gitbutler: could not read '" .. config.values.cmd .. " amend --help'; assuming the uncommitted area is @",
-        vim.log.levels.WARN
-      )
-    end
-    M.uncommitted = help and help:find('(zz)', 1, true) and 'zz' or '@'
-  end
-  return M.uncommitted
-end
-
 ---Append the single targeting flag for `target`, checked in the order unstack,
----branch, above, below; the first present wins. 0.22 accepts one flag per
+---branch, above, below; the first present wins. `but` accepts one flag per
 ---invocation. Newer but also lets `--branch` name the branch that
 ---`--above`/`--below` creates; this still sends one flag.
 ---@param args string[]
@@ -271,6 +225,53 @@ function M.branch_list(callback)
   M.run({ 'branch', '--json' }, callback)
 end
 
+---Convenience: but worktree list — `{ active = [...], archived = [...] }`,
+---each entry `{ id, name, refName, path, updatedAtMs }`.
+function M.worktree_list(callback)
+  M.run({ 'worktree', 'list', '--json' }, callback)
+end
+
+---Convenience: but worktree new [name] — a linked checkout on `name`, created
+---at the workspace base when that branch does not exist yet. `but` picks the
+---directory (under `~/.gitbutler-worktrees/<repo>/`) and copies anything
+---listed in `.worktreeinclude`.
+---@param name? string branch to check out; omit for a generated one
+---@param callback fun(err?: string, result?: any)
+function M.worktree_new(name, callback)
+  local args = { 'worktree', 'new' }
+  if name and name ~= '' then
+    table.insert(args, name)
+  end
+  table.insert(args, '--json')
+  M.run(args, callback)
+end
+
+---Convenience: but worktree archive <worktree> — hide it from the workspace,
+---leaving the directory and its branch alone.
+function M.worktree_archive(name, callback)
+  M.run({ 'worktree', 'archive', name, '--json' }, callback)
+end
+
+---Convenience: but worktree unarchive <worktree>
+function M.worktree_unarchive(name, callback)
+  M.run({ 'worktree', 'unarchive', name, '--json' }, callback)
+end
+
+---Convenience: but worktree remove <worktree> [--force] — delete the
+---directory, keeping the branch it had checked out. Without `--force` but
+---refuses a worktree with uncommitted changes.
+---@param name string
+---@param force boolean discard the worktree's uncommitted changes
+---@param callback fun(err?: string, result?: any)
+function M.worktree_remove(name, force, callback)
+  local args = { 'worktree', 'remove', name }
+  if force then
+    table.insert(args, '--force')
+  end
+  table.insert(args, '--json')
+  M.run(args, callback)
+end
+
 ---Convenience: but undo
 function M.undo(callback)
   M.run({ 'undo', '--json' }, callback)
@@ -306,19 +307,12 @@ function M.pull(callback)
   M.run({ 'pull', '--json' }, callback)
 end
 
----Whether `but move` takes `-m` for the commit it creates from committed files
----(0.22.3 and earlier do not, and leave that commit's message empty).
----@return boolean
-function M.move_takes_message()
-  return (help_text('move') or ''):find('--message', 1, true) ~= nil
-end
-
 ---Convenience: but move <sources>... --above/--below/--branch/--unstack [-m <message>]
 ---@param sources string[] Commit, committed-file or single-branch CLI IDs
 ---@param target { above?: string, below?: string, branch?: string, unstack?: boolean }
 ---@param callback fun(err?: string, result?: any)
----@param message? string Committed-file sources only: the new commit's message
----(0.22.3 and earlier reject `-m`; see `move_takes_message`); nil or '' sends none
+---@param message? string Committed-file sources only: the new commit's message;
+---nil or '' sends none
 function M.move(sources, target, callback, message)
   local args = { 'move' }
   vim.list_extend(args, sources)
@@ -361,15 +355,8 @@ function M.uncommit(sources, callback)
   M.run(args, callback)
 end
 
----Whether this but has `split` (0.22.3 and earlier do not).
----@return boolean
-function M.has_split()
-  return help_text('split') ~= nil
-end
-
 ---Convenience: but split <sources>... [-m <message>] — move committed files into
----a new commit directly above their source commit. 0.22.3 and earlier have no
----`split`; see `has_split`.
+---a new commit directly above their source commit.
 ---@param sources string[] Committed-file CLI IDs; but takes them from one commit
 ---@param message string Message for the new commit; '' leaves it empty
 ---@param callback fun(err?: string, result?: any)
@@ -479,17 +466,16 @@ function M.pr_auto_merge(branch, callback)
   M.run({ 'pr', 'auto-merge', branch, '--json' }, callback)
 end
 
----Convenience: but land (land a branch directly onto the target branch).
+---Convenience: but merge (merge a branch directly onto the target branch).
 ---Fast-forwards the target to the branch tip when possible (else a merge
----commit), pushes to the remote, and reconciles remaining applied branches —
----the whole "just push to the target" workflow in one call. Silent on success.
----From 0.22.1 it also deletes the branch's remote copy, only when the target
----contains the branch tip; a failed delete only warns. Newer but renames this
----`merge` and keeps `land` as an alias; 0.22 has no `merge`, so stay on `land`.
----@param branch string Branch name or CLI ID to land
+---commit), pushes to the remote when the target has one, and reconciles
+---remaining applied branches — the whole "just push to the target" workflow in
+---one call. Silent on success. It also deletes the branch's remote copy, only
+---when the target contains the branch tip; a failed delete only warns.
+---@param branch string Branch name or CLI ID to merge
 ---@param callback fun(err?: string, result?: any)
-function M.land(branch, callback)
-  M.run({ 'land', branch, '--yes', '--json' }, callback)
+function M.merge(branch, callback)
+  M.run({ 'merge', branch, '--yes', '--json' }, callback)
 end
 
 ---Convenience: but clean (remove empty branches from workspace)

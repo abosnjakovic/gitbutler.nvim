@@ -2,13 +2,13 @@ local fixtures = require('tests.gitbutler.fixtures')
 local graph = require('gitbutler.ui.graph')
 local h = require('tests.gitbutler.helpers')
 
--- The header shows and acts on whichever id the CLI speaks (`zz` on 0.22, `@`
--- after), so a copied or typed id works in the terminal too.
-h.test('graph: uncommitted header first, with the cli id it is given', function()
-  local rows = graph.build(fixtures.status_full, { uncommitted_id = 'zz' })
-  h.assert_eq('╭┄▾ zz [uncommitted]', rows[1].text)
+-- The header is the id the CLI speaks, so a copied or typed id works in the
+-- terminal too. From 0.23 the workspace's uncommitted area is always `@`.
+h.test('graph: uncommitted header first, with the cli id but uses', function()
+  local rows = graph.build(fixtures.status_full)
+  h.assert_eq('╭┄▾ @ [uncommitted]', rows[1].text)
   h.assert_eq('uncommitted_header', rows[1].type)
-  h.assert_eq('zz', rows[1].data.cli_id)
+  h.assert_eq('@', rows[1].data.cli_id)
   h.assert_truthy(rows[1].selectable)
 end)
 
@@ -272,9 +272,8 @@ end)
 h.test('graph: folded headers render ▸, expanded render ▾', function()
   local rows = graph.build(fixtures.status_full, {
     fold_state = { unassigned = true, ['branch:feature-auth'] = true },
-    uncommitted_id = 'zz',
   })
-  h.assert_eq('╭┄▸ zz [uncommitted]', rows[1].text)
+  h.assert_eq('╭┄▸ @ [uncommitted]', rows[1].text)
   for _, r in ipairs(rows) do
     if r.type == 'branch' then
       h.assert_eq('┊╭┄▸ br [feature-auth]', r.text)
@@ -427,5 +426,55 @@ h.test('graph: vim.NIL in any payload field does not crash the render', function
       local ok, err = pcall(graph.build, data, { show_all_files = true })
       h.assert_truthy(ok, 'vim.NIL at ' .. table.concat(vim.tbl_map(tostring, path), '.') .. ' → ' .. tostring(err))
     end
+  end
+end)
+
+-- Worktrees are a whole section of 0.23's status payload. Dropping it would
+-- hide uncommitted work and commits that exist, and every verb keys off the
+-- `worktree` field in the payload to know which checkout a row belongs to.
+h.test('graph: a worktree renders its own uncommitted area, branch and commits', function()
+  local rows = graph.build(fixtures.status_worktree, { show_all_files = true })
+  local by_type = {}
+  for _, r in ipairs(rows) do
+    by_type[r.type] = by_type[r.type] or {}
+    table.insert(by_type[r.type], r)
+  end
+
+  local wt_header = by_type.uncommitted_header[2]
+  h.assert_eq('┊╭┄▾ wt:@ [uncommitted] {wt-one}', wt_header.text)
+  h.assert_eq('wt:@', wt_header.data.cli_id, 'the area is addressable by its own cli id')
+  h.assert_eq('wt-one', wt_header.data.worktree)
+
+  local wt_file = by_type.file[2]
+  h.assert_eq('wt:dr', wt_file.data.cli_id)
+  h.assert_eq('wt-one', wt_file.data.worktree)
+
+  h.assert_eq(1, #by_type.branch, 'the worktree branch is a branch row')
+  h.assert_eq('┊├┄▾ wt [wt-one]', by_type.branch[1].text)
+  h.assert_eq('wt-one', by_type.branch[1].data.worktree)
+  h.assert_falsy(by_type.branch[1].data.stack, 'a worktree branch belongs to no stack')
+
+  h.assert_eq(1, #by_type.commit)
+  h.assert_eq('qtto', by_type.commit[1].data.cli_id)
+  h.assert_eq('wt-one', by_type.commit[1].data.worktree)
+end)
+
+h.test('graph: folding a worktree hides its files, keeping the header', function()
+  local rows = graph.build(fixtures.status_worktree, { fold_state = { ['worktree:wt-one'] = true } })
+  local header
+  for _, r in ipairs(rows) do
+    h.assert_falsy(r.data and r.data.cli_id == 'wt:dr', 'the folded worktree still listed a file')
+    if r.type == 'uncommitted_header' and r.data.worktree then
+      header = r
+    end
+  end
+  h.assert_eq('┊╭┄▸ wt:@ [uncommitted] {wt-one}', header.text)
+end)
+
+-- A workspace with no worktrees must render exactly as it did before them.
+h.test('graph: a payload without worktrees adds no rows', function()
+  local rows = graph.build(fixtures.status_full)
+  for _, r in ipairs(rows) do
+    h.assert_falsy(r.data and r.data.worktree, 'a worktree row appeared out of nowhere')
   end
 end)

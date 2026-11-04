@@ -894,20 +894,16 @@ end)
 -- ── Split (`e`) ───────────────
 
 ---Run actions.split on `buf`, submitting `message` to the input float.
----@param has_split? boolean false for a CLI without `split`
 ---@return { ids: string[], message: string }[] calls
 ---@return string[] warnings
 ---@return boolean asked whether the message float opened
-local function run_split(buf, message, has_split)
+local function run_split(buf, message)
   local float = require('gitbutler.ui.float')
   local calls, warnings = {}, {}
-  local orig_split, orig_has, orig_input, orig_notify = cli.split, cli.has_split, float.input, vim.notify
+  local orig_split, orig_input, orig_notify = cli.split, float.input, vim.notify
   h.after(function()
-    cli.split, cli.has_split, float.input, vim.notify = orig_split, orig_has, orig_input, orig_notify
+    cli.split, float.input, vim.notify = orig_split, orig_input, orig_notify
   end)
-  cli.has_split = function()
-    return has_split ~= false
-  end
   cli.split = function(ids, msg, cb)
     table.insert(calls, { ids = ids, message = msg })
     cb(nil, 'ok')
@@ -953,21 +949,6 @@ test('actions.split warns on a row that is not a committed file', function()
   local calls, warnings = run_split(buf, 'x')
 
   assert_eq(0, #calls, 'a commit row must not reach cli.split')
-  assert_eq(1, #warnings)
-end)
-
--- A CLI without `split` must say so before a message is typed, not after.
-test('actions.split refuses up front on a CLI without split', function()
-  local buf = h.mock_buffer()
-  buf.lines = { { type = 'committed_file', data = { cli_id = 'c1:k1', path = 'a.lua', commit_id = 'deadbeefcafe' } } }
-  buf.get_cursor_line = function(self)
-    return self.lines[1]
-  end
-
-  local calls, warnings, asked = run_split(buf, 'x', false)
-
-  assert_falsy(asked, 'no message float')
-  assert_eq(0, #calls)
   assert_eq(1, #warnings)
 end)
 

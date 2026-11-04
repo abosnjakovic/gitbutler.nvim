@@ -18,9 +18,9 @@ fail() {
 
 # --- Scenario 1: happy path ---------------------------------------------------
 #
-# direct_to_main commits the change to an ephemeral branch, then `but land`s it
-# straight onto the target. Land fast-forwards origin's target, pushes it, and
-# reconciles the workspace — leaving no ephemeral branch behind. Note that land
+# direct_to_main commits the change to an ephemeral branch, then `but merge`s it
+# straight onto the target. Merge fast-forwards origin's target, pushes it, and
+# reconciles the workspace — leaving no ephemeral branch behind. Note that merge
 # operates on GitButler's target, not the local plain `main` ref, so we assert on
 # origin/main (the local `main` checkout is not expected to move).
 
@@ -33,8 +33,6 @@ echo "seed" > a.txt
 git add a.txt
 git commit -q -m "init"
 git push -q origin main
-
-but setup >/dev/null 2>&1 || fail "but setup failed in $WORK"
 
 echo "change-1" >> a.txt
 
