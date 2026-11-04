@@ -382,6 +382,44 @@ function M.diff_json(cli_id, callback)
   M.run(args, callback)
 end
 
+---Hunk CLI IDs in one commit's diff, in the order `but diff` prints them.
+---
+---`but diff <commit> --json` (checked on 0.23.2) carries no per-hunk id, while
+---`but diff <uncommitted>` does — yet the ids exist, and every mutation takes
+---them: `but discard oqko:rlnq:5604` and `but squash -t … oqko:nkns:940e` both
+---work. The human output is where they are published, one per file-and-hunk
+---header box: ` oqko:nkns:940e M a.txt │`.
+---
+---ponytail: parsing output this plugin otherwise never reads. Delete it, and
+---its caller in details.lua, once `--json` carries the ids.
+---@param text string `but diff <commit>` output
+---@return { id: string, path: string }[]
+function M._parse_hunk_ids(text)
+  local out = {}
+  for line in tostring(text):gmatch('[^\n]+') do
+    -- commit:file:hunk — three segments, so an uncommitted `klvn:a3b4` header
+    -- (two) never matches.
+    local id, path = line:match('^%s*(%S+:%S+:%S+)%s+%a%s+(.-)%s*│%s*$')
+    if id and path ~= '' then
+      table.insert(out, { id = id, path = path })
+    end
+  end
+  return out
+end
+
+---Convenience: but diff <cli_id>, read for its hunk ids (see `_parse_hunk_ids`).
+---@param cli_id string commit or committed-file CLI id
+---@param callback fun(err?: string, ids?: { id: string, path: string }[])
+function M.diff_hunk_ids(cli_id, callback)
+  M.run({ 'diff', cli_id }, { raw = true }, function(err, text)
+    if err then
+      callback(err)
+      return
+    end
+    callback(nil, M._parse_hunk_ids(text or ''))
+  end)
+end
+
 ---Convenience: but discard <changes>... — one call, so one undoable oplog
 ---entry for the whole selection. An empty list calls back with an error and
 ---runs nothing.

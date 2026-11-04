@@ -82,7 +82,8 @@ end
 ---exposes no change-id. `◐` asserts divergence, so a false positive lies:
 ---it is only emitted when the subject is unambiguous on both sides — exactly
 ---one upstream match and unique among the branch's own commits. Any ambiguity
----falls back to the plain dot. Swap to change-ids if the CLI ever emits them.
+---falls back to the plain dot. `upstreamCommits[]` entries still carry a null
+---`changeId` on 0.23.2, which is why this is not a change-id comparison.
 ---@param commit table
 ---@param branch table
 ---@return string glyph, string? hl
