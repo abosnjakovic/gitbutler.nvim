@@ -72,3 +72,46 @@ test('_land_targets skips rows without a resolvable branch', function()
   assert_eq(1, #names)
   assert_eq('only-one', names[1])
 end)
+
+-- `L` on branch rows confirms before it rewrites and pushes the target, and
+-- the first option is what <CR> takes. Landing is the answer the keystroke
+-- already asked for, so `Yes` leads; a flip back would make every land a
+-- two-key operation.
+test('L offers Yes first, and lands only on Yes', function()
+  local buf = h.mock_buffer()
+  buf.lines = { { type = 'branch', data = { name = 'feat/x', cli_id = 'fx' } } }
+  buf.selected = { ['feat/x'] = true }
+  buf.get_selected_lines = function(self, types)
+    return types and vim.tbl_contains(types, 'branch') and self.lines or {}
+  end
+
+  local cli = require('gitbutler.cli')
+  local status = require('gitbutler.ui.status')
+  local orig_select, orig_merge, orig_notify, orig_refresh = vim.ui.select, cli.merge, vim.notify, status.refresh
+  h.after(function()
+    vim.ui.select, cli.merge, vim.notify, status.refresh = orig_select, orig_merge, orig_notify, orig_refresh
+  end)
+  local offered, merged, answer
+  vim.ui.select = function(items, opts, cb)
+    offered = items
+    assert_truthy(opts.prompt:find('feat/x', 1, true), opts.prompt)
+    cb(answer)
+  end
+  -- Answering the callback is what stops the spinner the land started.
+  cli.merge = function(name, cb)
+    merged = name
+    cb(nil, {})
+  end
+  status.refresh = function() end
+  vim.notify = function() end
+
+  answer = 'No'
+  actions.direct_to_main(buf)
+  assert_eq('Yes', offered[1], 'the default answer must be Yes')
+  assert_eq('No', offered[2])
+  assert_eq(nil, merged, 'No must land nothing')
+
+  answer = 'Yes'
+  actions.direct_to_main(buf)
+  assert_eq('feat/x', merged)
+end)

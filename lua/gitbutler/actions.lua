@@ -521,7 +521,9 @@ local function land_next(buf, names, i)
 end
 
 ---Land the branches under the selected branch/commit rows straight onto the
----target. Confirms first because landing rewrites the target and pushes.
+---target. Confirms first because landing rewrites the target and pushes, with
+---`Yes` first: `L` is already a deliberate keystroke, and the prompt is there
+---to name the branches, not to talk you out of it.
 local function land_branches(buf, rows)
   local names = M._land_targets(rows)
   if #names == 0 then
@@ -529,7 +531,7 @@ local function land_branches(buf, rows)
     return
   end
   local prompt = 'Land ' .. table.concat(names, ', ') .. ' onto the target?'
-  vim.ui.select({ 'No', 'Yes' }, { prompt = prompt }, function(choice)
+  vim.ui.select({ 'Yes', 'No' }, { prompt = prompt }, function(choice)
     if choice ~= 'Yes' then
       return
     end
