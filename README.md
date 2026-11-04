@@ -375,6 +375,8 @@ The CI view shells out to `gh run list` / `gh run view` / `gh run rerun` via a p
 
 Solo flow: `L` in `:Butler` commits selected (or unassigned) files directly onto the target branch, no PR. The action commits to an ephemeral branch, then runs `but merge`, which fast-forwards (or merges) the target, pushes to the remote, and reconciles the workspace in one step. It also deletes the branch's remote copy, but only when the target contains its tip, so remote commits that did not land are never lost. With a target that has no upstream — a local `main` in a repository with no remote — the refs move locally and nothing is published.
 
+With branch or commit rows selected, `L` names the branches it is about to land and asks first. `Yes` is the leading answer, so `<CR>` lands: the prompt is there to show you which branches, not to make you argue for it.
+
 Land failures — for example a branch protected against direct pushes — surface to `:messages` with the CLI's message.
 
 ## Configuration

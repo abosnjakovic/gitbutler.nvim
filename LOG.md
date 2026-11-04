@@ -89,8 +89,45 @@ two.
 **Version control** — branch `feat/but-0-23`. Nothing pushed.
 
 **Open**
-- `/opt/homebrew/bin/but` is a symlink into `/Applications/GitButler.app` and
-  still reports 0.23.0; `~/.local/bin/but` is the 0.23.2 one that `but update
-  install` wrote. Whichever comes first in `PATH` is the one the plugin runs.
+- [x] `/opt/homebrew/bin/but` is a symlink into `/Applications/GitButler.app`
+  and still reports 0.23.0; `~/.local/bin/but` is the 0.23.2 one that `but
+  update install` wrote. Whichever comes first in `PATH` is the one the plugin
+  runs. *(Fixed in the next entry.)*
 
 **What I need from you** — nothing.
+
+## 2026-11-04 · the two `but` installs, and landing defaults to Yes
+
+**Done** — the version split was not a `PATH` problem so much as two apps. All
+three `but` symlinks pointed into a GitButler bundle: `/opt/homebrew/bin/but`
+and `/usr/local/bin/but` at `/Applications/GitButler.app` (0.23.0, 55 MB, 3
+November), `~/.local/bin/but` at `~/Applications/GitButler.app` (0.23.2, 106 MB,
+4 November). `but update install` had written a second copy beside the first
+rather than replacing it, and `/opt/homebrew/bin` comes first in the fish
+`PATH`, so every shell got the old one.
+
+Consolidated on one app: moved the 0.23.0 bundle to `~/.Trash/GitButler-0.23.0.app`,
+moved the 0.23.2 bundle from `~/Applications` into `/Applications`, and
+repointed `~/.local/bin/but` at it so nothing dangles. All three paths now
+report 0.23.2, `codesign --verify --deep --strict` passes, and no `sudo` was
+needed: the root-owned symlink in `/usr/local/bin` was never touched, only what
+it points at.
+
+Landing now defaults to Yes (`lua/gitbutler/actions.lua`). `L` on branch or
+commit rows offered `{ 'No', 'Yes' }`, so `<CR>` declined; the prompt is there
+to name the branches, not to argue, and the keystroke already said what it
+wanted. Every other confirmation keeps its old default: discard, undo, redo,
+branch delete, oplog restore and worktree remove all lose work, where a stray
+`<CR>` should cost nothing.
+
+Verified: `make ci` green, 484 tests, one of them pinning the option order
+through `actions.direct_to_main`. Live against a scratch repo with a bare
+origin — the prompt read "Land ship-it onto the target? Yes / No", answering
+with the first option (what `<CR>` takes) landed `ship this` onto `origin/main`
+and left the workspace on a single stack.
+
+**Version control** — branch `feat/but-0-23`. Nothing pushed.
+
+**What I need from you** — nothing. Worth knowing for next time: when the
+in-app updater runs, check `~/Applications` for a second bundle rather than
+trusting `but --version` from whichever shell you happen to be in.
