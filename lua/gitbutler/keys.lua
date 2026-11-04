@@ -317,6 +317,8 @@ M.contexts = {
     { key = 'x', action = 'hunk_discard', desc = 'discard', hotbar = true },
     { key = 'y', action = 'hunk_copy', desc = 'copy hunk', hotbar = true },
     { key = 'a', action = 'hunk_amend', desc = 'amend', hotbar = true },
+    { key = 'S', action = 'hunk_squash', desc = 'squash', help = 'Squash the marked committed hunks into a commit' },
+    { key = 'm', action = 'hunk_move', desc = 'move', help = 'Move the marked committed hunks out of their commit' },
     { key = 'h', action = 'focus_status', desc = 'back' },
     { key = '<Left>', action = 'focus_status', desc = 'back' },
     { key = '<Esc>', action = 'focus_status', desc = 'back' },

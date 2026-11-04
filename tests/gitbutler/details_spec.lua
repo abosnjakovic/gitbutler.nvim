@@ -2769,3 +2769,134 @@ h.test('details: a landed commit takes comments like any other diff', function()
   end
   h.assert_truthy(commented, 'the stored comment did not render after a rebuild')
 end)
+
+--- Committed hunk ids -------------------------------------------------------
+
+-- `but diff <commit> --json` carries no hunk ids (0.23.2), so they are read
+-- from the text output and written onto the decoded hunks. Getting the
+-- pairing wrong would label a hunk with another hunk's id and send the wrong
+-- change to discard or squash, so the order and the mismatch guard are both
+-- pinned here.
+local function committed_diff_data()
+  return {
+    changes = {
+      {
+        path = 'README.md',
+        status = 'modified',
+        diff = { type = 'patch', hunks = { { oldStart = 1, newStart = 1, diff = '@@ -1,1 +1,3 @@\n readme\n+more' } } },
+      },
+      {
+        path = 'a.txt',
+        status = 'modified',
+        diff = {
+          type = 'patch',
+          hunks = {
+            { oldStart = 1, newStart = 1, diff = '@@ -1,5 +1,5 @@\n one\n-two\n+TWO' },
+            { oldStart = 7, newStart = 7, diff = '@@ -7,4 +7,4 @@\n nine\n-ten\n+TEN' },
+          },
+        },
+      },
+    },
+  }
+end
+
+h.test('details: hunk ids from the text diff land on the right hunks', function()
+  local data = committed_diff_data()
+  details._attach_hunk_ids(data, {
+    { id = 'oqko:rlnq:5604', path = 'README.md' },
+    { id = 'oqko:nkns:01f5', path = 'a.txt' },
+    { id = 'oqko:nkns:940e', path = 'a.txt' },
+  })
+
+  h.assert_eq('oqko:rlnq:5604', data.changes[1].diff.hunks[1].id)
+  h.assert_eq('oqko:nkns:01f5', data.changes[2].diff.hunks[1].id, "a file's hunks keep their order")
+  h.assert_eq('oqko:nkns:940e', data.changes[2].diff.hunks[2].id)
+
+  local _, hunks = details.build(data, {})
+  h.assert_eq(3, #hunks)
+  h.assert_eq('oqko:nkns:940e', hunks[3].id, 'build reads the per-hunk id')
+end)
+
+h.test('details: a short id list leaves the rest of the hunks unaddressable', function()
+  local data = committed_diff_data()
+  details._attach_hunk_ids(data, { { id = 'oqko:rlnq:5604', path = 'README.md' } })
+
+  h.assert_eq('oqko:rlnq:5604', data.changes[1].diff.hunks[1].id)
+  h.assert_falsy(data.changes[2].diff.hunks[1].id, 'an unmatched hunk must not borrow an id')
+  h.assert_falsy(data.changes[2].diff.hunks[2].id)
+end)
+
+-- Amend takes uncommitted work and squash takes committed work; the pane
+-- shows both kinds of diff, so each key has to refuse the wrong one rather
+-- than let `but` fail after the mode is already open.
+local function open_committed_diff()
+  reset()
+  local sb = mock_status_buf()
+  details.open(sb)
+  local st = details.win_state
+  st.entity = { cli_id = 'oqko', kind = 'commit' }
+  local data = committed_diff_data()
+  details._attach_hunk_ids(data, {
+    { id = 'oqko:rlnq:5604', path = 'README.md' },
+    { id = 'oqko:nkns:01f5', path = 'a.txt' },
+    { id = 'oqko:nkns:940e', path = 'a.txt' },
+  })
+  st.data = data
+  details._rebuild()
+  details._select_hunk(1)
+  return sb, st
+end
+
+h.test("details: S squashes a commit's hunks, a refuses them", function()
+  local sb = open_committed_diff()
+  local modes = require('gitbutler.ui.modes')
+  local orig_enter, orig_notify = modes.enter_verb, vim.notify
+  local captured, warned
+  modes.enter_verb = function(_, verb, source)
+    captured = { verb = verb, source = source }
+    return true
+  end
+  vim.notify = function(msg, level)
+    if level == vim.log.levels.WARN then
+      warned = msg
+    end
+  end
+
+  details._hunk_amend()
+  h.assert_falsy(captured, 'amend must not open a mode on committed changes')
+  h.assert_truthy(warned and warned:match('S '), warned)
+
+  details._hunk_squash()
+  h.assert_eq('squash', captured.verb)
+  h.assert_eq('committed_file', captured.source.kind)
+  h.assert_eq('oqko:rlnq:5604', captured.source.ids[1], 'the selected hunk is the source')
+
+  modes.enter_verb, vim.notify = orig_enter, orig_notify
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+h.test('details: S refuses an uncommitted diff, where amend is the verb', function()
+  local sb = open_with_diff()
+  local modes = require('gitbutler.ui.modes')
+  local orig_enter, orig_notify = modes.enter_verb, vim.notify
+  local entered, warned
+  modes.enter_verb = function()
+    entered = true
+    return true
+  end
+  vim.notify = function(msg, level)
+    if level == vim.log.levels.WARN then
+      warned = msg
+    end
+  end
+
+  details._hunk_squash()
+
+  modes.enter_verb, vim.notify = orig_enter, orig_notify
+  h.assert_falsy(entered, 'squash must not open a mode on uncommitted changes')
+  h.assert_truthy(warned and warned:match('a amends'), warned)
+
+  details.close()
+  pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)

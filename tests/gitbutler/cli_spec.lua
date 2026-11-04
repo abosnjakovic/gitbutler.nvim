@@ -620,3 +620,57 @@ test('run: refuses a pre-0.23 CLI without spawning the command', function()
   assert_truthy(done, 'callback fired')
   assert_truthy(err and err:find(cli.MIN_VERSION, 1, true), 'callback got the unsupported error')
 end)
+
+-- `but diff <commit> --json` publishes no hunk ids (0.23.2), so they are read
+-- out of the text output's header boxes. Real output, so a change to that
+-- layout upstream fails here rather than silently returning nothing.
+test('_parse_hunk_ids: reads commit:file:hunk ids, in order, from the header boxes', function()
+  local text = table.concat({
+    '────────────────────────────╮',
+    ' oqko:rlnq:5604 M README.md │',
+    '────────────────────────────╯',
+    '',
+    '@@ -1,1 +1,3 @@',
+    '───────────────',
+    '1 ┊ 1 │  readme',
+    '  ┊ 2 │ +more',
+    '',
+    '────────────────────────╮',
+    ' oqko:nkns:01f5 M a.txt │',
+    '────────────────────────╯',
+    '',
+    '@@ -1,5 +1,5 @@',
+    '2 ┊   │ -two',
+    '',
+    '────────────────────────╮',
+    ' oqko:nkns:940e M a.txt │',
+    '────────────────────────╯',
+  }, '\n')
+
+  local ids = cli._parse_hunk_ids(text)
+  assert_eq(3, #ids)
+  assert_eq('oqko:rlnq:5604', ids[1].id)
+  assert_eq('README.md', ids[1].path)
+  assert_eq('oqko:nkns:01f5', ids[2].id)
+  assert_eq('a.txt', ids[2].path)
+  assert_eq('oqko:nkns:940e', ids[3].id)
+end)
+
+-- An uncommitted diff's header carries a two-segment id and the JSON already
+-- has it; a branch diff's carries none at all. Neither is a hunk id.
+test('_parse_hunk_ids: ignores headers that are not commit hunks', function()
+  local ids = cli._parse_hunk_ids(table.concat({
+    ' klvn:a3b4 A c.txt │',
+    ' M README.md │',
+    '@@ -1,1 +1,3 @@',
+  }, '\n'))
+  assert_eq(0, #ids)
+end)
+
+test('diff_hunk_ids: reads the text diff, not the JSON one', function()
+  local args = capture(function()
+    cli.diff_hunk_ids('oqko', noop)
+  end)
+  assert_eq('diff oqko', table.concat(args, ' '))
+  assert_falsy(contains_seq(args, { '--json' }), 'the ids are only in the text output')
+end)

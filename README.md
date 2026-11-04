@@ -240,7 +240,9 @@ x        Discard marked hunks, else the selected one (with confirmation)
 y        Copy the selected hunk's body to the clipboard
 C        Comment the line under the cursor (empty submit deletes)
 Y        Yank every comment as a review blob, then clear them
-a        Amend the marked (or selected) hunks into a target
+a        Amend the marked (or selected) hunks into a target (uncommitted diffs)
+S        Squash the marked (or selected) hunks into a target (a commit's diff)
+m        Move the marked (or selected) hunks out of their commit (a commit's diff)
 h/<Left>/<Esc>  Focus the status window
 D        Toggle fullscreen
 +/-      Grow / shrink the pane
@@ -249,6 +251,8 @@ q/d      Close the pane
 ```
 
 Note that `q` here closes the *pane*, not the whole view — deliberately different from the status window's `q`. This matches `but tui`.
+
+A commit's hunks are addressable, so the pane works the same on them: mark with `<Space>`, then `x` drops them from the commit, `S` folds them into another one, and `m` lifts them into a new commit or onto another branch. `but diff <commit> --json` omits the hunk ids it prints in its text output, so the pane reads them from there — the one call this plugin makes that is not `--json`, and `cli._parse_hunk_ids` goes away when the CLI publishes them. Amend is the exception: it takes uncommitted changes only, and says so rather than letting `but` refuse after the fact.
 
 **Jump to code.** `<CR>` or `o` on a hunk opens its file in an editor window beside the pane, cursor on the hunk's line, so you can edit the change in place — the TUI stays open, and your edits flow straight back into the next `but` diff or commit. From the status view, `o` on a file row does the same, landing on the file's first changed hunk. The editor window is reused across jumps rather than stacking new splits.
 
@@ -427,7 +431,7 @@ require('gitbutler').setup({
 
 ## How it works
 
-The plugin talks to the `but` CLI exclusively through `but <command> --json`, which returns structured data. There is no git output parsing. The architecture has three layers:
+The plugin talks to the `but` CLI through `but <command> --json`, which returns structured data, with one exception: a commit's hunk ids are only in the text output, so the details pane reads those (see `cli._parse_hunk_ids`). There is no git output parsing. The architecture has three layers:
 
 `cli.lua` wraps every `but` subcommand with `vim.system()` for async execution and `vim.json.decode()` for parsing. All other modules go through this layer. It also probes `but worktree --help` once per session: a CLI without that subcommand predates 0.23, so every call fails fast with a version error instead of spawning a command whose syntax no longer exists.
 

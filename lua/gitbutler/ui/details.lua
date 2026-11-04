@@ -392,9 +392,12 @@ function M.build(data, state)
         push(r)
       else
         for _, hunk in ipairs(diff_hunks) do
-          -- Committed diffs carry no `id` — the hunk is still registered so
-          -- navigation works; the ops key off `id` and stay unavailable.
-          local id = scalar(change.id, nil)
+          -- A hunk id of its own (a commit's diff, filled in by
+          -- `_attach_hunk_ids`) beats the change's, which `but` gives one per
+          -- hunk for uncommitted diffs. Without either — a branch diff, a
+          -- landed `git show` — the hunk is still registered so navigation
+          -- works, and the ops that key off `id` stay unavailable.
+          local id = scalar(hunk.id, nil) or scalar(change.id, nil)
           local entity = { cli_id = id, path = path }
           local index = #hunks + 1
           local is_selected = state.selected_hunk == index
@@ -856,9 +859,10 @@ function M._targets()
   return ids, paths
 end
 
----Committed diffs have no hunk ids, so no hunk op can address them.
+---Some diffs have no hunk ids at all — a branch's, or a landed commit's read
+---through `git show` — so no hunk op can address them.
 local function warn_no_ids()
-  vim.notify('gitbutler: this diff has no hunk ids (committed diffs are read-only here)', vim.log.levels.WARN)
+  vim.notify('gitbutler: this diff has no hunk ids (nothing here can be marked)', vim.log.levels.WARN)
 end
 
 ---`<CR>`/`o` — open the selected hunk's file in the editor window at the
@@ -872,8 +876,8 @@ function M._open_hunk()
   require('gitbutler.ui.editor').open(hunk.path, hunk.line)
 end
 
----Toggle the mark on the selected hunk. A hunk with no id (committed diff)
----cannot be marked — and must not be used as a table key.
+---Toggle the mark on the selected hunk. A hunk with no id cannot be marked —
+---and must not be used as a table key.
 function M._toggle_mark()
   local st = M.win_state
   local hunk = st.hunks[st.selected]
@@ -1049,28 +1053,73 @@ function M._yank_comments()
   )
 end
 
----`a` — enter amend mode on the status buffer with the hunks as source. `kind`
----is 'file': amend treats a hunk exactly like an uncommitted file, and the
----source rows live in the other window so `rows` stays empty.
-function M._hunk_amend()
-  local st = M.win_state
+---Whether the shown diff is a commit's. Its hunks are committed changes:
+---squash and move take them as sources, amend does not.
+---@return boolean
+local function committed_diff()
+  local kind = M.win_state.entity and M.win_state.entity.kind
+  return kind == 'commit' or kind == 'committed_file'
+end
+
+---Hand the marked (or selected) hunks to a status-buffer mode as its source.
+---The source rows live in this window, not the status one, so `rows` is empty.
+---@param mode 'amend'|'squash'|'move'
+---@param kind 'file'|'committed_file' what the hunks count as for that mode
+---@return boolean started
+local function hunks_to_mode(mode, kind)
   local ids, paths = M._targets()
   if #ids == 0 then
     warn_no_ids()
-    return
+    return false
   end
-  local sb = st.status_buf
+  local sb = M.win_state.status_buf
   if not sb or not (sb.win and vim.api.nvim_win_is_valid(sb.win)) then
-    vim.notify('gitbutler: no status window to amend into', vim.log.levels.WARN)
-    return
+    vim.notify('gitbutler: no status window to ' .. mode .. ' into', vim.log.levels.WARN)
+    return false
   end
-  M._focus_status()
-  require('gitbutler.ui.modes').enter_verb(sb, 'amend', {
-    kind = 'file',
+  local source = {
+    kind = kind,
     ids = ids,
     rows = {},
     label = paths[1] .. (#ids > 1 and (' +' .. (#ids - 1)) or ''),
-  })
+  }
+  M._focus_status()
+  local modes = require('gitbutler.ui.modes')
+  if mode == 'move' then
+    return modes.enter(sb, 'move', source, { above = false })
+  end
+  return modes.enter_verb(sb, mode, source)
+end
+
+---`a` — amend mode with the hunks as source. Amend takes uncommitted changes
+---only: a hunk counts as an uncommitted file, and `but amend` refuses a
+---committed one, so say which key does that job instead.
+function M._hunk_amend()
+  if committed_diff() then
+    vim.notify('gitbutler: amend takes uncommitted changes — S squashes this hunk', vim.log.levels.WARN)
+    return
+  end
+  hunks_to_mode('amend', 'file')
+end
+
+---`S` — squash mode with the committed hunks as source, for folding a fix
+---into another commit. Squash never takes uncommitted work.
+function M._hunk_squash()
+  if not committed_diff() then
+    vim.notify('gitbutler: squash takes committed changes — a amends this hunk', vim.log.levels.WARN)
+    return
+  end
+  hunks_to_mode('squash', 'committed_file')
+end
+
+---`m` — move mode with the committed hunks as source: `but move` lifts them
+---out of their commit into a new one, or onto another branch.
+function M._hunk_move()
+  if not committed_diff() then
+    vim.notify('gitbutler: move takes committed changes — a amends this hunk', vim.log.levels.WARN)
+    return
+  end
+  hunks_to_mode('move', 'committed_file')
 end
 
 ---Scroll the pane by `count` lines without moving the cursor relative to the
@@ -1123,6 +1172,8 @@ function M._register_handlers(buf)
   buf:on('comment_line', M._comment_line)
   buf:on('yank_comments', M._yank_comments)
   buf:on('hunk_amend', M._hunk_amend)
+  buf:on('hunk_squash', M._hunk_squash)
+  buf:on('hunk_move', M._hunk_move)
   buf:on('focus_status', M._focus_status)
   buf:on('close_pane', M.close)
   buf:on('toggle_full', function()
@@ -1532,6 +1583,30 @@ function M.update_branch_meta(data)
   end
 end
 
+---Write the ids `but diff <commit>` printed onto the hunks `but diff
+---<commit> --json` returned, pairing them by path in output order — both
+---list a file's hunks in the same order. A count that does not line up
+---leaves the remaining hunks without an id, which only costs the ops that
+---need one; it never labels a hunk with another hunk's id.
+---@param data table decoded `but diff --json`
+---@param ids { id: string, path: string }[]
+function M._attach_hunk_ids(data, ids)
+  local queues = {}
+  for _, entry in ipairs(list(ids)) do
+    queues[entry.path] = queues[entry.path] or {}
+    table.insert(queues[entry.path], entry.id)
+  end
+  local taken = {}
+  for _, change in ipairs(list(type(data) == 'table' and data.changes)) do
+    local path = scalar(change.path, '')
+    local diff = type(change.diff) == 'table' and change.diff or {}
+    for _, hunk in ipairs(list(diff.hunks)) do
+      taken[path] = (taken[path] or 0) + 1
+      hunk.id = queues[path] and queues[path][taken[path]] or nil
+    end
+  end
+end
+
 ---Load and display the diff for `entity`. No-op when it is already showing.
 ---@param entity { cli_id: string, kind?: string, meta?: table }
 function M.show(entity)
@@ -1577,6 +1652,21 @@ function M.show(entity)
       if M.is_open() then
         pcall(vim.api.nvim_win_set_cursor, M.win_state.win, { 1, 0 })
       end
+      return
+    end
+    -- A commit's hunks have ids the JSON does not carry; read them before the
+    -- first render so marks and ops are live from the start.
+    if committed_diff() then
+      require('gitbutler.cli').diff_hunk_ids(entity.cli_id, function(id_err, ids)
+        if gen ~= M.win_state.gen then
+          return
+        end
+        if not id_err then
+          M._attach_hunk_ids(data, ids)
+        end
+        M._rebuild()
+        M._select_hunk(1)
+      end)
       return
     end
     M._rebuild()
