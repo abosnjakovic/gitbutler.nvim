@@ -39,6 +39,7 @@ function M.setup()
     GitButlerModeCommit = { link = 'DiffAdd' },
     GitButlerModeMove = { link = 'DiffChange' },
     GitButlerModeStack = { link = 'DiffChange' },
+    GitButlerModeWorktree = { link = 'DiffChange' },
     GitButlerModeSource = { link = 'Visual' },
     GitButlerVerbPill = { link = 'IncSearch' },
     GitButlerDimmed = { link = 'Comment' },

@@ -1,7 +1,7 @@
 local M = {}
 
 ---@class ModeState
----@field mode 'amend'|'squash'|'commit'|'move'|'stack'
+---@field mode 'amend'|'squash'|'commit'|'move'|'stack'|'worktree'
 ---@field source? { kind: string, ids: string[], rows: integer[], label: string }
 ---@field opts table  -- e.g. { above = false }
 M.state = nil -- nil == normal mode
@@ -30,7 +30,7 @@ end
 
 ---Keys owned by the mode layer. On every transition ALL of these plus the
 ---normal-map keys are deleted, then the target mode's set is bound.
-local MODE_KEYS = { amend = {}, squash = {}, commit = {}, move = {}, stack = {} }
+local MODE_KEYS = { amend = {}, squash = {}, commit = {}, move = {}, stack = {}, worktree = {} }
 M._mode_keys = MODE_KEYS
 
 local NAV_ACTIONS = {
@@ -466,8 +466,7 @@ end
 
 ---Confirm a move-mode target: exit the mode, then one `but move` call with
 ---every source and refresh. Committed files land in a new commit, so they ask
----for its message first when the CLI can take one; commits and branches keep
----their own.
+---for its message first; commits and branches keep their own.
 ---@param buf GitButlerBuffer
 function M._move_confirm(buf)
   local state = M.state
@@ -497,7 +496,7 @@ function M._move_confirm(buf)
     end, message)
   end
 
-  if source.kind ~= 'committed_file' or not cli.move_takes_message() then
+  if source.kind ~= 'committed_file' then
     move(nil)
     return
   end
@@ -604,6 +603,129 @@ MODE_KEYS.stack['m'] = function(buf)
     rows = { row },
     label = line.data.name or line.data.cli_id,
   }, { above = false })
+end
+
+---The worktree the cursor sits in: every row `but status` lists under one —
+---its uncommitted area, its branch, its commits — carries the name.
+---@param buf GitButlerBuffer
+---@return string?
+local function worktree_under_cursor(buf)
+  local line = target_under_cursor(buf, function(l)
+    return l.data ~= nil and l.data.worktree ~= nil
+  end)
+  return line and line.data.worktree or nil
+end
+
+---Run one worktree mutation and refresh. The mode is exited by the caller
+---before this runs, so the refresh always re-renders normal mode.
+---@param verb string
+---@param run fun(cb: fun(err?: string, result?: any))
+---@param describe fun(result: any): string message for the success notification
+local function worktree_run(verb, run, describe)
+  run(function(err, result)
+    if err then
+      vim.notify('gitbutler worktree ' .. verb .. ': ' .. err, vim.log.levels.ERROR)
+    else
+      vim.notify('gitbutler: ' .. describe(result), vim.log.levels.INFO)
+    end
+    require('gitbutler.ui.status').refresh()
+  end)
+end
+
+---Worktree mode `n` — create one. `but` picks the directory (under
+---`~/.gitbutler-worktrees/`) and copies anything `.worktreeinclude` lists
+---into it; an empty name leaves the branch name to it as well.
+MODE_KEYS.worktree['n'] = function(buf)
+  M.exit(buf)
+  require('gitbutler.ui.float').input({
+    title = 'New worktree (branch name, empty for a generated one)',
+    allow_empty = true,
+    on_submit = function(name)
+      worktree_run('new', function(cb)
+        require('gitbutler.cli').worktree_new(vim.trim(name or ''), cb)
+      end, function(result)
+        local created = type(result) == 'table' and result.name or 'worktree'
+        local path = type(result) == 'table' and result.path or nil
+        return 'created ' .. tostring(created) .. (path and (' at ' .. tostring(path)) or '')
+      end)
+    end,
+  })
+end
+
+---Worktree mode `a` — archive the worktree under the cursor: it leaves the
+---workspace view, its directory and branch untouched.
+MODE_KEYS.worktree['a'] = function(buf)
+  local name = worktree_under_cursor(buf)
+  if not name then
+    vim.notify('gitbutler: place the cursor on a worktree row', vim.log.levels.WARN)
+    return
+  end
+  M.exit(buf)
+  worktree_run('archive', function(cb)
+    require('gitbutler.cli').worktree_archive(name, cb)
+  end, function()
+    return 'archived ' .. name
+  end)
+end
+
+---Worktree mode `A` — unarchive: pick from the archived list, which is the
+---only place those worktrees appear (status omits them).
+MODE_KEYS.worktree['A'] = function(buf)
+  require('gitbutler.cli').worktree_list(function(err, data)
+    if M.current() ~= 'worktree' then
+      -- The user left the mode while the list was in flight.
+      return
+    end
+    if err then
+      vim.notify('gitbutler worktree list: ' .. err, vim.log.levels.ERROR)
+      return
+    end
+    local names = {}
+    for _, wt in ipairs(type(data) == 'table' and data.archived or {}) do
+      if wt.name then
+        table.insert(names, wt.name)
+      end
+    end
+    if #names == 0 then
+      vim.notify('gitbutler: no archived worktrees', vim.log.levels.WARN)
+      return
+    end
+    M.exit(buf)
+    require('gitbutler.ui.float').fuzzy_picker({
+      title = 'Unarchive worktree',
+      items = names,
+      on_select = function(name)
+        worktree_run('unarchive', function(cb)
+          require('gitbutler.cli').worktree_unarchive(name, cb)
+        end, function()
+          return 'unarchived ' .. name
+        end)
+      end,
+    })
+  end)
+end
+
+---Worktree mode `x` — remove the worktree under the cursor. The directory
+---goes, the branch stays. `but` refuses one with uncommitted changes, so the
+---discarding answer is offered in the same prompt rather than as a retry.
+MODE_KEYS.worktree['x'] = function(buf)
+  local name = worktree_under_cursor(buf)
+  if not name then
+    vim.notify('gitbutler: place the cursor on a worktree row', vim.log.levels.WARN)
+    return
+  end
+  local prompt = 'Remove worktree ' .. name .. '? Its directory goes, the branch stays.'
+  vim.ui.select({ 'No', 'Yes', 'Yes, discard its changes' }, { prompt = prompt }, function(choice)
+    if not choice or choice == 'No' then
+      return
+    end
+    M.exit(buf)
+    worktree_run('remove', function(cb)
+      require('gitbutler.cli').worktree_remove(name, choice ~= 'Yes', cb)
+    end, function()
+      return 'removed ' .. name
+    end)
+  end)
 end
 
 MODE_KEYS.move['<CR>'] = M._move_confirm

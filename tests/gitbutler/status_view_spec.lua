@@ -15,7 +15,7 @@ end
 
 test('status: renders graph rows', function()
   local lines = h.capture_lines(fixtures.status_full)
-  assert_eq('╭┄▾ zz [uncommitted]', lines[1].text)
+  assert_eq('╭┄▾ @ [uncommitted]', lines[1].text)
   assert_truthy(lines[1].graph)
   local found_branch = false
   for _, l in ipairs(lines) do
@@ -125,7 +125,7 @@ end)
 test('handles empty workspace', function()
   local lines = h.capture_lines(fixtures.status_empty)
   assert_truthy(lines)
-  assert_eq('╭┄▾ zz [uncommitted] (no changes)', lines[1].text)
+  assert_eq('╭┄▾ @ [uncommitted] (no changes)', lines[1].text)
   assert_truthy(#lines >= 2, 'at least uncommitted header + merge base')
 end)
 

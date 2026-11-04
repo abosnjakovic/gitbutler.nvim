@@ -137,7 +137,7 @@ end
 
 ---Build graph rows from decoded `but status --json -f -v` output.
 ---@param data table
----@param state? { selected?: table<string,boolean>, fold_state?: table<string,boolean>, file_lists?: table<string,boolean>, show_all_files?: boolean, branch_suffix?: fun(stack: table, branch: table): {[1]:string,[2]:string?}[], base_history?: table, base_expanded?: table<string,boolean>, base_detail?: table<string,{ body?: string[], files?: table[] }>, base_more?: boolean, base_count?: integer, uncommitted_id?: string }
+---@param state? { selected?: table<string,boolean>, fold_state?: table<string,boolean>, file_lists?: table<string,boolean>, show_all_files?: boolean, branch_suffix?: fun(stack: table?, branch: table): {[1]:string,[2]:string?}[], base_history?: table, base_expanded?: table<string,boolean>, base_detail?: table<string,{ body?: string[], files?: table[] }>, base_more?: boolean, base_count?: integer }
 ---@return GraphRow[]
 function M.build(data, state)
   state = state or {}
@@ -155,140 +155,174 @@ function M.build(data, state)
   if #unassigned == 0 then
     unassigned = list(data.unassignedChanges)
   end
-  -- The CLI's id for the uncommitted area (see `cli.uncommitted_id`).
-  local uncommitted_id = state.uncommitted_id or '@'
-  local hdr = row('uncommitted_header', { cli_id = uncommitted_id, fold_id = 'unassigned' }, true)
-  -- Buffer:toggle_fold only walks rows flagged foldable.
-  hdr.foldable = true
-  add(hdr, '╭┄' .. fold_marker(folds['unassigned']), HL.connector)
-  add(hdr, uncommitted_id, HL.cli_id)
-  add(hdr, ' [uncommitted]', HL.section)
-  if #unassigned == 0 then
-    add(hdr, ' (no changes)', HL.dim)
-  end
-  push(hdr)
 
-  if not folds['unassigned'] then
-    for _, ch in ipairs(unassigned) do
-      local prefix, hl = change_prefix(ch.changeType)
-      local cli_id = scalar(ch.cliId, nil)
-      local path = scalar(ch.filePath, '(unknown)')
-      local key = 'change:' .. (cli_id or path)
-      local r = row('file', {
-        path = path,
-        change_type = ch.changeType,
-        cli_id = cli_id,
-        branch_name = nil,
-        unassigned = true,
-        mark_key = key,
-      }, true)
-      lead(r, selected[key], '┊')
-      add(r, '  ')
-      add(r, cli_id or '??', HL.cli_id)
-      add(r, ' ' .. prefix, hl)
-      add(r, ' ' .. path, hl)
-      push(r)
+  ---One change row: an uncommitted file in some checkout, or a change assigned
+  ---to a branch. `glyph` is the lane drawn to its left; `ctx` is merged into
+  ---the payload, so the owning branch / stack / worktree travels with the row.
+  local function push_file(ch, glyph, ctx)
+    local prefix, hl = change_prefix(ch.changeType)
+    local cli_id = scalar(ch.cliId, nil)
+    local path = scalar(ch.filePath, '(unknown)')
+    local key = 'change:' .. (cli_id or path)
+    local payload = { path = path, change_type = ch.changeType, cli_id = cli_id, mark_key = key }
+    for k, v in pairs(ctx) do
+      payload[k] = v
+    end
+    local r = row('file', payload, true)
+    lead(r, selected[key], glyph)
+    add(r, '  ')
+    add(r, cli_id or '??', HL.cli_id)
+    add(r, ' ' .. prefix, hl)
+    add(r, ' ' .. path, hl)
+    push(r)
+  end
+
+  ---An uncommitted-area header and its files: the workspace's own (`@`), or a
+  ---worktree's (`<wt>:@`), which `but` labels with the worktree name in braces.
+  ---@param cli_id string
+  ---@param fold_id string
+  ---@param changes table[]
+  ---@param opts { glyph: string, file_glyph: string, worktree?: string }
+  local function push_uncommitted(cli_id, fold_id, changes, opts)
+    local hdr = row('uncommitted_header', { cli_id = cli_id, fold_id = fold_id, worktree = opts.worktree }, true)
+    -- Buffer:toggle_fold only walks rows flagged foldable.
+    hdr.foldable = true
+    add(hdr, opts.glyph .. fold_marker(folds[fold_id]), HL.connector)
+    add(hdr, cli_id, HL.cli_id)
+    add(hdr, ' [uncommitted]', HL.section)
+    if opts.worktree then
+      add(hdr, ' {' .. opts.worktree .. '}', HL.branch)
+    end
+    if #changes == 0 then
+      add(hdr, ' (no changes)', HL.dim)
+    end
+    push(hdr)
+
+    if folds[fold_id] then
+      return
+    end
+    for _, ch in ipairs(changes) do
+      push_file(ch, opts.file_glyph, { unassigned = opts.worktree == nil, worktree = opts.worktree })
     end
   end
+
+  ---A branch header and, unless folded, the changes assigned to it and its
+  ---commits. `ctx` names the owner — a workspace stack or a worktree — and
+  ---travels into every payload the branch produces.
+  ---@param branch table
+  ---@param glyph string
+  ---@param ctx { stack?: table, stack_cli_id?: string, worktree?: string }
+  ---@param assigned? table[] changes assigned to this branch
+  local function push_branch(branch, glyph, ctx, assigned)
+    local name = scalar(branch.name, '(unnamed)')
+    local fold_id = 'branch:' .. name
+    local branch_cli_id = scalar(branch.cliId, nil)
+    local br = row('branch', {
+      branch = branch,
+      stack = ctx.stack,
+      worktree = ctx.worktree,
+      name = name,
+      cli_id = branch_cli_id,
+      stack_cli_id = ctx.stack_cli_id,
+      fold_id = fold_id,
+    }, true)
+    br.foldable = true
+    add(br, glyph .. fold_marker(folds[fold_id]), HL.connector)
+    add(br, branch_cli_id or '??', HL.cli_id)
+    add(br, ' [' .. name .. ']', HL.branch)
+    if state.branch_suffix then
+      for _, piece in ipairs(state.branch_suffix(ctx.stack, branch)) do
+        add(br, piece[1], piece[2])
+      end
+    end
+    push(br)
+
+    if folds[fold_id] then
+      return
+    end
+    for _, ch in ipairs(list(assigned)) do
+      push_file(ch, '┊┊', { branch_name = name, stack_cli_id = ctx.stack_cli_id, worktree = ctx.worktree })
+    end
+
+    for _, commit in ipairs(list(branch.commits)) do
+      local key = 'commit:' .. scalar(commit.commitId, '')
+      local cr = row('commit', {
+        commit = commit,
+        sha = commit.commitId,
+        cli_id = commit.cliId,
+        branch_name = name,
+        stack_cli_id = ctx.stack_cli_id,
+        worktree = ctx.worktree,
+        mark_key = key,
+      }, true)
+      if selected[key] then
+        add(cr, '✔︎', HL.mark)
+      else
+        local dot, dot_hl = commit_dot(commit, branch)
+        add(cr, '┊', HL.connector)
+        add(cr, dot, dot_hl)
+      end
+      add(cr, ' ')
+      add(cr, scalar(commit.commitId, ''):sub(1, 7), HL.sha)
+      add(cr, ' ' .. subject(commit.message), HL.msg)
+      push(cr)
+
+      -- Official default: committed-file rows hidden until toggled (f/F).
+      local show_files = state.show_all_files or file_lists[commit.commitId]
+      for _, ch in ipairs(show_files and list(commit.changes) or {}) do
+        local prefix, hl = change_prefix(ch.changeType)
+        local cli_id = scalar(ch.cliId, nil)
+        local path = scalar(ch.filePath, '(unknown)')
+        local ckey = 'cfile:' .. (cli_id or path)
+        local fr = row('committed_file', {
+          path = path,
+          change_type = ch.changeType,
+          cli_id = cli_id,
+          commit_id = commit.commitId,
+          branch_name = name,
+          worktree = ctx.worktree,
+          mark_key = ckey,
+        }, true)
+        lead(fr, selected[ckey], '┊│')
+        add(fr, '    ')
+        add(fr, prefix, hl)
+        add(fr, ' ' .. path, hl)
+        push(fr)
+      end
+    end
+  end
+
+  -- From 0.23 the workspace's uncommitted area is always `@`.
+  push_uncommitted('@', 'unassigned', unassigned, { glyph = '╭┄', file_glyph = '┊' })
   local gap = row('connector', nil, false)
   add(gap, '┊', HL.connector)
   push(gap)
 
   -- Stacks
   for _, stack in ipairs(list(data.stacks)) do
+    local ctx = { stack = stack, stack_cli_id = scalar(stack.cliId, nil) }
     for bi, branch in ipairs(list(stack.branches)) do
-      local name = scalar(branch.name, '(unnamed)')
-      local fold_id = 'branch:' .. name
-      local branch_cli_id = scalar(branch.cliId, nil)
-      local br = row('branch', {
-        branch = branch,
-        stack = stack,
-        name = name,
-        cli_id = branch_cli_id,
-        stack_cli_id = scalar(stack.cliId, nil),
-        fold_id = fold_id,
-      }, true)
-      br.foldable = true
-      add(br, (bi == 1 and '┊╭┄' or '┊├┄') .. fold_marker(folds[fold_id]), HL.connector)
-      add(br, branch_cli_id or '??', HL.cli_id)
-      add(br, ' [' .. name .. ']', HL.branch)
-      if state.branch_suffix then
-        for _, piece in ipairs(state.branch_suffix(stack, branch)) do
-          add(br, piece[1], piece[2])
-        end
-      end
-      push(br)
+      -- Stack-level assigned-but-uncommitted changes render under the head branch.
+      push_branch(branch, bi == 1 and '┊╭┄' or '┊├┄', ctx, bi == 1 and stack.assignedChanges or nil)
+    end
+    local join = row('connector', nil, false)
+    add(join, '├╯', HL.connector)
+    push(join)
+  end
 
-      if not folds[fold_id] then
-        -- Stack-level assigned-but-uncommitted changes render under the head branch.
-        if bi == 1 then
-          for _, ch in ipairs(list(stack.assignedChanges)) do
-            local prefix, hl = change_prefix(ch.changeType)
-            local cli_id = scalar(ch.cliId, nil)
-            local path = scalar(ch.filePath, '(unknown)')
-            local key = 'change:' .. (cli_id or path)
-            local r = row('file', {
-              path = path,
-              change_type = ch.changeType,
-              cli_id = cli_id,
-              branch_name = name,
-              stack_cli_id = stack.cliId,
-              mark_key = key,
-            }, true)
-            lead(r, selected[key], '┊┊')
-            add(r, '  ')
-            add(r, cli_id or '??', HL.cli_id)
-            add(r, ' ' .. prefix, hl)
-            add(r, ' ' .. path, hl)
-            push(r)
-          end
-        end
-
-        for _, commit in ipairs(list(branch.commits)) do
-          local key = 'commit:' .. scalar(commit.commitId, '')
-          local cr = row('commit', {
-            commit = commit,
-            sha = commit.commitId,
-            cli_id = commit.cliId,
-            branch_name = name,
-            stack_cli_id = stack.cliId,
-            mark_key = key,
-          }, true)
-          if selected[key] then
-            add(cr, '✔︎', HL.mark)
-          else
-            local glyph, glyph_hl = commit_dot(commit, branch)
-            add(cr, '┊', HL.connector)
-            add(cr, glyph, glyph_hl)
-          end
-          add(cr, ' ')
-          add(cr, scalar(commit.commitId, ''):sub(1, 7), HL.sha)
-          add(cr, ' ' .. subject(commit.message), HL.msg)
-          push(cr)
-
-          -- Official default: committed-file rows hidden until toggled (f/F).
-          local show_files = state.show_all_files or file_lists[commit.commitId]
-          for _, ch in ipairs(show_files and list(commit.changes) or {}) do
-            local prefix, hl = change_prefix(ch.changeType)
-            local cli_id = scalar(ch.cliId, nil)
-            local path = scalar(ch.filePath, '(unknown)')
-            local ckey = 'cfile:' .. (cli_id or path)
-            local fr = row('committed_file', {
-              path = path,
-              change_type = ch.changeType,
-              cli_id = cli_id,
-              commit_id = commit.commitId,
-              branch_name = name,
-              mark_key = ckey,
-            }, true)
-            lead(fr, selected[ckey], '┊│')
-            add(fr, '    ')
-            add(fr, prefix, hl)
-            add(fr, ' ' .. path, hl)
-            push(fr)
-          end
-        end
-      end
+  -- Worktrees (0.23+). A linked checkout has its own uncommitted area and its
+  -- own branch, listed after the stacks. Their CLI ids address them in diff,
+  -- amend and move exactly like workspace rows, so they reuse the same row
+  -- types and every verb works on them unchanged.
+  for _, wt in ipairs(list(data.worktrees)) do
+    local wt_name = scalar(wt.name, '(unnamed)')
+    push_uncommitted(scalar(wt.cliId, '') .. ':@', 'worktree:' .. wt_name, list(wt.uncommittedChanges), {
+      glyph = '┊╭┄',
+      file_glyph = '┊┊',
+      worktree = wt_name,
+    })
+    for _, branch in ipairs(list(wt.branches)) do
+      push_branch(branch, '┊├┄', { worktree = wt_name }, nil)
     end
     local join = row('connector', nil, false)
     add(join, '├╯', HL.connector)

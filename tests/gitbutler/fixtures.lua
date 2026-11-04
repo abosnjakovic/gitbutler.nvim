@@ -107,6 +107,47 @@ M.status_empty = {
   upstreamState = { behind = 0 },
 }
 
+-- `but status --json -f -v` in a repo with one linked worktree (0.23+): the
+-- worktree carries its own uncommitted area and its own branch, and `but`
+-- lists it after the stacks. Captured from a scratch repo.
+M.status_worktree = {
+  uncommittedChanges = {
+    { cliId = 'pnlo', filePath = 'b.txt', changeType = 'added' },
+  },
+  stacks = {},
+  worktrees = {
+    {
+      cliId = 'wt',
+      name = 'wt-one',
+      reference = 'refs/heads/wt-one',
+      base = { commitId = '0f1ac621a02dac27f0bbd0ae2be6a361d144ea41', inWorkspace = false, behind = 0 },
+      uncommittedChanges = {
+        { cliId = 'wt:dr', filePath = 'src/wip.rs', changeType = 'modified' },
+      },
+      branches = {
+        {
+          cliId = 'wt',
+          name = 'wt-one',
+          commits = {
+            {
+              cliId = 'qtto',
+              commitId = 'ccccdddd11112222333344445555666677778888',
+              message = 'add --help text',
+              changes = {},
+            },
+          },
+          upstreamCommits = {},
+          branchStatus = 'completelyUnpushed',
+          reviewId = vim.NIL,
+          ci = vim.NIL,
+        },
+      },
+    },
+  },
+  mergeBase = { cliId = '', commitId = '0f1ac621a02dac27f0bbd0ae2be6a361d144ea41', message = 'first\n' },
+  upstreamState = { behind = 0 },
+}
+
 -- `but status --json -f -v` with upstream behind
 M.status_behind = {
   uncommittedChanges = {},

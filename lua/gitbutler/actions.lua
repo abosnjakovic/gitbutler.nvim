@@ -77,6 +77,11 @@ function M.stack_start(buf)
   require('gitbutler.ui.modes').enter(buf, 'stack')
 end
 
+---Enter worktree mode: create / archive / unarchive / remove linked checkouts.
+function M.worktree_start(buf)
+  require('gitbutler.ui.modes').enter(buf, 'worktree')
+end
+
 ---Pure scan: row index of the branch row named `name`, or nil.
 ---@param lines? GitButlerLine[]
 ---@param name string
@@ -504,7 +509,7 @@ local function land_next(buf, names, i)
     return
   end
   local sp = spinner.start('landing ' .. name .. ' (' .. i .. '/' .. #names .. ')')
-  cli.land(name, function(err)
+  cli.merge(name, function(err)
     sp:stop()
     if err then
       surface_error('land', err)
@@ -534,10 +539,10 @@ local function land_branches(buf, rows)
 end
 
 ---Land onto the target. With branch/commit rows selected (or under the cursor),
----land those branches via `but land`. Otherwise commit the selected (or
----unassigned) files onto an ephemeral virtual branch and land that — `but land`
----fast-forwards (or merges) the target, pushes to the remote, and reconciles
----the workspace in a single call.
+---merge those branches via `but merge`. Otherwise commit the selected (or
+---unassigned) files onto an ephemeral virtual branch and merge that — `but
+---merge` fast-forwards (or merges) the target, pushes to the remote, and
+---reconciles the workspace in a single call.
 function M.direct_to_main(buf)
   local branch_rows = buf:get_selected_lines({ 'branch', 'commit' })
   if #branch_rows == 0 then
@@ -601,11 +606,11 @@ function M.direct_to_main(buf)
           return
         end
 
-        -- Land the ephemeral branch straight onto the target. `but land` does the
+        -- Merge the ephemeral branch straight onto the target. `but merge` does the
         -- fast-forward-or-merge, the remote push, and the workspace reconcile in one
         -- call; on rejection (e.g. a protected branch) it exits non-zero with a message.
         sp:update('landing onto target')
-        cli.land(ephemeral_name, function(land_err)
+        cli.merge(ephemeral_name, function(land_err)
           sp:stop()
           buf:clear_selection()
           if land_err then
@@ -661,8 +666,8 @@ function M.direct_to_main_test_harness(file_path, message)
     return 'commit: no commitId in response'
   end
 
-  -- but land <ephemeral> --yes: fast-forward-or-merge the target, push, reconcile.
-  local land_err = cli.run_sync({ 'land', ephemeral_name, '--yes', '--json' })
+  -- but merge <ephemeral> --yes: fast-forward-or-merge the target, push, reconcile.
+  local land_err = cli.run_sync({ 'merge', ephemeral_name, '--yes', '--json' })
   if land_err then
     return 'land: ' .. land_err
   end
@@ -1300,11 +1305,6 @@ function M.split(buf)
     return
   end
   if spans_commits(source.lines) then
-    return
-  end
-  -- Before the message float, so a message is never typed only to be refused.
-  if not cli.has_split() then
-    vim.notify('gitbutler: this but has no split (0.22.3 and earlier); update but to use it', vim.log.levels.WARN)
     return
   end
   float.input({

@@ -49,9 +49,16 @@ local MODE_ITEMS = {
     { 'm', 'move' },
     { 'esc', 'cancel' },
   },
+  worktree = {
+    { 'n', 'new' },
+    { 'a', 'archive' },
+    { 'A', 'unarchive' },
+    { 'x', 'remove' },
+    { 'esc', 'cancel' },
+  },
 }
 
----Hotbar items for a mode ('normal', 'amend', 'squash', 'commit', 'move', 'stack').
+---Hotbar items for a mode ('normal', 'amend', 'squash', 'commit', 'move', 'stack', 'worktree').
 ---@param mode string
 ---@return {[1]:string,[2]:string,keep?:boolean}[]
 function M.items_for(mode)
@@ -64,6 +71,7 @@ local PILL_HL = {
   commit = 'GitButlerModeCommit',
   move = 'GitButlerModeMove',
   stack = 'GitButlerModeStack',
+  worktree = 'GitButlerModeWorktree',
 }
 
 ---Pill highlight group for a mode.

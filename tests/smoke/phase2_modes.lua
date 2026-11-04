@@ -12,9 +12,8 @@ status.open()
 H.wait_status(status)
 local buf = status.instance
 
--- Baseline (header carries a fold indicator: `╭┄▾ zz [uncommitted]`, or `@`
--- on a CLI that has renamed it).
-if not buf.lines[1].text:find(cli.uncommitted_id() .. ' [uncommitted]', 1, true) then
+-- Baseline (header carries a fold indicator: `╭┄▾ @ [uncommitted]`).
+if not buf.lines[1].text:find('@ [uncommitted]', 1, true) then
   H.fail('no uncommitted header: ' .. buf.lines[1].text)
 end
 H.ok('baseline: graph + normal mode (' .. modes.current() .. ')')

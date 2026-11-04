@@ -114,6 +114,13 @@ M.contexts = {
       section = 'Modes',
       help = 'Stack mode (apply / unapply / move)',
     },
+    {
+      key = 'W',
+      action = 'worktree_start',
+      desc = 'worktree',
+      section = 'Modes',
+      help = 'Worktree mode (new / archive / unarchive / remove)',
+    },
     -- Navigation (hotbar order places these after Modes; see hotbar.normal_items)
     {
       key = 't',

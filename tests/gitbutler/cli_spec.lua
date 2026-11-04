@@ -315,12 +315,81 @@ test('unapply: no -f (the flag is gone in 0.22)', function()
   assert_falsy(contains_seq(args, { '-f' }), '-f is not a but 0.22 unapply flag')
 end)
 
-test('land: passes --yes so it never blocks on a prompt', function()
+test('merge: passes --yes so it never blocks on a prompt', function()
   assert_eq(
-    'land br --yes --json',
+    'merge br --yes --json',
     table.concat(
       capture(function()
-        cli.land('br', noop)
+        cli.merge('br', noop)
+      end),
+      ' '
+    )
+  )
+end)
+
+test('worktree_new: names the branch when given one, omits it when not', function()
+  assert_eq(
+    'worktree new feat --json',
+    table.concat(
+      capture(function()
+        cli.worktree_new('feat', noop)
+      end),
+      ' '
+    )
+  )
+  assert_eq(
+    'worktree new --json',
+    table.concat(
+      capture(function()
+        cli.worktree_new('', noop)
+      end),
+      ' '
+    ),
+    'an empty name leaves the branch to but'
+  )
+end)
+
+test('worktree_remove: --force only when discarding changes', function()
+  local plain = capture(function()
+    cli.worktree_remove('wt', false, noop)
+  end)
+  assert_eq('worktree remove wt --json', table.concat(plain, ' '))
+  assert_falsy(contains_seq(plain, { '--force' }), 'a plain remove must not discard changes')
+  assert_eq(
+    'worktree remove wt --force --json',
+    table.concat(
+      capture(function()
+        cli.worktree_remove('wt', true, noop)
+      end),
+      ' '
+    )
+  )
+end)
+
+test('worktree archive / unarchive / list: subcommand plus name', function()
+  assert_eq(
+    'worktree archive wt --json',
+    table.concat(
+      capture(function()
+        cli.worktree_archive('wt', noop)
+      end),
+      ' '
+    )
+  )
+  assert_eq(
+    'worktree unarchive wt --json',
+    table.concat(
+      capture(function()
+        cli.worktree_unarchive('wt', noop)
+      end),
+      ' '
+    )
+  )
+  assert_eq(
+    'worktree list --json',
+    table.concat(
+      capture(function()
+        cli.worktree_list(noop)
       end),
       ' '
     )
@@ -372,15 +441,16 @@ test('oplog_snapshot: -m only when a message is given', function()
   )
 end)
 
--- The 0.22 cutover is load-bearing: a CLI still advertising `--format` predates
--- the surface this plugin speaks, so cli.lua probes `status --help` once and
--- refuses outright rather than issuing retired syntax. Exercise both verdicts
--- through run_sync by stubbing vim.system and inspecting what reaches it.
+-- The 0.23 floor is load-bearing: a CLI without `but worktree` predates the
+-- status payload this plugin renders and the `merge` spelling of `land`, so
+-- cli.lua probes `worktree --help` once and refuses outright rather than
+-- issuing commands that CLI does not have. Exercise both verdicts through
+-- run_sync by stubbing vim.system and inspecting what reaches it.
 
 ---Stub vim.system for a synchronous run. Returns the last captured non-probe
----cmd (nil when nothing was spawned); the `status --help` capability probe is
----answered from `help`.
-local function with_system(exit, invoke, help)
+---cmd (nil when nothing was spawned); the `worktree --help` capability probe
+---exits with `probe_code` (0 — supported — by default).
+local function with_system(exit, invoke, probe_code)
   local captured_cmd
   local orig = vim.system
   vim.system = function(cmd, _opts)
@@ -390,7 +460,7 @@ local function with_system(exit, invoke, help)
     end
     return {
       wait = function()
-        return is_probe and { code = 0, stdout = help or '' } or exit
+        return is_probe and { code = probe_code or 0 } or exit
       end,
     }
   end
@@ -401,19 +471,19 @@ local function with_system(exit, invoke, help)
   return captured_cmd, err, res
 end
 
-test('run_sync: passes --json through on 0.22 CLIs and prepends the cmd', function()
+test('run_sync: passes --json through and prepends the cmd', function()
   local cmd = with_system({ code = 0, stdout = '{}' }, function()
     return cli.run_sync({ 'status', '--json' })
-  end, '      --json\n          Output detailed information as JSON')
+  end)
   assert_eq(config.values.cmd, cmd[1])
   assert_truthy(contains_seq(cmd, { '--json' }), 'boolean json flag kept')
   assert_falsy(contains_seq(cmd, { '--format=json' }), 'args must reach but verbatim')
 end)
 
-test('run_sync: refuses a pre-0.22 CLI without spawning the command', function()
+test('run_sync: refuses a CLI without `but worktree` without spawning the command', function()
   local cmd, err = with_system({ code = 0, stdout = '{}' }, function()
     return cli.run_sync({ 'status', '--json' })
-  end, '      --format <FORMAT>  Output format')
+  end, 2)
   assert_eq(nil, cmd)
   assert_truthy(err and err:find(cli.MIN_VERSION, 1, true), 'error names the minimum version')
 end)
@@ -532,7 +602,7 @@ test('run: spawn failure after a cached probe reaches the callback', function()
   cli.supported = nil
 end)
 
-test('run: refuses a pre-0.22 CLI without spawning the command', function()
+test('run: refuses a pre-0.23 CLI without spawning the command', function()
   cli.supported = false
   local orig = vim.system
   local spawned = false
@@ -549,121 +619,4 @@ test('run: refuses a pre-0.22 CLI without spawning the command', function()
   assert_falsy(spawned, 'nothing spawned on an unsupported CLI')
   assert_truthy(done, 'callback fired')
   assert_truthy(err and err:find(cli.MIN_VERSION, 1, true), 'callback got the unsupported error')
-end)
-
--- Newer but renames the uncommitted area from `zz` to `@` and rejects `zz`, so
--- the id is asked of the CLI rather than hardcoded. Every 0.22 release names it
--- `(zz)` in `amend --help`.
-
----Stub vim.system so `but <cmd> --help` answers from `helps[cmd]`: a string is
----the help text (exit 0), a table is the raw result, and nil means an unknown
----subcommand (exit 2). `throw` makes every spawn throw, like a missing binary.
----Clears the probe caches and restores everything when the test ends.
----@param helps table<string, string|table>
----@param throw? boolean
----@return string[][] cmds everything spawned
----@return string[] warnings
-local function stub_help(helps, throw)
-  local cmds, warnings = {}, {}
-  local orig_system, orig_notify = vim.system, vim.notify
-  local orig_id, orig_help = cli.uncommitted, cli._help
-  h.after(function()
-    vim.system, vim.notify = orig_system, orig_notify
-    cli.uncommitted, cli._help = orig_id, orig_help
-  end)
-  vim.system = function(cmd)
-    table.insert(cmds, cmd)
-    if throw then
-      error('ENOENT: no such file or directory')
-    end
-    local help = helps[cmd[2]]
-    return {
-      wait = function()
-        if type(help) == 'table' then
-          return help
-        end
-        return help and { code = 0, stdout = help }
-          or { code = 2, stderr = "error: unrecognized subcommand '" .. cmd[2] .. "'" }
-      end,
-    }
-  end
-  vim.notify = function(msg, level)
-    if level == vim.log.levels.WARN then
-      table.insert(warnings, msg)
-    end
-  end
-  cli.uncommitted, cli._help = nil, {}
-  return cmds, warnings
-end
-
-test('uncommitted_id: a 0.22 CLI names the uncommitted area zz', function()
-  stub_help({ amend = '          If omitted, all changes in the uncommitted area (zz) are amended.' })
-  assert_eq('zz', cli.uncommitted_id())
-end)
-
-test('uncommitted_id: a newer CLI names it @', function()
-  stub_help({ amend = '          If omitted, all changes in the uncommitted area (@) are amended.' })
-  assert_eq('@', cli.uncommitted_id())
-end)
-
--- A probe that never answered must not pass silently: the `@` fallback is a
--- guess, and on a 0.22 CLI every header amend and diff would then fail.
-test('uncommitted_id: an unrunnable CLI falls back to @ and says so', function()
-  local _, warnings = stub_help({}, true)
-  assert_eq('@', cli.uncommitted_id())
-  assert_eq(1, #warnings, 'the guess is reported once')
-end)
-
-test('uncommitted_id: a timed-out probe falls back to @ and says so', function()
-  local _, warnings = stub_help({ amend = { code = 124, signal = 9 } })
-  assert_eq('@', cli.uncommitted_id())
-  assert_eq(1, #warnings)
-end)
-
-test('uncommitted_id: probes amend --help once, then answers from the cache', function()
-  local cmds = stub_help({ amend = 'the uncommitted area (zz)' })
-  cli.uncommitted_id()
-  cli.uncommitted_id()
-  assert_eq(1, #cmds, 'one spawn for any number of calls')
-  assert_eq('amend --help', table.concat(cmds[1], ' ', 2))
-end)
-
--- `split` and `move -m` postdate 0.22.3. Asking the CLI up front lets the
--- plugin refuse a split before a message is typed, and move committed files
--- without a message on a CLI that has no `-m`.
-test('has_split: true only when `but split --help` succeeds', function()
-  stub_help({ split = 'Usage: but split [OPTIONS] <SOURCES>...' })
-  assert_truthy(cli.has_split())
-  stub_help({})
-  assert_falsy(cli.has_split(), 'an unknown subcommand means no split')
-end)
-
-test('move_takes_message: follows --message in `but move --help`', function()
-  stub_help({ move = '  -m, --message <MESSAGE>\n          The message for the new commit' })
-  assert_truthy(cli.move_takes_message())
-  stub_help({ move = '      --json\n          Output detailed information as JSON' })
-  assert_falsy(cli.move_takes_message(), '0.22.3 move has no -m')
-end)
-
-test('move_takes_message: false when the help probe fails', function()
-  stub_help({}, true)
-  assert_falsy(cli.move_takes_message())
-end)
-
--- A hung `--help` is a hiccup, not an answer: caching it would make `e` claim
--- the CLI has no split until Neovim restarts. A real exit is cached.
-test('help probes retry after a timeout instead of caching it', function()
-  local cmds = stub_help({ split = { code = 124, signal = 9 } })
-  assert_falsy(cli.has_split())
-  cli.has_split()
-  assert_eq(2, #cmds, 'the timed-out probe runs again')
-end)
-
-test('help probes share one spawn per subcommand', function()
-  local cmds = stub_help({ split = 'Usage: but split', move = '-m, --message' })
-  cli.has_split()
-  cli.has_split()
-  cli.move_takes_message()
-  cli.move_takes_message()
-  assert_eq(2, #cmds)
 end)

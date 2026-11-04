@@ -18,7 +18,7 @@ Covers:
 - `but` on PATH (`brew install gitbutler`)
 - `git` on PATH
 - `nvim` 0.10+
-- Network access if your `but setup` configuration reaches out (most local setups do not for a bare-origin scratch repo)
+- Network access only if your Git configuration reaches out; the bare-origin scratch repo itself is local
 
 ### Run
 

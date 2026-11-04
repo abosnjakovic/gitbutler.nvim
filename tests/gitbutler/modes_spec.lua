@@ -473,37 +473,32 @@ h.test('modes: move confirm sends every source in one cli.move call and refreshe
 end)
 
 -- Committed files moved to a commit or branch become a new commit, so confirm
--- asks for its message, but only when the CLI can take one: 0.22.3 moves them
--- too and rejects `-m`. Commit and branch moves keep their own message.
+-- asks for its message. Commit and branch moves keep their own.
 
 ---Enter move mode with `source` over row 1, confirm onto the commit at row 2,
 ---and report the cli.move call plus whether the message float opened.
 ---@param source_row table
 ---@param source { kind: string, ids: string[], label: string }
----@param takes_message boolean what cli.move_takes_message answers
 ---@param cancel? boolean close the message float without submitting
 ---@return { sources: string[], target: table, message?: string }? captured
 ---@return boolean asked
-local function run_move_confirm(source_row, source, takes_message, cancel)
+local function run_move_confirm(source_row, source, cancel)
   local cli = require('gitbutler.cli')
   local status = require('gitbutler.ui.status')
   local float = require('gitbutler.ui.float')
   local captured, asked = nil, false
-  local orig_move, orig_takes, orig_refresh, orig_input = cli.move, cli.move_takes_message, status.refresh, float.input
+  local orig_move, orig_refresh, orig_input = cli.move, status.refresh, float.input
   local buf = mode_buffer({
     source_row,
     { selectable = true, type = 'commit', data = { cli_id = 'cd', branch_name = 'feat' } },
   })
   h.after(function()
-    cli.move, cli.move_takes_message, status.refresh, float.input = orig_move, orig_takes, orig_refresh, orig_input
+    cli.move, status.refresh, float.input = orig_move, orig_refresh, orig_input
     close_buffer(buf)
   end)
   cli.move = function(sources, target, cb, message)
     captured = { sources = sources, target = target, message = message }
     cb(nil, {})
-  end
-  cli.move_takes_message = function()
-    return takes_message
   end
   status.refresh = function() end
   float.input = function(opts)
@@ -525,7 +520,7 @@ local committed_row = { selectable = true, type = 'committed_file', data = { cli
 local committed_source = { kind = 'committed_file', ids = { 'aa:k1' }, label = 'a.lua' }
 
 h.test('modes: move confirm asks committed-file sources for the new commit message', function()
-  local captured, asked = run_move_confirm(committed_row, committed_source, true)
+  local captured, asked = run_move_confirm(committed_row, committed_source)
 
   h.assert_truthy(asked)
   h.assert_eq('aa:k1', captured.sources[1])
@@ -533,16 +528,8 @@ h.test('modes: move confirm asks committed-file sources for the new commit messa
   h.assert_eq('extract the helper', captured.message)
 end)
 
-h.test('modes: move confirm skips the message on a CLI without move -m', function()
-  local captured, asked = run_move_confirm(committed_row, committed_source, false)
-
-  h.assert_falsy(asked, 'no message float when the CLI cannot take one')
-  h.assert_truthy(captured, 'the move still ran')
-  h.assert_falsy(captured.message)
-end)
-
 h.test('modes: cancelling the message float moves nothing', function()
-  local captured, asked = run_move_confirm(committed_row, committed_source, true, true)
+  local captured, asked = run_move_confirm(committed_row, committed_source, true)
 
   h.assert_truthy(asked)
   h.assert_falsy(captured, 'no cli.move without a submitted message')
@@ -552,11 +539,10 @@ end)
 h.test('modes: move confirm never asks a commit source for a message', function()
   local captured, asked = run_move_confirm(
     { selectable = true, type = 'commit', data = { cli_id = 'aa', branch_name = 'feat' } },
-    { kind = 'commit', ids = { 'aa' }, label = 'x' },
-    true
+    { kind = 'commit', ids = { 'aa' }, label = 'x' }
   )
 
-  h.assert_falsy(asked, 'a commit keeps its message, even on a CLI that takes -m')
+  h.assert_falsy(asked, 'a commit keeps its own message')
   h.assert_truthy(captured, 'the move ran')
   h.assert_falsy(captured.message)
 end)
@@ -919,4 +905,77 @@ h.test('modes: enter_verb refuses a source kind the verb cannot take', function(
 
   vim.api.nvim_win_close(buf.win, true)
   vim.api.nvim_buf_delete(buf.buf, { force = true })
+end)
+
+-- Worktree mode acts on whatever worktree the cursor sits in, and `x` is the
+-- destructive key: the confirmation's third answer is the only thing that may
+-- discard uncommitted work, so the force flag must track the answer exactly.
+local function worktree_buffer()
+  return mode_buffer({
+    { selectable = true, type = 'uncommitted_header', data = { cli_id = 'wt:@', worktree = 'wt-one' } },
+    { selectable = true, type = 'commit', data = { cli_id = 'qtto', worktree = 'wt-one' } },
+    { selectable = true, type = 'commit', data = { cli_id = 'aa', branch_name = 'feat' } },
+  })
+end
+
+---Press `key` in worktree mode with the cursor on `row`, answering the
+---confirmation with `choice`.
+---@return table calls every worktree CLI call made
+local function run_worktree_key(key, row, choice)
+  local cli = require('gitbutler.cli')
+  local status = require('gitbutler.ui.status')
+  local calls = {}
+  local orig_remove, orig_archive, orig_refresh, orig_select =
+    cli.worktree_remove, cli.worktree_archive, status.refresh, vim.ui.select
+  local buf = worktree_buffer()
+  h.after(function()
+    cli.worktree_remove, cli.worktree_archive, status.refresh, vim.ui.select =
+      orig_remove, orig_archive, orig_refresh, orig_select
+    close_buffer(buf)
+  end)
+  cli.worktree_remove = function(name, force, cb)
+    table.insert(calls, { verb = 'remove', name = name, force = force })
+    cb(nil, { name = name })
+  end
+  cli.worktree_archive = function(name, cb)
+    table.insert(calls, { verb = 'archive', name = name })
+    cb(nil, { name = name, archived = true })
+  end
+  status.refresh = function() end
+  vim.ui.select = function(_, _, cb)
+    cb(choice)
+  end
+
+  modes.enter(buf, 'worktree')
+  vim.api.nvim_win_set_cursor(buf.win, { row, 0 })
+  modes._mode_keys.worktree[key](buf)
+  return calls
+end
+
+h.test('modes: worktree remove discards changes only on the discarding answer', function()
+  local plain = run_worktree_key('x', 1, 'Yes')
+  h.assert_eq(1, #plain)
+  h.assert_eq('wt-one', plain[1].name)
+  h.assert_falsy(plain[1].force, 'a plain Yes must not discard uncommitted work')
+
+  local forced = run_worktree_key('x', 2, 'Yes, discard its changes')
+  h.assert_truthy(forced[1].force)
+  h.assert_eq('wt-one', forced[1].name, 'a commit row names its worktree too')
+
+  h.assert_eq(0, #run_worktree_key('x', 1, 'No'), 'No removes nothing')
+end)
+
+h.test('modes: worktree keys ignore a row outside any worktree', function()
+  h.assert_eq(0, #run_worktree_key('x', 3, 'Yes'), 'a workspace commit is not a worktree')
+  h.assert_eq(0, #run_worktree_key('a', 3, 'Yes'))
+  h.assert_eq('worktree', modes.current(), 'the mode stays open after the warning')
+  modes.state = nil
+end)
+
+h.test('modes: worktree archive exits the mode and archives the cursor worktree', function()
+  local calls = run_worktree_key('a', 1, nil)
+  h.assert_eq(1, #calls)
+  h.assert_eq('archive', calls[1].verb)
+  h.assert_eq('wt-one', calls[1].name)
+  h.assert_eq('normal', modes.current(), 'the mutation leaves the mode')
 end)
