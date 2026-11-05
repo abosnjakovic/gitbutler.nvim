@@ -150,11 +150,29 @@ jobs:
           BRANCH: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          if git ls-remote --exit-code --tags origin "v${VERSION}" >/dev/null 2>&1; then
+            echo "::error::v${VERSION} is already tagged on origin." \
+                 "Nothing was pushed; check whether an earlier run half-completed." >&2
+            exit 1
+          fi
           git add version.txt CHANGELOG.md
           git commit -m "chore(release): v${VERSION}"
           git tag -a "v${VERSION}" -m "v${VERSION}"
-          git push origin "HEAD:${BRANCH}"
-          git push origin "v${VERSION}"
+          # One push for both refs. A tag rejection used to leave the bump on
+          # the branch with no tag and no release behind it, which the next
+          # run then bumps again from. --atomic means a failure pushes nothing
+          # and the run can simply be dispatched again. The retry is for the
+          # bare "[remote rejected] (failed)" GitHub answered once with no
+          # reason, while the branch push seconds earlier had succeeded.
+          for attempt in 1 2 3; do
+            if git push --atomic origin "HEAD:${BRANCH}" "v${VERSION}"; then
+              exit 0
+            fi
+            echo "::warning::push attempt ${attempt} failed; retrying in $((attempt * 5))s"
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not push v${VERSION}; nothing was published." >&2
+          exit 1
 
       - name: Create GitHub release
         env:
