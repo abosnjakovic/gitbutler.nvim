@@ -285,9 +285,8 @@ M.contexts = {
     -- Curated (`hotbar = true`) entries are declared here, ahead of the rest
     -- of the pane's keys: `hotbar.build` truncates the curated bucket
     -- greedily in this declaration order, so whatever is listed first is
-    -- what survives a narrow pane. `comment` and `yank review` are the two
-    -- least-guessable keys in the pane (the only two with a `help` string),
-    -- so they lead.
+    -- what survives a narrow pane. `comment` and `yank review` are the least
+    -- guessable keys in the pane, so they lead.
     {
       key = 'C',
       action = 'comment_line',

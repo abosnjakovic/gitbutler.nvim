@@ -865,6 +865,17 @@ local function warn_no_ids()
   vim.notify('gitbutler: this diff has no hunk ids (nothing here can be marked)', vim.log.levels.WARN)
 end
 
+---Whether the shown diff is a commit's. Its hunks are committed changes:
+---squash and move take them as sources, amend does not. Read the scope, not
+---the row kind: a landed commit shown through `git show` has no kind, and
+---answering `false` there would send the reader to amend, which cannot
+---touch it either.
+---@return boolean
+local function committed_diff()
+  local entity = M.win_state.entity
+  return (entity and entity.scope) == 'commit'
+end
+
 ---`<CR>`/`o` — open the selected hunk's file in the editor window at the
 ---hunk's line, keeping the pane open beside it.
 function M._open_hunk()
@@ -900,6 +911,8 @@ local function uniq(paths)
 end
 
 ---`x` — discard the marked hunks (or the selected one) after a confirmation.
+---On a commit's diff this rewrites that commit, which the prompt says, the
+---way the status view's own discard does.
 function M._hunk_discard()
   local st = M.win_state
   local ids, paths = M._targets()
@@ -907,7 +920,12 @@ function M._hunk_discard()
     warn_no_ids()
     return
   end
-  local prompt = string.format('Discard %d hunk(s) in %s?', #ids, table.concat(uniq(paths), ', '))
+  local prompt = string.format('Discard %d hunk(s) in %s', #ids, table.concat(uniq(paths), ', '))
+  local sha = committed_diff() and st.entity and st.entity.ref
+  if type(sha) == 'string' and sha ~= '' then
+    prompt = prompt .. ' from commit ' .. sha:sub(1, 7)
+  end
+  prompt = prompt .. '?'
 
   vim.ui.select({ 'Yes', 'No' }, { prompt = prompt }, function(choice)
     if choice ~= 'Yes' then
@@ -1051,14 +1069,6 @@ function M._yank_comments()
     ),
     vim.log.levels.INFO
   )
-end
-
----Whether the shown diff is a commit's. Its hunks are committed changes:
----squash and move take them as sources, amend does not.
----@return boolean
-local function committed_diff()
-  local kind = M.win_state.entity and M.win_state.entity.kind
-  return kind == 'commit' or kind == 'committed_file'
 end
 
 ---Hand the marked (or selected) hunks to a status-buffer mode as its source.
@@ -1584,25 +1594,50 @@ function M.update_branch_meta(data)
 end
 
 ---Write the ids `but diff <commit>` printed onto the hunks `but diff
----<commit> --json` returned, pairing them by path in output order — both
----list a file's hunks in the same order. A count that does not line up
----leaves the remaining hunks without an id, which only costs the ops that
----need one; it never labels a hunk with another hunk's id.
+---<commit> --json` returned, pairing them by path in output order: both list
+---a file's hunks in the same order. A path whose two counts disagree keeps no
+---ids at all, so a shifted queue can never label a hunk with another hunk's
+---id; that path simply loses the ops that need one.
+---
+---The printed id abbreviates the commit to the shortest prefix unique inside
+---that diff (`o:uy:f3` where status says `oyo:uy`), and a prefix is only
+---unique in the context that produced it. Rewriting it with the commit the
+---pane already has keeps the id resolvable after the workspace moves under a
+---rendered diff.
 ---@param data table decoded `but diff --json`
 ---@param ids { id: string, path: string }[]
-function M._attach_hunk_ids(data, ids)
+---@param commit_id? string the shown commit's own CLI id
+function M._attach_hunk_ids(data, ids, commit_id)
+  local commit = type(commit_id) == 'string' and commit_id:match('^[^:]+') or nil
   local queues = {}
   for _, entry in ipairs(list(ids)) do
     queues[entry.path] = queues[entry.path] or {}
-    table.insert(queues[entry.path], entry.id)
+    table.insert(queues[entry.path], commit and entry.id:gsub('^[^:]+', commit, 1) or entry.id)
   end
+
+  local wanted = {}
+  for _, change in ipairs(list(type(data) == 'table' and data.changes)) do
+    local path = scalar(change.path, '')
+    local diff = type(change.diff) == 'table' and change.diff or {}
+    wanted[path] = (wanted[path] or 0) + #list(diff.hunks)
+  end
+
   local taken = {}
   for _, change in ipairs(list(type(data) == 'table' and data.changes)) do
     local path = scalar(change.path, '')
     local diff = type(change.diff) == 'table' and change.diff or {}
+    local queue = queues[path]
+    if queue and #queue ~= wanted[path] then
+      queue = nil
+    end
     for _, hunk in ipairs(list(diff.hunks)) do
       taken[path] = (taken[path] or 0) + 1
-      hunk.id = queues[path] and queues[path][taken[path]] or nil
+      -- Only ever add an id. The day `--json` carries them, a path this parse
+      -- missed must keep the one it arrived with.
+      local id = queue and queue[taken[path]]
+      if id then
+        hunk.id = id
+      end
     end
   end
 end
@@ -1662,7 +1697,7 @@ function M.show(entity)
           return
         end
         if not id_err then
-          M._attach_hunk_ids(data, ids)
+          M._attach_hunk_ids(data, ids, entity.cli_id)
         end
         M._rebuild()
         M._select_hunk(1)
@@ -1756,7 +1791,11 @@ local function row_ref(line)
   elseif line.type == 'branch' then
     return scalar(d.branch and d.branch.name, nil) or d.cli_id
   end
-  return nil
+  -- A worktree is a second checkout of the same paths, so its uncommitted
+  -- rows need their own anchor: without one, a comment on `src/lib.rs:40`
+  -- there would surface on the workspace's diff of the same file. Workspace
+  -- rows keep the nil they always had.
+  return d.worktree
 end
 
 ---Show the diff for a status row; rows that name no entity leave the pane alone.

@@ -180,16 +180,23 @@ function M.build(data, state)
 
   ---An uncommitted-area header and its files: the workspace's own (`@`), or a
   ---worktree's (`<wt>:@`), which `but` labels with the worktree name in braces.
-  ---@param cli_id string
+  ---An id-less header is shown the way a file row shows one, as `??`, and is
+  ---not selectable: there is nothing to hand `but diff`.
+  ---@param cli_id string?
   ---@param fold_id string
   ---@param changes table[]
-  ---@param opts { glyph: string, file_glyph: string, worktree?: string }
+  ---@param opts { glyph: string, file_glyph: string, worktree?: string, worktree_id?: string }
   local function push_uncommitted(cli_id, fold_id, changes, opts)
-    local hdr = row('uncommitted_header', { cli_id = cli_id, fold_id = fold_id, worktree = opts.worktree }, true)
+    local hdr = row('uncommitted_header', {
+      cli_id = cli_id,
+      fold_id = fold_id,
+      worktree = opts.worktree,
+      worktree_id = opts.worktree_id,
+    }, cli_id ~= nil)
     -- Buffer:toggle_fold only walks rows flagged foldable.
     hdr.foldable = true
     add(hdr, opts.glyph .. fold_marker(folds[fold_id]), HL.connector)
-    add(hdr, cli_id, HL.cli_id)
+    add(hdr, cli_id or '??', HL.cli_id)
     add(hdr, ' [uncommitted]', HL.section)
     if opts.worktree then
       add(hdr, ' {' .. opts.worktree .. '}', HL.branch)
@@ -203,7 +210,11 @@ function M.build(data, state)
       return
     end
     for _, ch in ipairs(changes) do
-      push_file(ch, opts.file_glyph, { unassigned = opts.worktree == nil, worktree = opts.worktree })
+      push_file(ch, opts.file_glyph, {
+        unassigned = opts.worktree == nil,
+        worktree = opts.worktree,
+        worktree_id = opts.worktree_id,
+      })
     end
   end
 
@@ -212,7 +223,7 @@ function M.build(data, state)
   ---travels into every payload the branch produces.
   ---@param branch table
   ---@param glyph string
-  ---@param ctx { stack?: table, stack_cli_id?: string, worktree?: string }
+  ---@param ctx { stack?: table, stack_cli_id?: string, worktree?: string, worktree_id?: string }
   ---@param assigned? table[] changes assigned to this branch
   local function push_branch(branch, glyph, ctx, assigned)
     local name = scalar(branch.name, '(unnamed)')
@@ -222,6 +233,7 @@ function M.build(data, state)
       branch = branch,
       stack = ctx.stack,
       worktree = ctx.worktree,
+      worktree_id = ctx.worktree_id,
       name = name,
       cli_id = branch_cli_id,
       stack_cli_id = ctx.stack_cli_id,
@@ -242,7 +254,12 @@ function M.build(data, state)
       return
     end
     for _, ch in ipairs(list(assigned)) do
-      push_file(ch, '┊┊', { branch_name = name, stack_cli_id = ctx.stack_cli_id, worktree = ctx.worktree })
+      push_file(ch, '┊┊', {
+        branch_name = name,
+        stack_cli_id = ctx.stack_cli_id,
+        worktree = ctx.worktree,
+        worktree_id = ctx.worktree_id,
+      })
     end
 
     for _, commit in ipairs(list(branch.commits)) do
@@ -254,6 +271,7 @@ function M.build(data, state)
         branch_name = name,
         stack_cli_id = ctx.stack_cli_id,
         worktree = ctx.worktree,
+        worktree_id = ctx.worktree_id,
         mark_key = key,
       }, true)
       if selected[key] then
@@ -282,6 +300,7 @@ function M.build(data, state)
           commit_id = commit.commitId,
           branch_name = name,
           worktree = ctx.worktree,
+          worktree_id = ctx.worktree_id,
           mark_key = ckey,
         }, true)
         lead(fr, selected[ckey], '┊│')
@@ -317,13 +336,15 @@ function M.build(data, state)
   -- types and every verb works on them unchanged.
   for _, wt in ipairs(list(data.worktrees)) do
     local wt_name = scalar(wt.name, '(unnamed)')
-    push_uncommitted(scalar(wt.cliId, '') .. ':@', 'worktree:' .. wt_name, list(wt.uncommittedChanges), {
+    local wt_id = scalar(wt.cliId, nil)
+    push_uncommitted(wt_id and (wt_id .. ':@'), 'worktree:' .. wt_name, list(wt.uncommittedChanges), {
       glyph = '┊╭┄',
       file_glyph = '┊┊',
       worktree = wt_name,
+      worktree_id = wt_id,
     })
     for _, branch in ipairs(list(wt.branches)) do
-      push_branch(branch, '┊├┄', { worktree = wt_name }, nil)
+      push_branch(branch, '┊├┄', { worktree = wt_name, worktree_id = wt_id }, nil)
     end
     local join = row('connector', nil, false)
     add(join, '├╯', HL.connector)

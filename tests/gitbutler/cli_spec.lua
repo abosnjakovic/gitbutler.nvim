@@ -366,7 +366,7 @@ test('worktree_remove: --force only when discarding changes', function()
   )
 end)
 
-test('worktree archive / unarchive / list: subcommand plus name', function()
+test('worktree archive / unarchive: subcommand plus name', function()
   assert_eq(
     'worktree archive wt --json',
     table.concat(
@@ -385,15 +385,15 @@ test('worktree archive / unarchive / list: subcommand plus name', function()
       ' '
     )
   )
-  assert_eq(
-    'worktree list --json',
-    table.concat(
-      capture(function()
-        cli.worktree_list(noop)
-      end),
-      ' '
-    )
-  )
+end)
+
+-- The picker this feeds is the only way to name an archived worktree, and the
+-- human listing stops after the three most recently updated. Ask for all.
+test('worktree_archived: asks for every archived worktree', function()
+  local args = capture(function()
+    cli.worktree_archived(noop)
+  end)
+  assert_eq('worktree list --archived --json', table.concat(args, ' '))
 end)
 
 test('pr_new: -m carries the message', function()

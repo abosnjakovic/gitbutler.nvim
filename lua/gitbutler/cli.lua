@@ -225,10 +225,14 @@ function M.branch_list(callback)
   M.run({ 'branch', '--json' }, callback)
 end
 
----Convenience: but worktree list — `{ active = [...], archived = [...] }`,
----each entry `{ id, name, refName, path, updatedAtMs }`.
-function M.worktree_list(callback)
-  M.run({ 'worktree', 'list', '--json' }, callback)
+---Convenience: but worktree list --archived — `{ archived = [...] }`, each
+---entry `{ id, name, refName, path, updatedAtMs }`. Archived worktrees are
+---the ones `but status` leaves out, so this is the only way to name one for
+---unarchiving. The flag is what the human listing needs to get past its three
+---most recent (`--json` returns them all either way, measured on 0.23.2), and
+---saying it keeps the two outputs from drifting apart under us.
+function M.worktree_archived(callback)
+  M.run({ 'worktree', 'list', '--archived', '--json' }, callback)
 end
 
 ---Convenience: but worktree new [name] — a linked checkout on `name`, created

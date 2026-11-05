@@ -530,7 +530,7 @@ local function land_branches(buf, rows)
     vim.notify('gitbutler: no branch to land', vim.log.levels.WARN)
     return
   end
-  local prompt = 'Land ' .. table.concat(names, ', ') .. ' onto the target?'
+  local prompt = 'Land ' .. table.concat(names, ', ') .. ' onto the target? This pushes to the remote.'
   vim.ui.select({ 'Yes', 'No' }, { prompt = prompt }, function(choice)
     if choice ~= 'Yes' then
       return

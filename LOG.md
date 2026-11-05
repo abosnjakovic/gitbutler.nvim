@@ -131,3 +131,61 @@ and left the workspace on a single stack.
 **What I need from you** — nothing. Worth knowing for next time: when the
 in-app updater runs, check `~/Applications` for a second bundle rather than
 trusting `but --version` from whichever shell you happen to be in.
+
+## 2026-11-05 · PR #33 and the review round
+
+**Done** — opened the branch as a draft PR and ran two reviews over it, one
+for correctness and one for safety. Eight of their findings landed as code.
+
+From the code review: `worktree list` only shows the three most recently
+updated archived worktrees in its human output, so the unarchive picker now
+calls `worktree list --archived` through `cli.worktree_archived`. A worktree's
+uncommitted rows share paths with the workspace's, and `row_ref` returned nil
+for both, so a review comment written on one surfaced on the other; worktree
+rows now anchor on the worktree name. `committed_diff()` reads `entity.scope`
+rather than the row kind, so a landed commit gets an honest message. A missing
+`cliId` renders `??` and makes the header unselectable instead of building the
+target `:@`. The test that claimed to cover the commit path stubbed neither
+call and passed on `show`'s initial `selected = 1` while spawning a real
+`but`; it now stubs both and asserts the ids reached the hunks.
+
+From the security review: `but diff <commit>` abbreviates the commit segment
+to whatever prefix is unique inside that one diff (`o:uy:f3` where status says
+`oyo:uy`), and a prefix only holds in the context that printed it, so
+`_attach_hunk_ids` rewrites it with the commit the pane is showing. A path
+whose text and JSON hunk counts disagree now keeps no ids at all, which makes
+the docstring's "never labels a hunk with another hunk's id" true rather than
+true-by-luck. The pane's discard prompt names the commit it rewrites, the way
+the status view's own does. Worktree mutations send the CLI id instead of the
+display name, since `but worktree remove` takes an id, a name or a path in one
+argument and a linked checkout's uncommitted work is not in the oplog.
+`Buffer:_set_keymaps` checks the buffer is still valid, because a mode can now
+exit from an async callback after the view closed under it.
+
+Not taken: the reviewer's call to revert the land prompt to `No` first. You
+asked for `Yes`, so it stays, and the prompt carries the cost instead: "Land X
+onto the target? This pushes to the remote." Their evidence stands and is worth
+recording — `cli.merge` passes `--yes`, which suppresses but's own guard, so
+this prompt is the only one left, and `but undo` cannot unpush.
+
+Also corrected: the claim in the `land defaults to Yes` commit message that
+every work-losing confirmation keeps `No` first. It does not. Discard, undo,
+redo, branch delete and oplog restore are all `Yes` first already, and all are
+oplog-recoverable. Land and worktree remove were the two `No`-first ones, and
+they are exactly the two `but undo` cannot reverse.
+
+Verified: `make ci` green, 488 tests. Live against a scratch repo — a commit's
+hunk ids came back qualified (`utwx:nkns:01f5`), the discard prompt read
+"Discard 1 hunk(s) in a.txt from commit 06fd02d?", the discard resolved, and
+`W` `x` sent `si` rather than `side-work`.
+
+**Version control** — branch `feat/but-0-23`, pushed. PR
+[#33](https://github.com/abosnjakovic/gitbutler.nvim/pull/33), draft.
+
+**Open**
+- [ ] The land prompt defaults to `Yes` on an action `but undo` cannot
+  reverse. Reverting is two words in `lua/gitbutler/actions.lua:534`.
+
+**What I need from you** — 1. Say whether the land prompt keeps `Yes` first
+now that the cost is spelled out, or goes back to `No`. 2. Mark PR #33 ready
+when you want it out of draft.

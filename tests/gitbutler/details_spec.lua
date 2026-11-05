@@ -2826,6 +2826,43 @@ h.test('details: a short id list leaves the rest of the hunks unaddressable', fu
   h.assert_falsy(data.changes[2].diff.hunks[2].id)
 end)
 
+-- A printed id abbreviates the commit to whatever prefix was unique inside
+-- that one diff (`o:rlnq:…` where status says `oqko`). A prefix only holds in
+-- the context that produced it, so the pane rewrites it with the commit it is
+-- showing before anything is stored.
+h.test('details: the abbreviated commit prefix is rewritten with the shown commit', function()
+  local data = committed_diff_data()
+  details._attach_hunk_ids(data, {
+    { id = 'o:rlnq:5604', path = 'README.md' },
+    { id = 'o:nkns:01f5', path = 'a.txt' },
+    { id = 'o:nkns:940e', path = 'a.txt' },
+  }, 'oqko')
+
+  h.assert_eq('oqko:rlnq:5604', data.changes[1].diff.hunks[1].id)
+  h.assert_eq('oqko:nkns:940e', data.changes[2].diff.hunks[2].id)
+
+  -- A committed-file entity's own id already carries the file segment; only
+  -- the commit part of it is the prefix to graft on.
+  local from_file_row = committed_diff_data()
+  details._attach_hunk_ids(from_file_row, { { id = 'o:rlnq:5604', path = 'README.md' } }, 'oqko:rlnq')
+  h.assert_eq('oqko:rlnq:5604', from_file_row.changes[1].diff.hunks[1].id)
+end)
+
+-- A partial list for one path means the two renderings disagree there, and
+-- pairing what is left by position would label hunk 2 with hunk 1's id. The
+-- path keeps no ids instead, which only costs it the ops that need one.
+h.test('details: a path whose counts disagree keeps no ids at all', function()
+  local data = committed_diff_data()
+  details._attach_hunk_ids(data, {
+    { id = 'oqko:rlnq:5604', path = 'README.md' },
+    { id = 'oqko:nkns:01f5', path = 'a.txt' },
+  })
+
+  h.assert_eq('oqko:rlnq:5604', data.changes[1].diff.hunks[1].id, 'a path that lines up still gets its id')
+  h.assert_falsy(data.changes[2].diff.hunks[1].id, 'one id for two hunks is a shifted queue')
+  h.assert_falsy(data.changes[2].diff.hunks[2].id)
+end)
+
 -- Amend takes uncommitted work and squash takes committed work; the pane
 -- shows both kinds of diff, so each key has to refuse the wrong one rather
 -- than let `but` fail after the mode is already open.
@@ -2834,7 +2871,8 @@ local function open_committed_diff()
   local sb = mock_status_buf()
   details.open(sb)
   local st = details.win_state
-  st.entity = { cli_id = 'oqko', kind = 'commit' }
+  -- `scope` is what `show_for_line` sets and what the pane's verbs read.
+  st.entity = { cli_id = 'oqko', kind = 'commit', scope = 'commit', ref = 'deadbeefcafe' }
   local data = committed_diff_data()
   details._attach_hunk_ids(data, {
     { id = 'oqko:rlnq:5604', path = 'README.md' },
@@ -2874,6 +2912,27 @@ h.test("details: S squashes a commit's hunks, a refuses them", function()
   modes.enter_verb, vim.notify = orig_enter, orig_notify
   details.close()
   pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+end)
+
+-- `x` on a commit's diff rewrites that commit. The status view's own discard
+-- says which commit; the pane has to say it too, or it reads like throwing
+-- away uncommitted work.
+h.test('details: the discard prompt names the commit it is rewriting', function()
+  local sb = open_committed_diff()
+  local orig_select = vim.ui.select
+  local prompt
+  h.after(function()
+    vim.ui.select = orig_select
+    details.close()
+    pcall(vim.api.nvim_buf_delete, sb.buf, { force = true })
+  end)
+  vim.ui.select = function(_, opts, cb)
+    prompt = opts.prompt
+    cb('No')
+  end
+
+  details._hunk_discard()
+  h.assert_truthy(prompt and prompt:find('from commit deadbee', 1, true), tostring(prompt))
 end)
 
 h.test('details: S refuses an uncommitted diff, where amend is the verb', function()
