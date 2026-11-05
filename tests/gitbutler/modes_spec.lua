@@ -910,10 +910,22 @@ end)
 -- Worktree mode acts on whatever worktree the cursor sits in, and `x` is the
 -- destructive key: the confirmation's third answer is the only thing that may
 -- discard uncommitted work, so the force flag must track the answer exactly.
+-- `but worktree remove` takes an id, a name or a path in one argument, so the
+-- keys send the id: a branch named like another worktree's id would otherwise
+-- decide which directory goes, and that directory is not in the oplog.
 local function worktree_buffer()
+  local wt = { worktree = 'wt-one', worktree_id = 'wt' }
   return mode_buffer({
-    { selectable = true, type = 'uncommitted_header', data = { cli_id = 'wt:@', worktree = 'wt-one' } },
-    { selectable = true, type = 'commit', data = { cli_id = 'qtto', worktree = 'wt-one' } },
+    {
+      selectable = true,
+      type = 'uncommitted_header',
+      data = { cli_id = 'wt:@', worktree = wt.worktree, worktree_id = wt.worktree_id },
+    },
+    {
+      selectable = true,
+      type = 'commit',
+      data = { cli_id = 'qtto', worktree = wt.worktree, worktree_id = wt.worktree_id },
+    },
     { selectable = true, type = 'commit', data = { cli_id = 'aa', branch_name = 'feat' } },
   })
 end
@@ -952,15 +964,15 @@ local function run_worktree_key(key, row, choice)
   return calls
 end
 
-h.test('modes: worktree remove discards changes only on the discarding answer', function()
+h.test('modes: worktree remove sends the id, and discards only on the discarding answer', function()
   local plain = run_worktree_key('x', 1, 'Yes')
   h.assert_eq(1, #plain)
-  h.assert_eq('wt-one', plain[1].name)
+  h.assert_eq('wt', plain[1].name, 'the cli id, not the display name, picks the worktree')
   h.assert_falsy(plain[1].force, 'a plain Yes must not discard uncommitted work')
 
   local forced = run_worktree_key('x', 2, 'Yes, discard its changes')
   h.assert_truthy(forced[1].force)
-  h.assert_eq('wt-one', forced[1].name, 'a commit row names its worktree too')
+  h.assert_eq('wt', forced[1].name, 'a commit row names its worktree too')
 
   h.assert_eq(0, #run_worktree_key('x', 1, 'No'), 'No removes nothing')
 end)
@@ -976,6 +988,6 @@ h.test('modes: worktree archive exits the mode and archives the cursor worktree'
   local calls = run_worktree_key('a', 1, nil)
   h.assert_eq(1, #calls)
   h.assert_eq('archive', calls[1].verb)
-  h.assert_eq('wt-one', calls[1].name)
+  h.assert_eq('wt', calls[1].name)
   h.assert_eq('normal', modes.current(), 'the mutation leaves the mode')
 end)

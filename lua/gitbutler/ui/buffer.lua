@@ -621,6 +621,11 @@ function Buffer:on(name, handler)
 end
 
 function Buffer:_set_keymaps()
+  -- A mode can exit from an async callback, after the view was closed under
+  -- it; `vim.keymap.set` on a dead buffer throws.
+  if not (self.buf and vim.api.nvim_buf_is_valid(self.buf)) then
+    return
+  end
   local mappings = (config.values.keymaps and config.values.keymaps[self.view or 'status']) or {}
   for key, action in pairs(mappings) do
     if action then

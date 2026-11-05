@@ -606,14 +606,22 @@ MODE_KEYS.stack['m'] = function(buf)
 end
 
 ---The worktree the cursor sits in: every row `but status` lists under one —
----its uncommitted area, its branch, its commits — carries the name.
+---its uncommitted area, its branch, its commits — carries both its name and
+---its CLI id. Mutations take either, so they take the id: a worktree named
+---after another's id would otherwise be ambiguous on a `remove`, and a
+---linked checkout's uncommitted work is not in the oplog. The name is for
+---the human in the prompt.
 ---@param buf GitButlerBuffer
----@return string?
+---@return string? id
+---@return string? name
 local function worktree_under_cursor(buf)
   local line = target_under_cursor(buf, function(l)
     return l.data ~= nil and l.data.worktree ~= nil
   end)
-  return line and line.data.worktree or nil
+  if not line then
+    return nil
+  end
+  return line.data.worktree_id or line.data.worktree, line.data.worktree
 end
 
 ---Run one worktree mutation and refresh. The mode is exited by the caller
@@ -655,14 +663,14 @@ end
 ---Worktree mode `a` — archive the worktree under the cursor: it leaves the
 ---workspace view, its directory and branch untouched.
 MODE_KEYS.worktree['a'] = function(buf)
-  local name = worktree_under_cursor(buf)
-  if not name then
+  local id, name = worktree_under_cursor(buf)
+  if not id then
     vim.notify('gitbutler: place the cursor on a worktree row', vim.log.levels.WARN)
     return
   end
   M.exit(buf)
   worktree_run('archive', function(cb)
-    require('gitbutler.cli').worktree_archive(name, cb)
+    require('gitbutler.cli').worktree_archive(id, cb)
   end, function()
     return 'archived ' .. name
   end)
@@ -671,7 +679,7 @@ end
 ---Worktree mode `A` — unarchive: pick from the archived list, which is the
 ---only place those worktrees appear (status omits them).
 MODE_KEYS.worktree['A'] = function(buf)
-  require('gitbutler.cli').worktree_list(function(err, data)
+  require('gitbutler.cli').worktree_archived(function(err, data)
     if M.current() ~= 'worktree' then
       -- The user left the mode while the list was in flight.
       return
@@ -709,8 +717,8 @@ end
 ---goes, the branch stays. `but` refuses one with uncommitted changes, so the
 ---discarding answer is offered in the same prompt rather than as a retry.
 MODE_KEYS.worktree['x'] = function(buf)
-  local name = worktree_under_cursor(buf)
-  if not name then
+  local id, name = worktree_under_cursor(buf)
+  if not id then
     vim.notify('gitbutler: place the cursor on a worktree row', vim.log.levels.WARN)
     return
   end
@@ -721,7 +729,7 @@ MODE_KEYS.worktree['x'] = function(buf)
     end
     M.exit(buf)
     worktree_run('remove', function(cb)
-      require('gitbutler.cli').worktree_remove(name, choice ~= 'Yes', cb)
+      require('gitbutler.cli').worktree_remove(id, choice ~= 'Yes', cb)
     end, function()
       return 'removed ' .. name
     end)
