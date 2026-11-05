@@ -188,4 +188,53 @@ hunk ids came back qualified (`utwx:nkns:01f5`), the discard prompt read
 
 **What I need from you** — 1. Say whether the land prompt keeps `Yes` first
 now that the cost is spelled out, or goes back to `No`. 2. Mark PR #33 ready
-when you want it out of draft.
+when you want it out of draft. *(You merged it; v4.0.0 followed.)*
+
+## 2026-11-05 · the half-finished v4.0.0 release
+
+**Done** — PR #33 merged, then the Release workflow bumped to 4.0.0, pushed
+`main`, and had its tag push rejected: `! [remote rejected] v4.0.0 -> v4.0.0
+(failed)`, seven seconds after the branch push succeeded with the same token.
+That left `main` carrying the bump and the changelog with no tag and no
+release behind them.
+
+Published the missing pieces by hand: an annotated `v4.0.0` tag object at
+`49ae957` through the git API, matching the annotated tags the workflow makes,
+then the GitHub release with the 4.0.0 changelog section.
+
+Why it failed is not settled, and the evidence rules out the usual suspects:
+the repo has no rulesets (`/rulesets` is `[]`), no branch protection, no
+legacy tag protection; `RELEASE_TOKEN` has not been touched since 2026-05-11
+and pushed the v3.3.0 tag on 8 October; no workflow files changed in this
+release range; and creating a tag ref through the API worked first try. GitHub
+answered with no `remote:` line at all, which is what an internal failure
+looks like rather than a permission or rule rejection. Transient is the
+leading explanation.
+
+So the fix is to make a repeat harmless rather than to chase it.
+`.github/workflows/release.yml` now pushes the branch and the tag in one
+`git push --atomic`, retries three times, and refuses up front when the tag
+already exists. A rejection now publishes nothing, so the run can be
+dispatched again without the version bumping twice.
+
+Verified: simulated against a scratch bare remote with a `pre-receive` hook
+that rejects tag pushes. With the hook, three attempts fail and the remote
+stays on 1.0.0 with no tags, where the old script would have pushed the bump;
+with the hook removed, the same dispatch publishes both refs; dispatched once
+more, the pre-flight check stops before committing.
+
+**Version control** — branch `fix/release-tag-push`, commit `wpl`
+("fix(ci): push the release branch and tag atomically"). Nothing pushed.
+`but pull` integrated the merged `feat/but-0-23` and removed it.
+
+**Open**
+- The v4.0.0 tag and release were created with my credentials through the
+  API, not by the workflow. The tag is annotated and points at `49ae957`, so
+  it matches what the workflow would have made.
+- [ ] Watch the next release. If the tag push is rejected again, the token is
+  the next thing to look at, since the retry will have ruled out a blip.
+
+**What I need from you** — 1. Check <https://github.com/abosnjakovic/gitbutler.nvim/releases/tag/v4.0.0>
+reads the way you want it to; I built the notes from the generated changelog
+section. 2. Say whether to open a PR for `fix/release-tag-push` or push it
+straight to `main`, since it is a one-file CI fix.
