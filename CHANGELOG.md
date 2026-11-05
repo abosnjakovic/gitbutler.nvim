@@ -1,3 +1,15 @@
+## [4.0.0] - 2026-11-05
+
+### Features
+
+- feat(actions): land defaults to Yes
+- feat(details): mark, squash, move and discard a commit's hunks
+- feat(cli)!: speak but 0.23 — worktrees, merge, no setup
+
+### Bug Fixes
+
+- fix: review findings on the 0.23 work
+
 ## [3.3.0] - 2026-10-08
 
 ### Features
